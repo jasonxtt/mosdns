@@ -1,0 +1,553 @@
+{
+  "api": 39113,
+  "dns": 36939,
+  "pid": 262087,
+  "pages": [
+    {
+      "path": "/",
+      "title": "MosDNS Dashboard (Vue Preview)",
+      "requests": [
+        "/",
+        "/assets/vue-log/app.css",
+        "/assets/vue-log/app.js",
+        "/api/v1/capabilities",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/api/v1/system/health",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective",
+        "/api/v1/special-groups",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/logs",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/upstream/tags",
+        "/api/v1/upstream/config",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/tags",
+        "/api/v1/upstream/config",
+        "/api/v1/special-groups",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health"
+      ],
+      "visits": [
+        {
+          "main": 0,
+          "text": "概览"
+        },
+        {
+          "main": 1,
+          "secondary": 0,
+          "text": "实时查询"
+        },
+        {
+          "main": 1,
+          "secondary": 1,
+          "text": "诊断抓取"
+        },
+        {
+          "main": 2,
+          "secondary": 0,
+          "text": "本地规则"
+        },
+        {
+          "main": 2,
+          "secondary": 1,
+          "text": "订阅规则"
+        },
+        {
+          "main": 2,
+          "secondary": 2,
+          "text": "广告拦截"
+        },
+        {
+          "main": 3,
+          "text": "数据管理"
+        },
+        {
+          "main": 4,
+          "text": "上游设置"
+        },
+        {
+          "main": 5,
+          "text": "系统设置"
+        }
+      ],
+      "boundaries": [
+        {
+          "operation": "system.update",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "system.config_management",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "system.global_overrides",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "switches.manage",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "switches.manage",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "system.webui_port",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "switches.manage",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "system.domain_generation",
+          "disabled": true,
+          "reason": "当前 Rust 原生运行时尚未实现此操作"
+        },
+        {
+          "operation": "audit.control",
+          "disabled": false,
+          "reason": ""
+        },
+        {
+          "operation": "audit.capacity",
+          "disabled": false,
+          "reason": ""
+        },
+        {
+          "operation": "appearance.server",
+          "disabled": true,
+          "reason": ""
+        }
+      ]
+    },
+    {
+      "path": "/log",
+      "title": "MosDNS Dashboard (Log1 Preview)",
+      "requests": [
+        "/log",
+        "/assets/vue-log1/app.css",
+        "/assets/vue-log1/app.js",
+        "/api/v1/capabilities",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/api/v1/system/health",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective",
+        "/api/v1/special-groups",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/logs",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/special-groups",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/cache/inventory",
+        "/metrics",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/upstream/tags",
+        "/api/v1/upstream/config",
+        "/api/v1/special-groups",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/upstream/tags",
+        "/api/v1/upstream/config",
+        "/api/v1/special-groups",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v1/system/health"
+      ],
+      "visits": [
+        {
+          "main": 0,
+          "text": "◫\n概览"
+        },
+        {
+          "main": 1,
+          "secondary": 0,
+          "text": "实时查询"
+        },
+        {
+          "main": 1,
+          "secondary": 1,
+          "text": "诊断抓取"
+        },
+        {
+          "main": 2,
+          "secondary": 0,
+          "text": "本地规则"
+        },
+        {
+          "main": 2,
+          "secondary": 1,
+          "text": "订阅规则"
+        },
+        {
+          "main": 2,
+          "secondary": 2,
+          "text": "广告拦截"
+        },
+        {
+          "main": 3,
+          "secondary": 0,
+          "text": "缓存管理"
+        },
+        {
+          "main": 3,
+          "secondary": 1,
+          "text": "域名统计"
+        },
+        {
+          "main": 3,
+          "secondary": 2,
+          "text": "刷新分流"
+        },
+        {
+          "main": 4,
+          "secondary": 0,
+          "text": "上游设置"
+        },
+        {
+          "main": 4,
+          "secondary": 1,
+          "text": "运行维护"
+        },
+        {
+          "main": 4,
+          "secondary": 2,
+          "text": "解析行为"
+        },
+        {
+          "main": 4,
+          "secondary": 3,
+          "text": "界面偏好"
+        },
+        {
+          "main": 4,
+          "secondary": 4,
+          "text": "日志刷新"
+        }
+      ],
+      "boundaries": [
+        {
+          "operation": "audit.capacity",
+          "disabled": false,
+          "reason": ""
+        }
+      ]
+    }
+  ],
+  "unsupported": [],
+  "errors": [],
+  "capabilities": {
+    "endpoints": {
+      "audit_v1": true,
+      "audit_v2": true,
+      "cache_inventory_get": true,
+      "capabilities_get": true,
+      "diversion_sources": {
+        "delete": true,
+        "list_get": true,
+        "put": true
+      },
+      "manual_rules": {
+        "post": true,
+        "save_get": true,
+        "show_get": true
+      },
+      "metrics_get": true,
+      "special_groups": {
+        "delete": true,
+        "get": true,
+        "post": true
+      },
+      "upstream": {
+        "config_get": true,
+        "config_post": true,
+        "runtime_get": true,
+        "tags_get": true
+      }
+    },
+    "rule_formats": [
+      "local_text"
+    ],
+    "runtime": "rust",
+    "schema_version": 1,
+    "special_groups": {
+      "enabled": true,
+      "profile": "local_text_dns_v1"
+    },
+    "ui_operations": {
+      "appearance.server": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "audit.capacity": {
+        "reason": null,
+        "supported": true
+      },
+      "audit.control": {
+        "reason": null,
+        "supported": true
+      },
+      "audit.read": {
+        "reason": null,
+        "supported": true
+      },
+      "cache.inventory": {
+        "reason": null,
+        "supported": true
+      },
+      "cache.manage": {
+        "reason": null,
+        "supported": true
+      },
+      "cache.requery": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "capture.logs": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "client.aliases": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "groups.manage": {
+        "reason": null,
+        "supported": true
+      },
+      "groups.read": {
+        "reason": null,
+        "supported": true
+      },
+      "lists.remembered": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "metrics.cache": {
+        "reason": null,
+        "supported": true
+      },
+      "metrics.process": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "query.rank": {
+        "reason": null,
+        "supported": true
+      },
+      "rules.adguard": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "rules.diversion": {
+        "reason": null,
+        "supported": true
+      },
+      "rules.local.manage": {
+        "reason": "当前配置没有可管理的本地规则 provider",
+        "supported": false
+      },
+      "rules.local.read": {
+        "reason": null,
+        "supported": true
+      },
+      "switches.manage": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "system.config_management": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "system.domain_generation": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "system.global_overrides": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "system.health": {
+        "reason": null,
+        "supported": true
+      },
+      "system.restart": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "system.update": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "system.version": {
+        "reason": null,
+        "supported": true
+      },
+      "system.webui_port": {
+        "reason": "当前 Rust 原生运行时尚未实现此操作",
+        "supported": false
+      },
+      "upstreams.manage": {
+        "reason": null,
+        "supported": true
+      },
+      "upstreams.read": {
+        "reason": null,
+        "supported": true
+      }
+    },
+    "unsupported_features": [
+      "signed_aliapi",
+      "quic",
+      "http3",
+      "socks_proxy",
+      "socket_marks",
+      "bind_to_device",
+      "positive_idle_timeout",
+      "enable_pipeline",
+      "srs_geodata",
+      "remote_download",
+      "auto_update"
+    ],
+    "upstream_protocols": [
+      "udp",
+      "tcp",
+      "dot",
+      "doh"
+    ]
+  },
+  "discovery": [
+    {
+      "path": "/",
+      "fault": "non404",
+      "attempts": 2,
+      "optionalBeforeRetry": 0,
+      "healthAfterRetry": true
+    },
+    {
+      "path": "/",
+      "fault": "invalid",
+      "attempts": 2,
+      "optionalBeforeRetry": 0,
+      "healthAfterRetry": true
+    },
+    {
+      "path": "/",
+      "fault": "old-native-schema1",
+      "healthRequests": 0
+    },
+    {
+      "path": "/log",
+      "fault": "non404",
+      "attempts": 2,
+      "optionalBeforeRetry": 0,
+      "healthAfterRetry": true
+    },
+    {
+      "path": "/log",
+      "fault": "invalid",
+      "attempts": 2,
+      "optionalBeforeRetry": 0,
+      "healthAfterRetry": true
+    },
+    {
+      "path": "/log",
+      "fault": "old-native-schema1",
+      "healthRequests": 0
+    }
+  ],
+  "status": "PASS",
+  "cleanup": {
+    "forced": false,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (/root/mosdns-rust-webui-20261004/evidence/s5-complete-green/runtime/webinfo/audit_settings.json)\n"
+}

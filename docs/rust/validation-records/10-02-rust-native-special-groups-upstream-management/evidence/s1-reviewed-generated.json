@@ -1,0 +1,1 @@
+{"generated_yaml":"plugins:\n- args:\n  - exec: return\n  tag: special_upstream_matcher\n  type: sequence\n","group_count":0,"listener_count":1,"router_sequence":1,"sha256":"9813db7019fe5eed920c2606ccd96a68672a2faec664dfa088906f637d548923"}

@@ -1,0 +1,33 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: unused variable: `observed_queries`
+   --> native-host/tests/special_groups_supervisor.rs:161:13
+    |
+161 |         let observed_queries = queries.clone();
+    |             ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_observed_queries`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mosdns-native-host` (test "special_groups_supervisor") generated 1 warning (run `cargo fix --test "special_groups_supervisor" -p mosdns-native-host` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 0.97s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-dec9d4e49d597c3a)
+
+running 1 test
+test audit_can_be_enabled_by_a_later_managed_snapshot ... FAILED
+
+failures:
+
+---- audit_can_be_enabled_by_a_later_managed_snapshot stdout ----
+
+thread 'audit_can_be_enabled_by_a_later_managed_snapshot' (24558) panicked at native-host/tests/special_groups_supervisor.rs:216:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    audit_can_be_enabled_by_a_later_managed_snapshot
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

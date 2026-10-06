@@ -1,0 +1,14 @@
+{
+  "baseline": "1495c508fe5ead3dc2ba9fa6c7c435a0a220cf1e",
+  "enhanced_public_test": "rust/native-host/tests/special_groups_config.rs",
+  "files": {
+    "rust/sequence-core/src/state.rs": "b449f72b753a0c487cdbcc595b7ed8f5d45d8185c0b0132e25b2a8c23115c6f7",
+    "rust/sequence-core/src/lib.rs": "c4c5db67ccb21dad4d6da6019ecb63b0feb90efe2c2aaa2ddc3eb86d41a19011",
+    "rust/cache-core/src/lib.rs": "fdea84582c3df58c8b5c1463073995e585a417219d173275484be318c9c7393f",
+    "rust/native-host/src/cache.rs": "ea60fc8539def36b359a4fa32ade20491df5f9ed24aa1726deeb5eb1cd47dee8",
+    "rust/native-host/src/config.rs": "58bd27d24a78efcc1b5314c22996cb24771c40267640d07e4e7bc3c4f8073da9",
+    "rust/native-host/src/execution.rs": "765efd73b408fdceda1df0ad6907b0be5315692c6ce5449c9c5a3a820cf45c50",
+    "rust/native-host/src/policy.rs": "e19f59bc08fe92a6a7bdf49bc7b98d6cbc3df9a06d65af4954a314eae6c93596",
+    "rust/native-host/tests/special_groups_config.rs": "ffa6f24b59c3a9a2b2da44ccf8d202096e68ea1913e36a52ad23318375105c7b"
+  }
+}

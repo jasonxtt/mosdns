@@ -1,0 +1,15 @@
+{
+  "files": {
+    "rust/native-host/build.rs": "b717cfc1f1f33104fd31bd9150b942288ee2c38669e35f1df2ec1f556da5aa97",
+    "rust/native-host/src/build_identity.rs": "3ff341a0901a126895938957856c377e222d401c240810f5c36ea168059e116f",
+    "rust/native-host/src/cli.rs": "a666dd64203bbc914bce0ec07127da56a1907a9663218a52720776da4c65b39a",
+    "rust/native-host/src/main.rs": "5afd028e0435d191f47d171dc0975662dea5421332694a0103b66a351cefe19a",
+    "rust/native-host/src/lib.rs": "c86bb665c9a0d12d8edfb12b08ea89673ea36c107a660482445e301ca23cac9a",
+    "rust/native-host/src/runtime_snapshot.rs": "078e2a71534a2d720f434f6759483638a22146256469afd2bdbddd9d26e5971d",
+    "rust/native-host/src/api.rs": "05575748866da5662862296105a587affcc66116f6f26ad147741cdb42cbd40b",
+    "rust/native-host/tests/native_version.rs": "957b4450b160a8ccf9d43182ceada87e7b311d41328c9ae61db7cf61c53f7d90",
+    "rust/native-host/tests/slice6_management_http.rs": "0102de2d6273ac726322cd57a70cdff3fb15bcf3ade38e2f6f56e3af699e7014"
+  },
+  "remote_match": true,
+  "accepted_base": "ac629018d2aa8fd2a34a26f1f7ff0b2ecab4c0fc"
+}

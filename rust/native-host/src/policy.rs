@@ -16,6 +16,106 @@ pub struct DomainPayload<T> {
     matcher: MixMatcher<usize>,
     values: Vec<T>,
 }
+
+#[cfg(test)]
+mod special_group_cname_tests {
+    use super::*;
+    use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
+    use hickory_proto::rr::{Name, RData, Record, RecordType, rdata};
+
+    #[test]
+    fn compressed_group_cname_policy_preserves_control_sections_and_routing() {
+        for (kind, with_ip, dname, rcode, changes) in [
+            (RecordType::A, true, false, ResponseCode::NoError, true),
+            (RecordType::AAAA, true, false, ResponseCode::NoError, true),
+            (RecordType::A, false, false, ResponseCode::NoError, false),
+            (RecordType::A, true, true, ResponseCode::NoError, false),
+            (RecordType::MX, true, false, ResponseCode::NoError, false),
+            (RecordType::A, false, false, ResponseCode::NXDomain, false),
+        ] {
+            let qname = Name::from_ascii("original.example.").unwrap();
+            let target = Name::from_ascii("target.example.").unwrap();
+            let mut query = Message::new();
+            query
+                .set_id(91)
+                .add_query(Query::query(qname.clone(), kind));
+            let raw = query.to_vec().unwrap();
+            let (header, question) = mosdns_dns_core::parse_query(&raw).unwrap();
+            let mut state = ExecutionState::new(header, question);
+            state.routing.matched_group = Some("special_50".into());
+            state.routing.final_upstream = Some("actual_supplier".into());
+            let route = state.routing.clone();
+            let mut response = query.clone();
+            response
+                .set_message_type(MessageType::Response)
+                .set_response_code(rcode)
+                .set_recursion_available(true)
+                .set_authentic_data(true);
+            response.add_answer(Record::from_rdata(
+                qname.clone(),
+                37,
+                RData::CNAME(rdata::CNAME(target.clone())),
+            ));
+            if with_ip {
+                let data = if kind == RecordType::AAAA {
+                    RData::AAAA(rdata::AAAA("2001:db8::7".parse().unwrap()))
+                } else {
+                    RData::A(rdata::A("192.0.2.7".parse().unwrap()))
+                };
+                response.add_answer(Record::from_rdata(target.clone(), 41, data));
+            }
+            if dname {
+                response.add_answer(Record::from_rdata(
+                    target.clone(),
+                    31,
+                    RData::Unknown {
+                        code: RecordType::Unknown(39),
+                        rdata: rdata::NULL::with(encode_name("renamed.example.")),
+                    },
+                ));
+            }
+            response.add_name_server(Record::from_rdata(
+                target.clone(),
+                70,
+                RData::NS(rdata::NS(Name::from_ascii("ns.example.").unwrap())),
+            ));
+            response.add_additional(Record::from_rdata(
+                Name::from_ascii("ns.example.").unwrap(),
+                75,
+                RData::A(rdata::A("192.0.2.8".parse().unwrap())),
+            ));
+            let mut wire = response.to_vec().unwrap();
+            // An ECS-bearing OPT must survive reconstruction, including scope.
+            let count = u16::from_be_bytes([wire[10], wire[11]]) + 1;
+            wire[10..12].copy_from_slice(&count.to_be_bytes());
+            wire.extend([
+                0, 0, 41, 4, 208, 0, 0, 0, 0, 0, 11, 0, 8, 0, 7, 0, 1, 24, 16, 192, 0, 2,
+            ]);
+            assert!(wire.windows(2).any(|w| w[0] & 0xc0 == 0xc0));
+            let before = Message::from_vec(&wire).unwrap();
+            state.set_raw_response(wire.clone());
+            assert!(!apply_wire_policy(&ResponsePolicy::CnameRemover, &mut state, &raw).unwrap());
+            assert_eq!(state.routing, route);
+            let mosdns_sequence_core::ResponseState::Raw(after) = &state.response else {
+                panic!("raw response")
+            };
+            if !changes {
+                assert_eq!(after.as_bytes(), wire);
+                continue;
+            }
+            let after = Message::from_vec(after.as_bytes()).unwrap();
+            assert_eq!(after.answers().len(), 1);
+            assert_eq!(after.answers()[0].name(), &qname);
+            assert_eq!(after.answers()[0].ttl(), 41);
+            let mut expected_header = *before.header();
+            expected_header.set_answer_count(1);
+            assert_eq!(after.header(), &expected_header);
+            assert_eq!(after.name_servers(), before.name_servers());
+            assert_eq!(after.additionals(), before.additionals());
+            assert_eq!(after.extensions(), before.extensions());
+        }
+    }
+}
 impl<T> DomainPayload<T> {
     #[must_use]
     pub fn lookup(&self, domain: &str) -> Option<&T> {
@@ -38,6 +138,7 @@ pub struct HostAddresses {
     pub ipv6: Vec<std::net::Ipv6Addr>,
 }
 pub enum ResponsePolicy {
+    CnameRemover,
     Hosts(Rc<DomainPayload<HostAddresses>>),
     Redirect(Rc<DomainPayload<String>>),
     Ttl(TtlPolicy),
@@ -92,22 +193,38 @@ pub(crate) struct RuleBudget {
     rules: usize,
 }
 impl RuleBudget {
-    pub(crate) fn load(
+    pub(crate) fn load_with_inputs(
         &mut self,
         inline: &[String],
         files: &[PathBuf],
         missing_ok: bool,
         path: &str,
+        mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
         mut consume: impl FnMut(&str, &str) -> Result<(), ConfigError>,
     ) -> Result<(), ConfigError> {
         for (index, line) in inline.iter().enumerate() {
             self.line(line.as_bytes(), &format!("{path}[{index}]"), &mut consume)?;
         }
         for file in files {
-            let input = match std::fs::File::open(file) {
+            let file_path = file.clone();
+            let open_result =
+                crate::transaction::blocking_io(move || std::fs::File::open(file_path)).map_err(
+                    |error| {
+                        ConfigError::new(
+                            file.display().to_string(),
+                            format!("cannot open rule file on bounded worker: {error}"),
+                        )
+                    },
+                )?;
+            let input = match open_result {
                 Ok(file) => file,
                 Err(error) if missing_ok && error.kind() == std::io::ErrorKind::NotFound => {
                     eprintln!("{}: missing IP rule file, skipped", file.display());
+                    if let Some(inputs) = inputs.as_deref_mut() {
+                        inputs.record_missing(file).map_err(|reason| {
+                            ConfigError::new(file.display().to_string(), reason)
+                        })?;
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -118,25 +235,42 @@ impl RuleBudget {
                 }
             };
             let mut reader = BufReader::new(input);
+            let mut source_bytes = Vec::new();
             let mut index = 0;
             loop {
                 // A bounded read prevents a single hostile line allocating the whole file.
-                let mut line = Vec::new();
-                let read = reader
-                    .by_ref()
-                    .take((POLICY_LINE_LIMIT + 2) as u64)
-                    .read_until(b'\n', &mut line)
-                    .map_err(|error| {
-                        ConfigError::new(
-                            file.display().to_string(),
-                            format!("cannot read rules: {error}"),
-                        )
-                    })?;
+                let (next_reader, read, line) = crate::transaction::blocking_io(move || {
+                    let mut line = Vec::new();
+                    let read = reader
+                        .by_ref()
+                        .take((POLICY_LINE_LIMIT + 2) as u64)
+                        .read_until(b'\n', &mut line)?;
+                    Ok::<_, std::io::Error>((reader, read, line))
+                })
+                .map_err(|error| {
+                    ConfigError::new(
+                        file.display().to_string(),
+                        format!("cannot read rules on bounded worker: {error}"),
+                    )
+                })?
+                .map_err(|error| {
+                    ConfigError::new(
+                        file.display().to_string(),
+                        format!("cannot read rules: {error}"),
+                    )
+                })?;
+                reader = next_reader;
                 if read == 0 {
                     break;
                 }
+                source_bytes.extend_from_slice(&line);
                 index += 1;
                 self.line(&line, &format!("{}:{index}", file.display()), &mut consume)?;
+            }
+            if let Some(inputs) = inputs.as_deref_mut() {
+                inputs
+                    .record_bytes(file, &source_bytes)
+                    .map_err(|reason| ConfigError::new(file.display().to_string(), reason))?;
             }
         }
         Ok(())
@@ -188,37 +322,45 @@ impl RuleBudget {
     }
 }
 
-pub(crate) fn domain_payload<T>(
+pub(crate) fn domain_payload_with_inputs<T>(
     inline: &[String],
     files: &[PathBuf],
     path: &str,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     parse: impl Fn(&[&str], &str) -> Result<T, ConfigError>,
 ) -> Result<DomainPayload<T>, ConfigError> {
     let mut entries: Vec<(String, T)> = Vec::new();
     let mut positions = BTreeMap::new();
-    RuleBudget::default().load(inline, files, false, path, |line, location| {
-        let fields: Vec<_> = line.split_whitespace().collect();
-        let (kind, pattern) = fields[0].split_once(':').unwrap_or(("full", fields[0]));
-        let pattern = if kind == "regexp" {
-            pattern.to_owned()
-        } else {
-            normalize(pattern)
-        };
-        let canonical = format!("{kind}:{pattern}");
-        // Validate each rule even if a later duplicate would replace it.
-        let mut validator = MixMatcher::new();
-        validator
-            .add(&canonical, ())
-            .map_err(|error| ConfigError::new(location, error.to_string()))?;
-        let value = parse(&fields[1..], location)?;
-        if let Some(index) = positions.get(&canonical).copied() {
-            entries[index] = (canonical, value);
-        } else {
-            positions.insert(canonical.clone(), entries.len());
-            entries.push((canonical, value));
-        }
-        Ok(())
-    })?;
+    RuleBudget::default().load_with_inputs(
+        inline,
+        files,
+        false,
+        path,
+        inputs,
+        |line, location| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            let (kind, pattern) = fields[0].split_once(':').unwrap_or(("full", fields[0]));
+            let pattern = if kind == "regexp" {
+                pattern.to_owned()
+            } else {
+                normalize(pattern)
+            };
+            let canonical = format!("{kind}:{pattern}");
+            // Validate each rule even if a later duplicate would replace it.
+            let mut validator = MixMatcher::new();
+            validator
+                .add(&canonical, ())
+                .map_err(|error| ConfigError::new(location, error.to_string()))?;
+            let value = parse(&fields[1..], location)?;
+            if let Some(index) = positions.get(&canonical).copied() {
+                entries[index] = (canonical, value);
+            } else {
+                positions.insert(canonical.clone(), entries.len());
+                entries.push((canonical, value));
+            }
+            Ok(())
+        },
+    )?;
     let mut matcher = MixMatcher::new();
     let mut values = Vec::with_capacity(entries.len());
     for (rule, value) in entries {
@@ -229,12 +371,13 @@ pub(crate) fn domain_payload<T>(
     }
     Ok(DomainPayload { matcher, values })
 }
-pub(crate) fn hosts(
+pub(crate) fn hosts_with_inputs(
     inline: &[String],
     files: &[PathBuf],
     path: &str,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<DomainPayload<HostAddresses>, ConfigError> {
-    domain_payload(inline, files, path, |fields, location| {
+    domain_payload_with_inputs(inline, files, path, inputs, |fields, location| {
         let mut result = HostAddresses {
             ipv4: Vec::new(),
             ipv6: Vec::new(),
@@ -250,12 +393,21 @@ pub(crate) fn hosts(
         Ok(result)
     })
 }
-pub(crate) fn redirects(
+#[cfg(test)]
+fn hosts(
     inline: &[String],
     files: &[PathBuf],
     path: &str,
+) -> Result<DomainPayload<HostAddresses>, ConfigError> {
+    hosts_with_inputs(inline, files, path, None)
+}
+pub(crate) fn redirects_with_inputs(
+    inline: &[String],
+    files: &[PathBuf],
+    path: &str,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<DomainPayload<String>, ConfigError> {
-    domain_payload(inline, files, path, |fields, location| {
+    domain_payload_with_inputs(inline, files, path, inputs, |fields, location| {
         if fields.len() != 1 {
             return Err(ConfigError::new(
                 location,
@@ -288,20 +440,36 @@ pub(crate) fn ip_prefix(field: &str, path: &str) -> Result<(IpAddr, u8), ConfigE
     }
     Ok((address, bits))
 }
+#[cfg(test)]
 pub(crate) fn ip_list(
     inline: &[String],
     files: &[PathBuf],
     path: &str,
 ) -> Result<Rc<IpPrefixList>, ConfigError> {
+    ip_list_with_inputs(inline, files, path, None)
+}
+pub(crate) fn ip_list_with_inputs(
+    inline: &[String],
+    files: &[PathBuf],
+    path: &str,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+) -> Result<Rc<IpPrefixList>, ConfigError> {
     for (index, entry) in inline.iter().enumerate() {
         ip_prefix(entry, &format!("{path}.ips[{index}]"))?;
     }
     let mut prefixes = IpPrefixList::new();
-    RuleBudget::default().load(inline, files, true, path, |line, location| {
-        let (ip, bits) = ip_prefix(line.split_whitespace().next().unwrap_or(""), location)?;
-        prefixes.append(ip, bits);
-        Ok(())
-    })?;
+    RuleBudget::default().load_with_inputs(
+        inline,
+        files,
+        true,
+        path,
+        inputs,
+        |line, location| {
+            let (ip, bits) = ip_prefix(line.split_whitespace().next().unwrap_or(""), location)?;
+            prefixes.append(ip, bits);
+            Ok(())
+        },
+    )?;
     prefixes.rebuild();
     Ok(Rc::new(prefixes))
 }
@@ -313,6 +481,49 @@ pub(crate) fn apply_wire_policy(
     query_wire: &[u8],
 ) -> Result<bool, ExecutorError> {
     match policy {
+        ResponsePolicy::CnameRemover => {
+            if !matches!(state.query.question.qtype, 1 | 28) {
+                return Ok(false);
+            }
+            let mosdns_sequence_core::ResponseState::Raw(wire) = &state.response else {
+                return Ok(false);
+            };
+            let mut message = hickory_proto::op::Message::from_vec(wire.as_bytes())
+                .map_err(|e| ExecutorError::new(format!("invalid CNAME response: {e}")))?;
+            use hickory_proto::rr::RecordType;
+            if message
+                .answers()
+                .iter()
+                .any(|r| u16::from(r.record_type()) == 39)
+                || !message
+                    .answers()
+                    .iter()
+                    .any(|r| matches!(r.record_type(), RecordType::A | RecordType::AAAA))
+                || !message
+                    .answers()
+                    .iter()
+                    .any(|r| r.record_type() == RecordType::CNAME)
+            {
+                return Ok(false);
+            }
+            let name = hickory_proto::rr::Name::from_ascii(
+                crate::matchers::wire_name_to_ascii_domain(&state.query.question.qname_wire)
+                    .ok_or_else(|| ExecutorError::new("invalid question name"))?,
+            )
+            .map_err(|e| ExecutorError::new(e.to_string()))?;
+            message
+                .answers_mut()
+                .retain(|r| r.record_type() != RecordType::CNAME);
+            for answer in message.answers_mut() {
+                answer.set_name(name.clone());
+            }
+            state.rewrite_raw_response(
+                message
+                    .to_vec()
+                    .map_err(|e| ExecutorError::new(e.to_string()))?,
+            );
+            Ok(false)
+        }
         ResponsePolicy::Hosts(rules) => {
             let q = &state.query.question;
             if q.qclass != 1 || !matches!(q.qtype, 1 | 28) {
@@ -392,7 +603,7 @@ pub(crate) fn apply_wire_policy(
                 }
             }
             .map_err(|error| ExecutorError::new(format!("invalid TTL response: {error:?}")))?;
-            state.set_raw_response(patched);
+            state.rewrite_raw_response(patched);
             Ok(false)
         }
         ResponsePolicy::Redirect(_) | ResponsePolicy::Ecs(_) => Ok(false),

@@ -1,0 +1,19 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+error: case-sensitive file extension comparison
+   --> native-host/tests/slice6_management_http.rs:879:23
+    |
+879 |             } else if path.ends_with(".css") {
+    |                       ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: consider using a case-insensitive comparison instead
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#case_sensitive_file_extension_comparisons
+    = note: `-D clippy::case-sensitive-file-extension-comparisons` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::case_sensitive_file_extension_comparisons)]`
+help: use std::path::Path
+    |
+879 ~             } else if std::path::Path::new(path)
+880 +                 .extension()
+881 ~                 .is_some_and(|ext| ext.eq_ignore_ascii_case("css")) {
+    |
+
+error: could not compile `mosdns-native-host` (test "slice6_management_http") due to 1 previous error

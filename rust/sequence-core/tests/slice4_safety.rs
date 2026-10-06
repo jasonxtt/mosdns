@@ -866,6 +866,7 @@ fn canonical_contract_snapshot_is_typed_and_deterministic() {
                 selected_upstream: Some("selected-upstream".to_owned()),
                 matched_rule_source: Some("rule-source".to_owned()),
             },
+            admission_facts: state.admission_facts.clone(),
         }
     );
 }

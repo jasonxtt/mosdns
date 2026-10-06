@@ -1,0 +1,461 @@
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/cache.rs:1451:
+             .unwrap();
+         tokio::task::LocalSet::new().block_on(&runtime, async {
+             let clock = CacheTestClock::new(1000);
+-            let cache = NativeCacheAdapter::with_options_and_clock(
+-                8,
+-                3600,
+-                Rc::new(clock.clone()),
+-            )
+-            .unwrap();
++            let cache = NativeCacheAdapter::with_options_and_clock(8, 3600, Rc::new(clock.clone()))
++                .unwrap();
+             let (query, response) = query_response();
+             let entry = mosdns_cache_core::NativeSnapshotEntry {
+                 key: cache.key_for_query(&query).unwrap().unwrap(),
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/cache.rs:1475:
+             );
+ 
+             let old = CacheCatalog::from_adapters(vec![cache.clone()]);
+-            let replacement = NativeCacheAdapter::with_options_and_clock(
+-                8,
+-                3600,
+-                Rc::new(clock),
+-            )
+-            .unwrap();
++            let replacement =
++                NativeCacheAdapter::with_options_and_clock(8, 3600, Rc::new(clock)).unwrap();
+             let live = CacheCatalog::from_adapters(vec![replacement.clone()]);
+             let (started, started_rx) = tokio::sync::oneshot::channel();
+             let (release, release_rx) = tokio::sync::oneshot::channel();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/cache.rs:1487:
+             let published = Rc::new(Cell::new(false));
+             let publish_result = published.clone();
+             let fresh_response = response.clone();
+-            assert!(cache
+-                .start_refresh(&query, move |pending, _, _| async move {
+-                    let _ = started.send(());
+-                    let _ = release_rx.await;
+-                    publish_result.set(pending.publish(&fresh_response).unwrap());
+-                })
+-                .unwrap());
++            assert!(
++                cache
++                    .start_refresh(&query, move |pending, _, _| async move {
++                        let _ = started.send(());
++                        let _ = release_rx.await;
++                        publish_result.set(pending.publish(&fresh_response).unwrap());
++                    })
++                    .unwrap()
++            );
+             started_rx.await.unwrap();
+ 
+             let gate = old.acquire_policy_transaction_gate().await;
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/cache.rs:1514:
+                 "the retired response remains unchanged"
+             );
+             assert!(!published.get());
+-            assert!(release.send(()).is_err(), "the old refresh future was dropped");
++            assert!(
++                release.send(()).is_err(),
++                "the old refresh future was dropped"
++            );
+             assert!(replacement.lookup_entry(&query).unwrap().is_none());
+         });
+     }
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:943:
+ }
+ 
+ impl<'a> CacheDependencyClosure<'a> {
+-    fn new(
+-        config: &'a CompiledConfig,
+-        plugins: &'a BTreeMap<String, &'a RawPlugin>,
+-    ) -> Self {
++    fn new(config: &'a CompiledConfig, plugins: &'a BTreeMap<String, &'a RawPlugin>) -> Self {
+         Self {
+             config,
+             plugins,
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1000:
+             self.add_plugin(plugin);
+             self.add_references(&plugin.args);
+         } else if sequence.synthetic {
+-            self.material.insert(format!(
+-                "synthetic-sequence-rules:{}",
+-                sequence.rules.len()
+-            ));
++            self.material
++                .insert(format!("synthetic-sequence-rules:{}", sequence.rules.len()));
+             for (index, rule) in sequence.rules.iter().enumerate() {
+                 if !rule.matchers.is_empty() {
+                     self.refuse_reuse();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1011:
+                 match rule.executable.as_ref() {
+                     Some(executable) => {
+                         if let Some(material) = self.executable_material(executable) {
+-                            self.material.insert(format!(
+-                                "synthetic-sequence-exec:{index}:{material}"
+-                            ));
++                            self.material
++                                .insert(format!("synthetic-sequence-exec:{index}:{material}"));
+                         } else {
+                             self.refuse_reuse();
+                         }
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1125:
+                 .into_iter()
+                 .flat_map(|router| router.groups.iter())
+                 .filter(|group| {
+-                    reachable_sequence(
+-                        self.config,
+-                        group.child,
+-                        goal,
+-                        &mut BTreeSet::new(),
+-                    )
++                    reachable_sequence(self.config, group.child, goal, &mut BTreeSet::new())
+                 })
+                 .map(|group| group.slot)
+                 .collect();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1228:
+             self.refuse_reuse();
+             return;
+         };
+-        self.material
+-            .insert(format!("external:{}", external.name));
++        self.material.insert(format!("external:{}", external.name));
+         let mut recognized = false;
+         if let Some(plugin) = self.plugins.get(&external.name).copied() {
+             self.add_plugin(plugin);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1242:
+             .find(|invocation| invocation.executable == id)
+         {
+             recognized = true;
+-            let Some(definition) = self
+-                .config
+-                .forward_definitions
+-                .get(invocation.definition)
++            let Some(definition) = self.config.forward_definitions.get(invocation.definition)
+             else {
+                 self.refuse_reuse();
+                 return;
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1263:
+                 }
+             }
+         }
+-        if let Some(cache) = self.config.caches.iter().find(|cache| cache.executable == id) {
++        if let Some(cache) = self
++            .config
++            .caches
++            .iter()
++            .find(|cache| cache.executable == id)
++        {
+             self.material.insert(cache_config_material(cache));
+             recognized = true;
+         }
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1295:
+                 PreferenceFamily::Ipv4 => "ipv4",
+                 PreferenceFamily::Ipv6 => "ipv6",
+             };
+-            self.material
+-                .insert(format!("preference:{family}"));
++            self.material.insert(format!("preference:{family}"));
+             recognized = true;
+         }
+         if let Some(policy) = self
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1309:
+                 .insert(format!("response-policy:{}", policy.tag));
+             recognized = true;
+         }
+-        if external.name.starts_with("@native-cname:")
+-            || external.name.starts_with("@native-ecs:")
++        if external.name.starts_with("@native-cname:") || external.name.starts_with("@native-ecs:")
+         {
+             recognized = true;
+         }
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1327:
+             self.refuse_reuse();
+             return;
+         };
+-        self.material
+-            .insert(format!("fixture:{}", fixture.name));
++        self.material.insert(format!("fixture:{}", fixture.name));
+         if let Some(tag) = fixture.name.strip_prefix("__native_plugin_") {
+             if let Some(plugin) = self.plugins.get(tag).copied() {
+                 self.add_plugin(plugin);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:1424:
+         let mut expressions = Vec::new();
+         collect_raw_strings(matches, &mut expressions);
+         expressions.iter().any(|expression| {
+-            let expression = expression
+-                .strip_prefix('!')
+-                .unwrap_or(expression)
+-                .trim();
++            let expression = expression.strip_prefix('!').unwrap_or(expression).trim();
+             let mut fields = expression.split_whitespace();
+             matches!(fields.next(), Some("client_ip" | "resp_ip"))
+                 && fields.any(|field| field.starts_with('&'))
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:4365:
+ 
+     #[test]
+     fn cache_dependency_fingerprint_fails_closed_for_file_backed_ip_matchers() {
+-        let root = std::env::temp_dir().join(format!(
+-            "native-cache-ip-dependency-{}",
+-            std::process::id()
+-        ));
++        let root =
++            std::env::temp_dir().join(format!("native-cache-ip-dependency-{}", std::process::id()));
+         let _ = std::fs::remove_dir_all(&root);
+         std::fs::create_dir_all(&root).unwrap();
+ 
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:4404:
+             );
+ 
+             let before = compile_yaml_with_base(&yaml, &root).unwrap();
+-            let cache = before.caches.iter().find(|cache| cache.tag == "cache").unwrap();
++            let cache = before
++                .caches
++                .iter()
++                .find(|cache| cache.tag == "cache")
++                .unwrap();
+             let before = before.cache_dependencies[cache.id.0].clone();
+             std::fs::write(&rules, b"203.0.113.0/24\n").unwrap();
+             let after = compile_yaml_with_base(&yaml, &root).unwrap();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:4411:
+-            let cache = after.caches.iter().find(|cache| cache.tag == "cache").unwrap();
++            let cache = after
++                .caches
++                .iter()
++                .find(|cache| cache.tag == "cache")
++                .unwrap();
+             let after = after.cache_dependencies[cache.id.0].clone();
+ 
+             assert!(
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1074:
+         std::fs::create_dir_all(root.join("rule")).unwrap();
+         std::fs::write(
+             root.join("webinfo/special_upstream_groups.json"),
+-            format!(
+-                r#"[{{"slot":50,"name":"managed","listen_port":{group_listener}}}]"#
+-            )
+-            .into_bytes(),
++            format!(r#"[{{"slot":50,"name":"managed","listen_port":{group_listener}}}]"#)
++                .into_bytes(),
+         )
+         .unwrap();
+         let overrides = group_upstream.map_or_else(
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1130:
+     fn seed_cache(adapter: &crate::cache::NativeCacheAdapter, name: &str) {
+         let wire = cache_query(name);
+         let response = cache_response(&wire);
+-        assert!(adapter.begin_store(&wire).unwrap().unwrap().publish(&response).unwrap());
++        assert!(
++            adapter
++                .begin_store(&wire)
++                .unwrap()
++                .unwrap()
++                .publish(&response)
++                .unwrap()
++        );
+     }
+ 
+     fn cache_query(name: &str) -> Vec<u8> {
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1168:
+                 let (length, address) = received.unwrap();
+                 requests.fetch_add(1, Ordering::Relaxed);
+                 let (header, question) = mosdns_dns_core::parse_query(&wire[..length]).unwrap();
+-                let response = mosdns_dns_core::synthesize_response(&header, &question, rcode)
+-                    .unwrap();
++                let response =
++                    mosdns_dns_core::synthesize_response(&header, &question, rcode).unwrap();
+                 socket.send_to(&response, address).await.unwrap();
+             }
+         })
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1176:
+     }
+ 
+-    async fn dns_exchange(
+-        socket: &tokio::net::UdpSocket,
+-        port: u16,
+-        query: &[u8],
+-    ) -> u16 {
++    async fn dns_exchange(socket: &tokio::net::UdpSocket, port: u16, query: &[u8]) -> u16 {
+         socket.send_to(query, ("127.0.0.1", port)).await.unwrap();
+         let mut response = [0; 512];
+         let (_length, _) = tokio::time::timeout(
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1198:
+         let control = host.control();
+         let old = control.view();
+         let id = |config: &crate::config::CompiledConfig, tag: &str| {
+-            config.caches.iter().find(|cache| cache.tag == tag).unwrap().id
++            config
++                .caches
++                .iter()
++                .find(|cache| cache.tag == tag)
++                .unwrap()
++                .id
+         };
+         let all_id = id(&old.config, "cache_all");
+         let sibling_id = id(&old.config, "sibling_cache");
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1232:
+         let next = prepared.snapshot.as_ref().unwrap();
+         let next_all = next.cache.get(id(&next.config, "cache_all")).unwrap();
+         let next_sibling = next.cache.get(id(&next.config, "sibling_cache")).unwrap();
+-        let next_group = next.cache.get(id(&next.config, "cache_special_50")).unwrap();
+-        let next_quick = next
++        let next_group = next
+             .cache
+-            .get(id(&next.config, &quick_tag))
++            .get(id(&next.config, "cache_special_50"))
+             .unwrap();
++        let next_quick = next.cache.get(id(&next.config, &quick_tag)).unwrap();
+ 
+-        assert!(next_all.is_empty(), "the router-wrapping cache is policy-dependent");
+-        assert_eq!(next_sibling.len(), 1, "the disjoint sibling owner must survive");
+-        assert!(next_group.is_empty(), "the changed group route closure must be fenced");
+-        assert!(next_quick.is_empty(), "quick caches depend on their downstream policy closure");
++        assert!(
++            next_all.is_empty(),
++            "the router-wrapping cache is policy-dependent"
++        );
++        assert_eq!(
++            next_sibling.len(),
++            1,
++            "the disjoint sibling owner must survive"
++        );
++        assert!(
++            next_group.is_empty(),
++            "the changed group route closure must be fenced"
++        );
++        assert!(
++            next_quick.is_empty(),
++            "quick caches depend on their downstream policy closure"
++        );
+         drop(prepared);
+         drop(old);
+         drop(host);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1462:
+ 
+         assert!(!all_miss.publish(&cache_response(&all_query)).unwrap());
+         assert!(!group_miss.publish(&cache_response(&group_query)).unwrap());
+-        assert!(sibling_miss
+-            .publish(&cache_response(&sibling_query))
+-            .unwrap());
++        assert!(
++            sibling_miss
++                .publish(&cache_response(&sibling_query))
++                .unwrap()
++        );
+         host.block_on(control.close()).unwrap();
+         drop(old);
+         drop(host);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1523:
+             assert_eq!(dns_exchange(&client, main_port, &group_query).await, 0);
+             assert_eq!(dns_exchange(&client, main_port, &group_query).await, 0);
+             assert_eq!(group_requests.load(Ordering::Relaxed), 1);
+-            assert_eq!(dns_exchange(&client, sibling_listener, &sibling_query).await, 0);
+-            assert_eq!(dns_exchange(&client, sibling_listener, &sibling_query).await, 0);
++            assert_eq!(
++                dns_exchange(&client, sibling_listener, &sibling_query).await,
++                0
++            );
++            assert_eq!(
++                dns_exchange(&client, sibling_listener, &sibling_query).await,
++                0
++            );
+             assert_eq!(sibling_requests.load(Ordering::Relaxed), 1);
+ 
+             let candidate = host
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1541:
+ 
+             assert_eq!(dns_exchange(&client, main_port, &group_query).await, 3);
+             assert_eq!(default_requests.load(Ordering::Relaxed), 1);
+-            assert_eq!(dns_exchange(&client, sibling_listener, &sibling_query).await, 0);
++            assert_eq!(
++                dns_exchange(&client, sibling_listener, &sibling_query).await,
++                0
++            );
+             assert_eq!(sibling_requests.load(Ordering::Relaxed), 1);
+ 
+             stop.cancel();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1665:
+             )
+             .unwrap();
+         host.block_on(control.apply_candidate(delete)).unwrap();
+-        assert!(crate::cache_dump::decode(
+-            &std::fs::read(root.join("cache/cache_special_50.dump")).unwrap()
+-        )
+-        .unwrap()
+-        .is_empty());
++        assert!(
++            crate::cache_dump::decode(
++                &std::fs::read(root.join("cache/cache_special_50.dump")).unwrap()
++            )
++            .unwrap()
++            .is_empty()
++        );
+ 
+         let recreate = control
+             .compile_managed_candidate(
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1676:
+                 &root.join("config.yaml"),
+                 vec![(
+                     std::path::PathBuf::from("webinfo/special_upstream_groups.json"),
+-                    Some(
+-                        br#"[{"slot":50,"name":"managed","listen_port":0}]"#.to_vec(),
+-                    ),
++                    Some(br#"[{"slot":50,"name":"managed","listen_port":0}]"#.to_vec()),
+                 )],
+             )
+             .unwrap();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1709:
+             .id;
+         assert!(restarted.cache().get(current_group).unwrap().is_empty());
+         drop(_bound);
+-        restarted
+-            .block_on(restarted.control().close())
+-            .unwrap();
++        restarted.block_on(restarted.control().close()).unwrap();
+         drop(restarted);
+         std::fs::remove_dir_all(root).unwrap();
+     }
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1868:
+             {
+                 assert_eq!(std::fs::read(root.join(path)).unwrap(), expected, "{path}");
+             }
+-            assert_eq!(std::fs::read(root.join("rule/special_50.txt")).unwrap(), external);
++            assert_eq!(
++                std::fs::read(root.join("rule/special_50.txt")).unwrap(),
++                external
++            );
+             assert!(!crate::transaction::ManagedStore::has_pending(&root));
+-            assert!(pending.publish(&cache_response(&cache_query("pending.example."))).unwrap());
++            assert!(
++                pending
++                    .publish(&cache_response(&cache_query("pending.example.")))
++                    .unwrap()
++            );
+ 
+             control.close().await.unwrap();
+             drop(initial);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:2237:
+                 restarted_view.cache.get(cache_id).unwrap().is_empty(),
+                 "committed cache invalidation remains empty after host restart at {phase}"
+             );
+-            restarted_host
+-                .block_on(restarted_control.close())
+-                .unwrap();
++            restarted_host.block_on(restarted_control.close()).unwrap();
+             drop(restarted_view);
+             drop(restarted_control);
+             drop(restarted_host);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/transaction.rs:1800:
+             );
+             assert_eq!(
+                 crate::cache_dump::decode(&actual_dump).unwrap().len(),
+-                if marker || committed || result.is_ok() { 0 } else { 1 },
++                if marker || committed || result.is_ok() {
++                    0
++                } else {
++                    1
++                },
+                 "valid cache dump generation at boundary {boundary}"
+             );
+             if marker || committed || result.is_ok() {

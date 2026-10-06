@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "exit_code": 0,
+  "command": "CGO_ENABLED=0 GOMAXPROCS=2 go run /root/mosdns-rust-special-groups-20261003/evidence/cumulative-origin-go-probe.go /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_50.dump /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_51.dump /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_52.dump",
+  "log": "cumulative-origin-go-probe.log",
+  "unchanged_go_reader": true,
+  "ui_bundles_built_before_prior_go_build_and_unchanged": true,
+  "cwd": "/root/mosdns-rust-special-groups-20261003/src"
+}

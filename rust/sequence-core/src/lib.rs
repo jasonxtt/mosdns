@@ -17,9 +17,10 @@ pub use program::{
     ValidatedFixture, ValidatedProgram, ValidatedRule, ValidatedSequence,
 };
 pub use state::{
-    ClientContext, ClientTransport, DnsResponseInspector, ExecutionState, OwnedResponseWire,
-    QueryState, ResponseError, ResponseInspection, ResponseInspector, ResponseState, RoutingField,
-    RoutingState, StateMutation, StateSnapshot, SynthesizedResponse,
+    AdmissionFacts, ClientContext, ClientTransport, DnsResponseInspector, ExecutionState,
+    OwnedResponseWire, QueryState, ResponseError, ResponseInspection, ResponseInspector,
+    ResponseOrigin, ResponseState, RoutingField, RoutingState, StateMutation, StateSnapshot,
+    SynthesizedResponse,
 };
 
 #[cfg(test)]
@@ -77,6 +78,7 @@ mod slice1_state_tests {
                 fast_flags: 1 << 48,
                 response: ResponseState::None,
                 routing: state.routing.clone(),
+                admission_facts: state.admission_facts.clone(),
             }
         );
     }
@@ -105,6 +107,22 @@ mod slice1_state_tests {
         assert_eq!(state.response_generation(), 1);
         state.set_raw_response(wire);
         assert_eq!(state.response_generation(), 2);
+    }
+
+    #[test]
+    fn response_origin_survives_decoration_but_not_identical_replacement() {
+        let mut state = state();
+        let wire = response_wire();
+        let origin = crate::ResponseOrigin {
+            identity: std::sync::Arc::from("actual"),
+            peer: None,
+            transport: None,
+        };
+        state.set_raw_response_with_origin(wire.clone(), Some(origin.clone()));
+        state.rewrite_raw_response(wire.clone());
+        assert_eq!(state.response_origin(), Some(&origin));
+        state.set_raw_response(wire);
+        assert!(state.response_origin().is_none());
     }
 
     #[test]

@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.77s
+     Running unittests src/lib.rs (rust/target/debug/deps/mosdns_native_host-f99cad6ef449a523)
+
+running 1 test
+test static_ui::tests::slow_body_slots_are_bounded_and_cancelled_work_releases_them ... FAILED
+
+failures:
+
+---- static_ui::tests::slow_body_slots_are_bounded_and_cancelled_work_releases_them stdout ----
+
+thread 'static_ui::tests::slow_body_slots_are_bounded_and_cancelled_work_releases_them' (248538) panicked at native-host/src/static_ui.rs:211:17:
+POST /
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    static_ui::tests::slow_body_slots_are_bounded_and_cancelled_work_releases_them
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 147 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

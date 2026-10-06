@@ -1,0 +1,43 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.12s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-ffd12075785eba3b)
+
+running 16 tests
+cache startup /tmp/managed-supervisor-143543-1/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test audit_can_be_enabled_by_a_later_managed_snapshot ... ok
+test api_failure_releases_all_main_and_custom_listener_sockets ... ok
+cache startup /tmp/managed-supervisor-143543-2/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/managed-supervisor-143543-3/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test custom_udp_tcp_pair_serves_the_group_without_main_matching ... ok
+test changing_listener_entry_invalidates_a_shared_wire_cache ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-143543-5/webinfo/audit_settings.json)
+cache startup /tmp/managed-supervisor-143543-5/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test discarded_candidate_does_not_change_upstream_inventory ... ok
+cache startup /tmp/managed-supervisor-143543-6/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test diversion_catalog_http_uses_single_transaction_for_source_rename ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-143543-7/webinfo/audit_settings.json)
+cache startup /tmp/managed-supervisor-143543-7/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test managed_manual_http_post_commits_rule_file_and_new_generation ... ok
+test managed_publication_cannot_disable_the_frozen_opt_in ... ok
+cache startup /tmp/managed-supervisor-143543-9/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test occupied_tcp_rolls_back_the_prebound_udp_half ... ok
+cache startup /tmp/managed-supervisor-143543-10/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/managed-supervisor-143543-10/cache/cache_special_51.dump: cache persistence: No such file or directory (os error 2); starting empty
+test in_flight_uses_old_snapshot_and_next_tcp_frame_uses_new_snapshot ... ok
+cache startup /tmp/managed-supervisor-143543-11/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test running_port_change_prebinds_both_halves_and_drains_only_removed_sockets ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-143543-12/webinfo/audit_settings.json)
+cache startup /tmp/managed-supervisor-143543-12/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test special_groups_http_crud_commits_and_removes_owned_state ... ok
+cache startup /tmp/managed-supervisor-143543-13/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test special_groups_http_view_reflects_the_committed_profile ... ok
+cache startup /tmp/managed-supervisor-143543-14/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test stable_api_captures_the_snapshot_after_the_complete_http_request ... ok
+test removing_another_group_preserves_the_live_tcp_upstream_owner ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-143543-15/webinfo/audit_settings.json)
+cache startup /tmp/managed-supervisor-143543-15/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-143543-15/webinfo/audit_settings.json)
+test upstream_http_snapshot_save_changes_generation_and_dns_supplier ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+

@@ -1,0 +1,20 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 39.41s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-preflight-config-snapshot-107851/webinfo/audit_settings.json)
+
+thread 'assembly::tests::startup_uses_the_same_config_snapshot_for_preflight_and_compilation' (107852) panicked at native-host/src/assembly.rs:1684:9:
+the compiled graph must reflect the YAML snapshot whose opt-in was checked
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test assembly::tests::startup_uses_the_same_config_snapshot_for_preflight_and_compilation ... FAILED
+
+failures:
+
+failures:
+    assembly::tests::startup_uses_the_same_config_snapshot_for_preflight_and_compilation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 132 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

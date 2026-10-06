@@ -1,0 +1,10 @@
+node:internal/process/promises:391
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+page.waitForResponse: Timeout 30000ms exceeded while waiting for event "response"
+    at /root/mosdns-rust-webui-20261004/evidence/s6-native-proof.mjs:45:282 {
+  name: 'TimeoutError'
+}
+
+Node.js v20.19.2

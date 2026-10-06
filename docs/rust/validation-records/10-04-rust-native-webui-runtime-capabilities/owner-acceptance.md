@@ -1,0 +1,12 @@
+# Parent acceptance — 2026-10-04
+
+User requested acceptance and archive if no issue. Scope S1–S6 is accepted; no new actionable code issue found. Six recorded dedicated C2C slice PASS results have no open findings. Separate complete range `ac629018d2aa8fd2a34a26f1f7ff0b2ecab4c0fc..c98dc5d1012ce73aed318504c1053b04ab15de08` has explicit FINAL: PASS, prior cumulative P2-1/P3-1 closed. The execution controller was reconciled from its already-recorded final Slice6 PASS to authorized_scope_complete using the supported complete command; no authorization was recreated.
+
+Independent checks this session:
+- All46 implementation/asset paths changed in the reviewed range are byte-identical to c98dc5d1. No new runtime/UI/build changes made.
+- Final219 build inputs match locally and on isolated SSH mosdns-rust; binary SHA-256 `8638b671c974bab2eb70eaeebd953e54926c85212ce7194b1c62cf756182e8ec` agrees with the final manifest and source-unavailable runtime proof. See [source verification](owner-source-verification.json).
+- Reran complete native-host tests on the isolated VM:391 passed/0 failed/3 intentionally parent-invoked subprocess entrypoints; [log](owner-native-tests.log). Frontend Node tests26 passed/0 failed, [log](owner-node-tests.log). Current fmt check passed, [log](owner-fmt.log).
+- Reviewed actual all-tabs native, actual Go404/final-assets, source-unavailable both-shell DNS/cache/audit/files/restart and retention/error regression results: PASS, zero unsupported requests/page errors where required. Physical checkout restored and recorded owned runtime resources released.
+- Existing final all-target strict Clippy/native build/browser evidence remains applicable to matching source. Workspace1194 is explicitly pre-remediation evidence, not a rerun on final source; other packages unchanged. No full performance/stability claim.
+
+Archive uses task.py --no-commit, per existing prohibition on ordinary automatic commits/push and preservation of accepted dirty work. Review source object is pinned locally for recovery. Public closure/status-only edits are separate from exact tested source. Real HEAD/index and all source/assets remain unchanged. No push/deployment/default switch. C11/C12 whole rows, full5D/Phase6, hybrid retirement and production approval remain open. Unsupported-kernel external mounts fail closed; started stalled filesystem I/O may delay shutdown join as documented.

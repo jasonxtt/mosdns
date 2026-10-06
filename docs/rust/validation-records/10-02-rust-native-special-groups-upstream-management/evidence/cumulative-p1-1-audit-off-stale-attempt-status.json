@@ -1,0 +1,5 @@
+{
+  "valid": false,
+  "reason": "tar baseline mtimes were older than Cargo fingerprints; green compiled artifacts were reused; this output is not accepted as RED or GREEN",
+  "repair": "verified all baseline input hashes, then touched them before rerunning"
+}

@@ -1,0 +1,38 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+error: this function has too many lines (126/100)
+   --> native-host/tests/slice6_management_http.rs:934:1
+    |
+934 | fn external_ui_is_live_confined_and_root_pinned() {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_lines
+    = note: `-D clippy::too-many-lines` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::too_many_lines)]`
+
+error: adding items after statements is confusing, since items exist from the start of the scope
+    --> native-host/tests/slice6_management_http.rs:1013:9
+     |
+1013 | /         struct SwapOwner(
+1014 | |             std::sync::Arc<std::sync::atomic::AtomicBool>,
+1015 | |             Option<std::thread::JoinHandle<()>>,
+1016 | |         );
+     | |__________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#items_after_statements
+     = note: `-D clippy::items-after-statements` implied by `-D clippy::pedantic`
+     = help: to override `-D clippy::pedantic` add `#[allow(clippy::items_after_statements)]`
+
+error: adding items after statements is confusing, since items exist from the start of the scope
+    --> native-host/tests/slice6_management_http.rs:1017:9
+     |
+1017 | /         impl Drop for SwapOwner {
+1018 | |             fn drop(&mut self) {
+1019 | |                 self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+1020 | |                 self.1.take().unwrap().join().unwrap();
+1021 | |             }
+1022 | |         }
+     | |_________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#items_after_statements
+
+error: could not compile `mosdns-native-host` (test "slice6_management_http") due to 3 previous errors

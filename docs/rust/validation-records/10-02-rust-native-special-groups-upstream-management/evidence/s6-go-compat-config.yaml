@@ -1,0 +1,22 @@
+log: {level: error}
+api: {http: "127.0.0.1:16480"}
+plugins:
+  - tag: default_upstream
+    type: forward
+    args:
+      upstreams:
+        - {tag: local_go, addr: "udp://127.0.0.1:25455"}
+  - tag: cache_default
+    type: cache
+    args: {size: 1024, lazy_cache_ttl: 300}
+  - tag: main_entry
+    type: sequence
+    args:
+      - exec: $cache_default
+      - exec: $default_upstream
+  - tag: main_udp
+    type: udp_server
+    args:
+      entry: main_entry
+      listen: "127.0.0.1:16453"
+      enable_audit: true

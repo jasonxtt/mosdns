@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0599]: no method named `cloned` found for enum `std::option::Option<cache::NativeCacheAdapter>` in the current scope
+    --> native-host/src/cache.rs:1008:26
+     |
+ 982 | /                     old_config
+ 983 | |                         .caches
+ 984 | |                         .iter()
+ 985 | |                         .find(|old| {
+...    |
+1007 | |                         })
+1008 | |                         .cloned()
+     | |                         -^^^^^^ `std::option::Option<cache::NativeCacheAdapter>` is not an iterator
+     | |_________________________|
+     |
+     |
+help: call `.into_iter()` first
+     |
+1008 |                         .into_iter().cloned()
+     |                          ++++++++++++
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `mosdns-native-host` (lib test) due to 1 previous error

@@ -1,0 +1,10 @@
+{
+  "status": "FAIL",
+  "cases": [],
+  "error": "TypeError: expect is not a function",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (./webinfo/audit_settings.json)\ncache startup /root/mosdns-rust-webui-20261004/evidence/cumulative-retention-red2/runtime/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty\n"
+}

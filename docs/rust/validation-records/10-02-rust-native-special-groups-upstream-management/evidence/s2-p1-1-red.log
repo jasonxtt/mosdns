@@ -1,0 +1,31 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: unused import: `super::*`
+   --> native-host/src/runtime_snapshot.rs:444:9
+    |
+444 |     use super::*;
+    |         ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mosdns-native-host` (lib test) generated 1 warning (run `cargo fix --lib -p mosdns-native-host --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized] target(s) in 8.81s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-556fd23d77659943)
+
+running 1 test
+test runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation ... FAILED
+
+failures:
+
+---- runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation stdout ----
+
+thread 'runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation' (32096) panicked at native-host/src/runtime_snapshot.rs:478:17:
+old socket must not capture a new-generation datagram/frame before asynchronous cancellation
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 100 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

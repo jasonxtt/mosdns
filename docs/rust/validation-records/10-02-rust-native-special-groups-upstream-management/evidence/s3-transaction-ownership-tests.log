@@ -1,0 +1,129 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: this lint expectation is unfulfilled
+   --> native-host/src/cache.rs:915:5
+    |
+915 |     dead_code,
+    |     ^^^^^^^^^
+    |
+    = note: S3 transaction gate is connected by the S5 HTTP mutation adapter
+    = note: `#[warn(unfulfilled_lint_expectations)]` on by default
+
+warning: this lint expectation is unfulfilled
+  --> native-host/src/runtime_snapshot.rs:76:9
+   |
+76 |         dead_code,
+   |         ^^^^^^^^^
+   |
+   = note: S3 transaction worker is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:108:5
+    |
+108 |     dead_code,
+    |     ^^^^^^^^^
+    |
+    = note: S3 transaction coordinator is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:156:5
+    |
+156 |     dead_code,
+    |     ^^^^^^^^^
+    |
+    = note: S3 transaction failures are exposed by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/cache.rs:933:9
+    |
+933 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 transaction gate is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:331:9
+    |
+331 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 persistence worker is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:381:9
+    |
+381 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 admission barrier is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:395:9
+    |
+395 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 admission barrier is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:433:9
+    |
+433 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 management drain is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:695:9
+    |
+695 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 transaction shutdown handling is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:703:9
+    |
+703 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 transaction shutdown handling is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:712:9
+    |
+712 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 rollback classification is connected by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/runtime_snapshot.rs:740:9
+    |
+740 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 transaction errors are exposed by the S5 HTTP mutation adapter
+
+warning: this lint expectation is unfulfilled
+   --> native-host/src/transaction.rs:171:9
+    |
+171 |         dead_code,
+    |         ^^^^^^^^^
+    |
+    = note: S3 candidate ownership is consumed by the S5 HTTP mutation adapter
+
+error[E0596]: cannot borrow `client` as mutable, as it is not declared as mutable
+    --> native-host/src/runtime_snapshot.rs:1337:13
+     |
+1337 |             client.shutdown().await.unwrap();
+     |             ^^^^^^ cannot borrow as mutable
+     |
+help: consider changing this to be mutable
+     |
+1312 |             let mut client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+     |                 +++
+
+For more information about this error, try `rustc --explain E0596`.
+error: could not compile `mosdns-native-host` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+warning: `mosdns-native-host` (lib) generated 14 warnings

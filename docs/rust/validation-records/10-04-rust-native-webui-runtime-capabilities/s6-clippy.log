@@ -1,0 +1,8 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Checking mosdns-runtime v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/runtime)
+    Checking mosdns-sequence-core v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/sequence-core)
+    Checking mosdns-matcher-core v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/matcher-core)
+    Checking mosdns-dns-core v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/dns-core)
+    Checking mosdns-cache-core v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/cache-core)
+    Checking mosdns-upstream-core v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/upstream-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.03s

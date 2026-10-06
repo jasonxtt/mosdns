@@ -1,0 +1,10 @@
+{
+  "source_files": 219,
+  "all_local_vm_build_source_match": true,
+  "artifact_sha256": "726f93522202a67d151a548d98a7215f92cd5af82a50bbdfd772b0c225618c7f",
+  "local_artifact_match": true,
+  "source_id": null,
+  "latest_build_script_verified": true,
+  "source_unavailable_proof_same_binary_sha256": true,
+  "rust_and_ui_inputs_unchanged_since_full_tests": true
+}

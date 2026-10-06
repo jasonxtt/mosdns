@@ -1,0 +1,11 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.71s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-dec9d4e49d597c3a)
+
+running 3 tests
+test custom_udp_tcp_pair_serves_the_group_without_main_matching ... ok
+test occupied_tcp_rolls_back_the_prebound_udp_half ... ok
+test in_flight_uses_old_snapshot_and_next_tcp_frame_uses_new_snapshot ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

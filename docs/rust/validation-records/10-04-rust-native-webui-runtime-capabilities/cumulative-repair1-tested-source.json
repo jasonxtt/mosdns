@@ -1,0 +1,30 @@
+{
+  "base": "ca35be6f7bf1c49b41de0b6640c7366f4382b864",
+  "files": {
+    "rust/native-host/src/assembly.rs": "da0e616ef751b71ca7a04e668d4f3ddfd968e7d841f1b9037913810f5a024a70",
+    "rust/native-host/tests/native_hosting.rs": "8156f53fa5bb91dc7243c91e0e3d56bec9d191c4f617c4ea769f214e6ca9ee48",
+    "scripts/build-rust-native.sh": "8f332f794b96cc2b8acaca905b8a8067d5f21b556742d8164877b0e710a58d2f",
+    "scripts/native-build-manifest.mjs": "c6e23dbd11d1b44f7ca8a30654ad869dcfecbb47a461dcecd40c1dc106463f09",
+    "docs/rust/contracts/native-webui-hosting.md": "b9e80c7b09ec8e5c359b1ff87148328641ebe24c18a6da324916d1cff8cc4ce5",
+    "docs/rust/contracts/index.md": "88b614927655eb0fabf4d285a46bf35fc8d393536c1a0fe9838d9a2dee2ca034",
+    "docs/rust/feature-coverage.md": "0b723941be7e530ac1f1c605e216bf48a3df9033ffd2e658ac80579267ff92d5",
+    "docs/rust/validation-summary.md": "40f369db2aee1eaa1654f4d95728b8a9b5a4e879bdec47608252b05ff17b8c7f",
+    "docs/ai/rust-handover.md": "8a4edebb973c556ab02dc593348519d322f27356ea0f84ea7176e9dc39871b56",
+    "coremain/www/assets/vue-log/app.css": "61835470feaeb656ea823ec98486d6b60029fc7fd46abfd8ac78374c384f9c49",
+    "coremain/www/assets/vue-log/app.js": "511b5bde43c84b30472be81a23df63057435744fa8bdd737e4c5b09effec5e36",
+    "coremain/www/assets/vue-log/index.html": "8c9f54bcf49a65ee0529057a0b96e246961f458c9f5739ff239607c54a608ac5",
+    "coremain/www/assets/vue-log1/app.css": "1b74502c52158e684c87cce5c6c372fe31cbc41c8a7e8a340adbe21f1434db7a",
+    "coremain/www/assets/vue-log1/app.js": "4afac22fb1d89c9390691a216e65cb20baed09282f15eddfde748a6db5363473",
+    "coremain/www/assets/vue-log1/log1.index.html": "be975c3b605b9304c5247a6ff7d0e0769a260f178dc54a0cc7e6e351757868e7",
+    "coremain/www/log.html": "de5cc0349aa958edf94bbdf10576e236fe2ea90e70db0aa4d469fb0fa92c1797",
+    "coremain/www/log1.html": "dad7ba8db1bb73e65e6dbe01fe76e8aa20ad55e8b48348be5c42685c2fd9af06",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s5-browser-check.mjs": "282a8895cdac7d00d25ab6cf22691c2fc6981c0cbab786b32cfd1675d40065e9",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s6-native-proof.mjs": "8552a8aa3d7b33436a916fce04cc52fd20fe3d2398a413fa0240cb0cf3572282",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s6-go-legacy-proof.mjs": "3d553bb8dd3cd02078d83f5b29238ba54b3f125f1d7ae18f5f197eb5c0cb9ccc",
+    "rust/native-host/src/external_ui.rs": "8b0a4a6de7bdc2989ba04f6d7cbf6c09ac95845ff7085703260766a71e78cc62",
+    "rust/native-host/tests/slice6_management_http.rs": "26ad5ca4c6249dda18ce68ccf87a3d90a2a4f9472d773df5db83f45dfc19696d",
+    "webui-log/src/components/RulesManager.vue": "08ce9debf562ee42be01e5ed120483d5990d7e63a486977cffc3510141922e9d",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/cumulative-capability-retention.mjs": "f8ee39f4396bdad0e1d6a32c4c7f40d9e77dacc963fcf1512c248a99a80082d6"
+  },
+  "remote_match": true
+}

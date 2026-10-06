@@ -1,5 +1,6 @@
+import { capabilityFetch } from './runtimeCapabilities.js'
 async function request(url, options = {}) {
-  const response = await fetch(url, options)
+  const response = await capabilityFetch(url, options)
   if (!response.ok) {
     let message = `HTTP ${response.status} ${response.statusText}`
     try {

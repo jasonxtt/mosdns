@@ -1,0 +1,20 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 8.95s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-d7fe384451f80feb)
+
+running 10 tests
+test transaction::tests::crash_writer_child ... ignored, subprocess probe, invoked by SIGKILL recovery test
+test transaction::tests::durable_marker_recovers_new_state_even_if_canonical_files_are_torn ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-journal-startup-38356/webinfo/audit_settings.json)
+test transaction::tests::host_startup_recovers_before_compile_and_keeps_writer_owned_by_control ... ok
+test transaction::tests::precommit_external_edit_conflict_preserves_external_bytes_after_restart ... ok
+test transaction::tests::failure_at_each_filesystem_boundary_is_restart_recoverable ... ok
+test transaction::tests::state_directory_symlink_cannot_write_outside_root ... ok
+test transaction::tests::uncommitted_replacement_recovers_every_original_file ... ok
+test transaction::tests::writer_lock_child ... ignored, subprocess probe, invoked by writer-lock ownership test
+test transaction::tests::writer_lock_refuses_an_independent_process_and_releases_on_drop ... ok
+real SIGKILL/restart boundaries proved: 37
+test transaction::tests::sigkill_at_every_filesystem_boundary_recovers_whole_generation ... ok
+
+test result: ok. 8 passed; 0 failed; 2 ignored; 0 measured; 102 filtered out; finished in 0.24s
+

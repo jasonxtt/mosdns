@@ -1,0 +1,25 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.76s
+     Running tests/special_groups_whole_chain.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_whole_chain-14bd8f1c3f5532ca)
+
+running 1 test
+test group_cache_supplier_survives_shutdown_restart_without_new_attempt ... FAILED
+
+failures:
+
+---- group_cache_supplier_survives_shutdown_restart_without_new_attempt stdout ----
+cache startup /tmp/special-groups-whole-chain-215273-0/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+
+thread 'group_cache_supplier_survives_shutdown_restart_without_new_attempt' (215274) panicked at native-host/tests/special_groups_whole_chain.rs:590:13:
+assertion `left == right` failed
+  left: None
+ right: Some("persisted_supplier")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    group_cache_supplier_survives_shutdown_restart_without_new_attempt
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_whole_chain`

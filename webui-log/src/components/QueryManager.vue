@@ -1,4 +1,6 @@
 <script setup>
+import CapabilityBoundary from './CapabilityBoundary.vue'
+import { capabilityState, supportsOperation, operationReason } from '../api/runtimeCapabilities'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getJSON, postJSON, putJSON } from '../api/http'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
@@ -450,6 +452,7 @@ function processDiagnosticLogs(allLogs) {
 }
 
 async function loadAliases() {
+  if (!supportsOperation('client.aliases')) return
   try {
     const data = await getJSON('/plugins/clientname')
     clientAliases.value = normalizeAliasMap(data)
@@ -459,6 +462,7 @@ async function loadAliases() {
 }
 
 async function loadSpecialGroups() {
+  if (!supportsOperation('groups.read')) return
   try {
     const data = await getJSON('/api/v1/special-groups')
     specialGroups.value = Array.isArray(data) ? data : []
@@ -483,6 +487,7 @@ function syncAliasRowsFromMap(baseMap = clientAliases.value, knownIPs = []) {
 }
 
 async function openAliasManager() {
+  if (!supportsOperation('client.aliases')) return
   aliasModalOpen.value = true
   aliasLoading.value = true
   manualAliasIp.value = ''
@@ -507,6 +512,7 @@ function closeAliasManager() {
 }
 
 async function saveAliasesFromRows(showMessage = true) {
+  if (!supportsOperation('client.aliases')) return
   aliasSaving.value = true
   try {
     const nextMap = {}
@@ -570,6 +576,7 @@ function parseJsonFile(file) {
 }
 
 async function onImportAliases(event) {
+  if (!supportsOperation('client.aliases')) return
   const file = event?.target?.files?.[0]
   if (!file) {
     return
@@ -596,6 +603,7 @@ async function onImportAliases(event) {
 }
 
 async function exportAliases() {
+  if (!supportsOperation('client.aliases')) return
   try {
     const latest = await getJSON('/plugins/clientname')
     const payload = normalizeAliasMap(latest)
@@ -614,6 +622,7 @@ async function exportAliases() {
 }
 
 async function loadLogs(page = 1, append = false) {
+  if (!supportsOperation('audit.read')) return
   loading.value = true
   resetMessages()
   const { query: rawQuery, exact } = parseSearchKeyword(searchInput.value)
@@ -634,7 +643,7 @@ async function loadLogs(page = 1, append = false) {
       params.set('q', query)
       params.set('exact', String(exact))
     }
-    const data = await getJSON(`/api/v2/audit/logs?${params.toString()}`)
+    const data = await getJSON(`/api/${capabilityState.value?.kind === 'native' && capabilityState.value.endpoints.audit_v2 !== true ? 'v1' : 'v2'}/audit/logs?${params.toString()}`)
     const nextLogs = Array.isArray(data?.logs) ? data.logs : []
     pagination.value = data?.pagination || pagination.value
     logs.value = append ? [...logs.value, ...nextLogs] : nextLogs
@@ -663,6 +672,7 @@ function loadMoreLogs() {
 }
 
 async function startCapture() {
+  if (!supportsOperation('capture.logs')) return
   const seconds = Math.max(1, Math.min(600, Number(captureDuration.value || 15)))
   loading.value = true
   resetMessages()
@@ -677,6 +687,7 @@ async function startCapture() {
 }
 
 async function fetchCaptureLogs() {
+  if (!supportsOperation('capture.logs')) return
   loading.value = true
   resetMessages()
   try {
@@ -744,7 +755,7 @@ onBeforeUnmount(() => {
           <p class="muted">支持分页与关键字过滤。输入带双引号表示精确匹配；支持按客户端别名搜索。</p>
         </div>
         <div class="actions">
-          <button class="btn secondary" @click="openAliasManager">客户端别名</button>
+          <CapabilityBoundary operation="client.aliases"><button class="btn secondary" @click="openAliasManager">客户端别名</button></CapabilityBoundary>
         </div>
       </header>
 
@@ -821,13 +832,14 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div class="diagnostic-toolbar">
+      <CapabilityBoundary operation="capture.logs"><div class="diagnostic-toolbar">
         <label>抓取时长(秒)</label>
         <input v-model.number="captureDuration" type="number" min="1" max="600" />
         <button class="btn secondary" :disabled="loading" @click="startCapture">{{ loading ? '处理中...' : '日志抓取' }}</button>
         <button class="btn primary" :disabled="loading" @click="fetchCaptureLogs">{{ loading ? '处理中...' : '获取日志' }}</button>
       </div>
 
+      </CapabilityBoundary>
       <div class="diagnostic-layout">
         <section class="panel sub-panel diagnostic-pane">
           <h4>请求列表</h4>

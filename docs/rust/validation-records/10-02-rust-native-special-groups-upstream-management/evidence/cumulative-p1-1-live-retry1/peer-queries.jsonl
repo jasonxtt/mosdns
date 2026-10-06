@@ -1,0 +1,6 @@
+{"answer": "192.0.2.50", "client": "127.0.0.1:34162", "peer_id": "lower", "qname": "shared.example", "time": "2026-10-03T17:42:20Z", "transport": "udp"}
+{"answer": "192.0.2.51", "client": "127.0.0.1:38234", "peer_id": "higher", "qname": "shared.example", "time": "2026-10-03T17:42:20Z", "transport": "tcp"}
+{"answer": "192.0.2.90", "client": "127.0.0.1:51205", "peer_id": "default", "qname": "exclusive.example", "time": "2026-10-03T17:42:20Z", "transport": "udp"}
+{"answer": "192.0.2.52", "client": "127.0.0.1:35330", "peer_id": "isolated", "qname": "exclusive.example", "time": "2026-10-03T17:42:20Z", "transport": "udp"}
+{"answer": "192.0.2.90", "client": "127.0.0.1:33738", "peer_id": "default", "qname": "no-match.example", "time": "2026-10-03T17:42:20Z", "transport": "udp"}
+{"answer": "192.0.2.55", "client": "127.0.0.1:42666", "peer_id": "lower_v2", "qname": "shared.example", "time": "2026-10-03T17:42:20Z", "transport": "udp"}

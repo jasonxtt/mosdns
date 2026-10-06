@@ -1,0 +1,5 @@
+{
+  "exit": 1,
+  "npm_invoked": false,
+  "output": "file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:8\nif (!version?.trim() || /[\\r\\n]/.test(version)) throw new Error('invalid product version')\n                                                      ^\n\nError: invalid product version\n    at file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:8:55\n    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.19.2\n"
+}

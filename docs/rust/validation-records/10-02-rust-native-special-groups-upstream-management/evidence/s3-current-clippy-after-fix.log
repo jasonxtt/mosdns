@@ -1,0 +1,89 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error: struct `PolicyTransactionGate` is never constructed
+   --> native-host/src/cache.rs:914:19
+    |
+914 | pub(crate) struct PolicyTransactionGate {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `-D dead-code` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+error: method `acquire_policy_transaction_gate` is never used
+   --> native-host/src/cache.rs:928:25
+    |
+927 | impl CacheCatalog {
+    | ----------------- method in this implementation
+928 |     pub(crate) async fn acquire_policy_transaction_gate(&self) -> PolicyTransactionGate {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: field `store_io_gate` is never read
+  --> native-host/src/runtime_snapshot.rs:75:5
+   |
+67 | struct Control {
+   |        ------- field in this struct
+...
+75 |     store_io_gate: Arc<tokio::sync::Semaphore>,
+   |     ^^^^^^^^^^^^^
+
+error: function `wait_for_shutdown` is never used
+   --> native-host/src/runtime_snapshot.rs:101:10
+    |
+101 | async fn wait_for_shutdown(token: Option<mosdns_upstream_core::TransportCancellation>) {
+    |          ^^^^^^^^^^^^^^^^^
+
+error: enum `ApplyFailure` is never used
+   --> native-host/src/runtime_snapshot.rs:145:17
+    |
+145 | pub(crate) enum ApplyFailure {
+    |                 ^^^^^^^^^^^^
+
+error: multiple associated items are never used
+   --> native-host/src/runtime_snapshot.rs:264:19
+    |
+219 | impl RuntimeControl {
+    | ------------------- associated items in this implementation
+...
+264 |     pub(crate) fn compile_managed_candidate(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+305 |     pub(crate) async fn with_managed_store<T, F>(
+    |                         ^^^^^^^^^^^^^^^^^^
+...
+351 |     pub(crate) fn pause_admission(&self) -> Result<(), AssemblyError> {
+    |                   ^^^^^^^^^^^^^^^
+...
+361 |     pub(crate) fn resume_admission(&self) {
+    |                   ^^^^^^^^^^^^^^^^
+...
+395 |     async fn wait_management_drain(&self) {
+    |              ^^^^^^^^^^^^^^^^^^^^^
+...
+653 |     fn shutdown_token(&self) -> Option<mosdns_upstream_core::TransportCancellation> {
+    |        ^^^^^^^^^^^^^^
+...
+657 |     fn shutdown_requested(&self) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^
+...
+662 |     async fn abort_precommit(
+    |              ^^^^^^^^^^^^^^^
+...
+686 |     fn map_transaction_error(error: crate::transaction::TransactionError) -> ApplyFailure {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+...
+700 |     pub(crate) async fn apply_candidate(
+    |                         ^^^^^^^^^^^^^^^
+
+error: methods `persistence` and `into_parts` are never used
+   --> native-host/src/transaction.rs:163:19
+    |
+152 | impl CompiledCandidate {
+    | ---------------------- methods in this implementation
+...
+163 |     pub(crate) fn persistence(&self) -> &CandidatePersistence {
+    |                   ^^^^^^^^^^^
+...
+166 |     pub(crate) fn into_parts(mut self) -> (crate::config::CompiledConfig, CandidatePersistence) {
+    |                   ^^^^^^^^^^
+
+error: could not compile `mosdns-native-host` (lib) due to 7 previous errors
+warning: build failed, waiting for other jobs to finish...

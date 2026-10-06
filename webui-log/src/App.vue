@@ -1,4 +1,5 @@
 <script setup>
+import { capabilityState, getRuntimeCapabilities, supportsOperation, operationReason, retryRuntimeCapabilities } from './api/runtimeCapabilities'
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, postJSON } from './api/http'
 import ConfirmBubbleHost from './components/ConfirmBubbleHost.vue'
@@ -115,6 +116,7 @@ function triggerGlobalRefresh() {
 }
 
 async function triggerOverviewReset() {
+  if (!supportsOperation('system.restart')) return
   if (overviewResetting.value) {
     return
   }
@@ -194,6 +196,7 @@ function handleTopNoticeEvent(event) {
 }
 
 async function initializePanelBackground() {
+  if (!supportsOperation('appearance.server')) return
   try {
     const settings = await getJSON('/api/v1/appearance/panel-background')
     await previewPanelBackground(settings)
@@ -203,6 +206,7 @@ async function initializePanelBackground() {
 }
 
 async function initializeTextColors() {
+  if (!supportsOperation('appearance.server')) return
   try {
     const settings = await getJSON('/api/v1/appearance/text-color')
     const normalized = normalizeTextColorSettings(settings || {})
@@ -215,6 +219,7 @@ async function initializeTextColors() {
 }
 
 async function initializeButtonColors() {
+  if (!supportsOperation('appearance.server')) return
   try {
     const settings = await getJSON('/api/v1/appearance/button-color')
     const normalized = normalizeButtonColorSettings(settings || {})
@@ -226,11 +231,18 @@ async function initializeButtonColors() {
   }
 }
 
-onMounted(() => {
-  initializeAppearance()
+function initializeServerAppearance() {
+  if (supportsOperation('system.health')) getJSON('/api/v1/system/health').catch(() => {})
   initializePanelBackground()
   initializeTextColors()
   initializeButtonColors()
+}
+
+onMounted(async () => {
+  initializeAppearance()
+  try { await getRuntimeCapabilities() } catch { /* Keep retryable discovery visible and optional children unmounted. */ }
+  initializeServerAppearance()
+  window.addEventListener('mosdns-capabilities-ready', initializeServerAppearance)
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   window.addEventListener('mosdns-top-notice', handleTopNoticeEvent)
@@ -239,6 +251,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mosdns-capabilities-ready', initializeServerAppearance)
   stopAutoRefresh()
   clearTopNotice()
   window.removeEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
@@ -250,6 +263,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell">
+    <div v-if="capabilityState.status !== 'ready'" role="alert" class="panel">
+      {{ capabilityState.status === 'pending' ? '正在读取运行时能力' : capabilityState.error }}
+      <button v-if="capabilityState.status === 'error'" class="btn secondary" @click="retryRuntimeCapabilities().catch(() => {})">重试能力发现</button>
+    </div>
+    <p v-if="capabilityState.value?.kind === 'native'" class="muted" role="note">Rust · {{ supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version') }} · 进程 / Go 指标：{{ operationReason('metrics.process') }}</p>
+    <p v-if="!supportsOperation('system.restart')" class="muted" role="note">重置/重启：{{ operationReason('system.restart') }}</p>
     <div class="top-strip">
       <div class="top-strip-head">
         <header class="hero compact">
@@ -260,7 +279,7 @@ onBeforeUnmount(() => {
             v-if="activeMainTab === 'overview'"
             class="legacy-main-btn reset-inline-btn"
             type="button"
-            :disabled="overviewResetting"
+            :disabled="overviewResetting || !supportsOperation('system.restart')"
             title="清空概览页全部统计并重启 mosdns"
             @click="triggerOverviewReset"
           >
@@ -297,7 +316,7 @@ onBeforeUnmount(() => {
             v-if="activeMainTab === 'overview'"
             class="legacy-main-btn reset-inline-btn"
             type="button"
-            :disabled="overviewResetting"
+            :disabled="overviewResetting || !supportsOperation('system.restart')"
             title="清空概览页全部统计并重启 mosdns"
             @click="triggerOverviewReset"
           >
@@ -315,7 +334,7 @@ onBeforeUnmount(() => {
       </nav>
     </div>
 
-    <main class="main-body">
+    <main v-if="capabilityState.value" class="main-body">
       <section v-if="activeMainTab === 'overview'" class="page-shell">
         <OverviewManager />
       </section>

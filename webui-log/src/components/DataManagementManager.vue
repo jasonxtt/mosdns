@@ -1,4 +1,7 @@
 <script setup>
+import CapabilityBoundary from './CapabilityBoundary.vue'
+import { capabilityState, supportsOperation, operationReason, switchTagForType } from '../api/runtimeCapabilities'
+import { capabilityFetch } from '../api/runtimeCapabilities'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
 import DataCachePanel from './data/DataCachePanel.vue'
@@ -256,15 +259,21 @@ function buildCacheRows(metricsText) {
 }
 
 async function loadCoreMode() {
+  if (!supportsOperation('switches.manage')) return
+  const tag = switchTagForType(3)
+  if (!tag) {
+    coreMode.value = ''
+    return
+  }
   try {
-    coreMode.value = String(await getText('/plugins/switch3/show') || '').trim().toUpperCase()
+    coreMode.value = String(await getText(`/plugins/${encodeURIComponent(tag)}/show`) || '').trim().toUpperCase()
   } catch {
     coreMode.value = ''
   }
 }
 
 async function requestResponse(url, options = {}) {
-  const response = await fetch(url, options)
+  const response = await capabilityFetch(url, options)
   if (!response.ok) {
     let message = `HTTP ${response.status} ${response.statusText}`
     try {
@@ -292,17 +301,18 @@ async function postEmpty(url) {
 }
 
 async function refreshCacheStats(showMessage = false) {
+  if (!supportsOperation('cache.inventory')) return
   cacheRefreshing.value = true
   cacheLoadError.value = ''
   try {
-    const inventory = await loadCacheInventory(getJSON)
+    const inventory = await loadCacheInventory(getJSON, {native:capabilityState.value?.kind === 'native'})
     nativeCacheInventory.value = inventory
     if (inventory === null) {
       const groupsRes = await getJSON('/api/v1/special-groups').catch(() => [])
       specialGroups.value = Array.isArray(groupsRes) ? groupsRes : []
       await loadCoreMode()
     }
-    const metricsText = await getText('/metrics')
+    const metricsText = supportsOperation('metrics.cache') ? await getText('/metrics') : ''
     buildCacheRows(metricsText)
     if (showMessage) {
       setSuccess('缓存统计已刷新')
@@ -318,6 +328,7 @@ async function refreshCacheStats(showMessage = false) {
 }
 
 async function clearSingleCache(cacheTag, cacheName) {
+  if (!supportsOperation('cache.manage')) return
   if (!(await openConfirm(`确定要清空缓存“${cacheName}”吗？`, { tone: 'danger' }))) {
     return
   }
@@ -334,6 +345,7 @@ async function clearSingleCache(cacheTag, cacheName) {
 }
 
 async function clearAllCaches() {
+  if (!supportsOperation('cache.manage')) return
   if (!(await openConfirm(`将依次清空 ${visibleCacheConfig.value.length} 个缓存实例，此操作不可恢复。`, { tone: 'danger' }))) {
     return
   }
@@ -366,6 +378,7 @@ function countLines(text) {
 }
 
 async function fetchListCount(endpoint) {
+  if (!supportsOperation('lists.remembered')) return
   const response = await requestResponse(`${endpoint}?limit=1`)
   const totalCount = response.headers.get('X-Total-Count')
   if (totalCount !== null && totalCount !== '') {
@@ -376,6 +389,7 @@ async function fetchListCount(endpoint) {
 }
 
 async function refreshListStats(showMessage = false) {
+  if (!supportsOperation('lists.remembered')) return
   listStatsRefreshing.value = true
   try {
     const next = listStats.value.map((item) => ({ ...item, count: null, error: '' }))
@@ -512,6 +526,7 @@ async function fetchDataView(append = false) {
 }
 
 function openDataViewForList(row) {
+  if (!supportsOperation('lists.remembered')) return
   if (!row || row.count === null || row.error) {
     return
   }
@@ -634,6 +649,7 @@ function ensureRequeryPolling() {
 }
 
 async function refreshRequeryStatusAndConfig(showMessage = false) {
+  if (!supportsOperation('cache.requery')) return
   requeryStatusRefreshing.value = true
   requeryLoadError.value = ''
   try {
@@ -682,6 +698,7 @@ async function refreshRequeryStatusAndConfig(showMessage = false) {
 }
 
 async function refreshSourceFileCounts(showMessage = false) {
+  if (!supportsOperation('cache.requery')) return
   if (!requeryAvailable.value) {
     return
   }
@@ -706,6 +723,7 @@ async function refreshSourceFileCounts(showMessage = false) {
 }
 
 async function triggerRequery() {
+  if (!supportsOperation('cache.requery')) return
   if (!(await openConfirm('将启动一次全新刷新任务，并完整执行所有步骤，可能需要一些时间。'))) {
     return
   }
@@ -725,6 +743,7 @@ async function triggerRequery() {
 }
 
 async function cancelRequery() {
+  if (!supportsOperation('cache.requery')) return
   if (!(await openConfirm('确定要取消当前正在执行的刷新任务吗？', { tone: 'danger' }))) {
     return
   }
@@ -741,6 +760,7 @@ async function cancelRequery() {
 }
 
 async function updateSchedulerConfig() {
+  if (!supportsOperation('cache.requery')) return
   if (!requeryAvailable.value) {
     return
   }
@@ -775,6 +795,7 @@ async function updateSchedulerConfig() {
 }
 
 function scheduleSchedulerConfigUpdate() {
+  if (!supportsOperation('cache.requery')) return
   if (schedulerTimerId) {
     window.clearTimeout(schedulerTimerId)
   }
@@ -784,6 +805,7 @@ function scheduleSchedulerConfigUpdate() {
 }
 
 async function saveAllShuntRules() {
+  if (!supportsOperation('lists.remembered')) return
   if (!(await openConfirm('确定要保存所有分流规则吗？'))) {
     return
   }
@@ -806,6 +828,7 @@ async function saveAllShuntRules() {
 }
 
 async function clearAllShuntRules() {
+  if (!supportsOperation('lists.remembered')) return
   if (!(await openConfirm('确定要清空所有动态生成的分流规则吗？此操作不可撤销。', { tone: 'danger' }))) {
     return
   }
@@ -865,7 +888,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="data-panel">
-    <DataCachePanel
+    <CapabilityBoundary operation="cache.manage"><DataCachePanel
       v-if="showCachePanel"
       :cache-clearing-all="cacheClearingAll"
       :cache-clearing-by-tag="cacheClearingByTag"
@@ -874,20 +897,20 @@ onBeforeUnmount(() => {
       @clear-all="clearAllCaches"
       @open-cache="openDataViewForCache"
       @clear-cache="clearCacheRow"
-    />
+    /></CapabilityBoundary>
 
     <div
       v-if="showListStatsPanel || showRequeryPanel"
       :class="showAllPanels ? 'data-inline-row' : 'data-inline-row data-inline-row-single'"
     >
-    <DataListStatsPanel
+    <CapabilityBoundary operation="lists.remembered"><DataListStatsPanel
       v-if="showListStatsPanel"
       :last-run-domain-count-text="lastRunDomainCountText"
       :list-stats="listStats"
       @open-list="openDataViewForList"
-    />
+    /></CapabilityBoundary>
 
-    <DataRequeryPanel
+    <CapabilityBoundary operation="cache.requery"><DataRequeryPanel
       v-if="showRequeryPanel"
       :is-requery-running="isRequeryRunning"
       :last-run-error-text="lastRunErrorText"
@@ -905,7 +928,7 @@ onBeforeUnmount(() => {
       @schedule-scheduler-update="scheduleSchedulerConfigUpdate"
       @save-rules="saveAllShuntRules"
       @clear-rules="clearAllShuntRules"
-    />
+    /></CapabilityBoundary>
     </div>
 
     <DataViewModal

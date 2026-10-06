@@ -1,0 +1,12 @@
+[
+  {
+    "step": "fmt",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-fmt-retry1.log"
+  },
+  {
+    "step": "clippy",
+    "exit_code": 101,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-clippy-retry1.log"
+  }
+]

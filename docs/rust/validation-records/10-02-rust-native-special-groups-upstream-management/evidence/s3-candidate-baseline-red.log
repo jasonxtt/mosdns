@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 9.57s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-d7fe384451f80feb)
+
+running 1 test
+test transaction::tests::external_edit_after_candidate_compile_is_not_accepted_as_backup_baseline ... FAILED
+
+failures:
+
+---- transaction::tests::external_edit_after_candidate_compile_is_not_accepted_as_backup_baseline stdout ----
+
+thread 'transaction::tests::external_edit_after_candidate_compile_is_not_accepted_as_backup_baseline' (41651) panicked at native-host/src/transaction.rs:662:9:
+compile-to-prepare changes must conflict
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    transaction::tests::external_edit_after_candidate_compile_is_not_accepted_as_backup_baseline
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 115 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

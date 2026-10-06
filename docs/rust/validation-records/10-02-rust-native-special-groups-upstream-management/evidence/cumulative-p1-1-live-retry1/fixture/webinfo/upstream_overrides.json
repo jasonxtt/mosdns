@@ -1,0 +1,1 @@
+{"special_upstream_50":[{"addr":"udp://127.0.0.1:25559","enabled":true,"protocol":"udp","tag":"lower_supplier_v2"}],"special_upstream_51":[{"addr":"tcp://127.0.0.1:25557","enabled":true,"protocol":"tcp","tag":"higher_supplier"}],"special_upstream_52":[{"addr":"udp://127.0.0.1:25558","enabled":true,"protocol":"udp","tag":"isolated_supplier"}]}

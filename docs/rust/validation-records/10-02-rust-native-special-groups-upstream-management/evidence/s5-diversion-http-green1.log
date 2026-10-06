@@ -1,0 +1,11 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.04s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-ffd12075785eba3b)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-141864-0/webinfo/audit_settings.json)
+cache startup /tmp/managed-supervisor-141864-0/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test diversion_catalog_http_uses_single_transaction_for_source_rename ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.02s
+

@@ -1,0 +1,23 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.95s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-120786-0/webinfo/audit_settings.json)
+cache dependency fingerprints old=[None, Some("d984c7b3a0193e6e0bf0a85fae0c67112c0fa160bbd3b566e0f5bdd47e97c9b6"), Some("6c2344e16a6543a4e95ff530ea1426234ea2dbe84c4ac61e7a0a5274a3fcbc0f"), None] new=[None, Some("d984c7b3a0193e6e0bf0a85fae0c67112c0fa160bbd3b566e0f5bdd47e97c9b6"), Some("de6fe651af9cf00b63c7548df4851154027fa1780f16b68f353b8116d1a5b62c"), None]
+
+thread 'runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners' (120787) panicked at native-host/src/runtime_snapshot.rs:1482:13:
+assertion `left == right` failed: display rename and listener port do not change wire cache policy: cache_all
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners ... FAILED
+
+failures:
+
+failures:
+    runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 138 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

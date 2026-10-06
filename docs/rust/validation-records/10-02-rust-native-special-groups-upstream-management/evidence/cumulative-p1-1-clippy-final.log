@@ -1,0 +1,20 @@
+command: cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking mosdns-cache-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/cache-core)
+error: this method could have a `#[must_use]` attribute
+   --> cache-core/src/lib.rs:316:12
+    |
+316 |     pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&T> {
+    |            ^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#must_use_candidate
+    = note: `-D clippy::must-use-candidate` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::must_use_candidate)]`
+help: add the attribute
+    |
+316 ~     #[must_use] 
+317 ~     pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&T> {
+    |
+
+error: could not compile `mosdns-cache-core` (lib) due to 1 previous error
+
+exit_code=101

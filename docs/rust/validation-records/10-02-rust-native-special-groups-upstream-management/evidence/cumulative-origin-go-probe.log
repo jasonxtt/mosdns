@@ -1,0 +1,20 @@
+[
+  {
+    "entries": 1,
+    "legacy_reader": "PASS",
+    "path": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_50.dump",
+    "unknown_native_extension_entries": 1
+  },
+  {
+    "entries": 1,
+    "legacy_reader": "PASS",
+    "path": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_51.dump",
+    "unknown_native_extension_entries": 1
+  },
+  {
+    "entries": 1,
+    "legacy_reader": "PASS",
+    "path": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_52.dump",
+    "unknown_native_extension_entries": 1
+  }
+]

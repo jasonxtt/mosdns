@@ -1,0 +1,32 @@
+[
+  {
+    "step": "fmt",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-fmt-restart-final1.log"
+  },
+  {
+    "step": "clippy",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-clippy-restart-final1.log"
+  },
+  {
+    "step": "native-host",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-native-host-restart-final1.log"
+  },
+  {
+    "step": "workspace-libs",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-workspace-libs-restart-final1.log"
+  },
+  {
+    "step": "workspace-full",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-workspace-full-restart-final1.log"
+  },
+  {
+    "step": "native-build",
+    "exit_code": 0,
+    "log": "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-native-build-restart-final1.log"
+  }
+]

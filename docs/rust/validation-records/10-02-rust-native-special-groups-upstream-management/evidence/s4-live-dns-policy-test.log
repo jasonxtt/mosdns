@@ -1,0 +1,12 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-120412-0/webinfo/audit_settings.json)
+cache startup /tmp/native-managed-cache-120412-0/cache/cache_all.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/native-managed-cache-120412-0/cache/sibling.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/native-managed-cache-120412-0/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+test runtime_snapshot::admission_tests::managed_rule_edit_changes_real_dns_and_preserves_disjoint_warm_answer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 138 filtered out; finished in 0.01s
+

@@ -1,0 +1,23 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.26s
+     Running tests/native_hosting.rs (rust/target/debug/deps/native_hosting-baa122421773ca19)
+
+running 1 test
+mosdns: $.plugins[2].args.enable_audit: required field is missing
+test basename_config_serves_its_external_mount_in_actual_process ... FAILED
+
+failures:
+
+---- basename_config_serves_its_external_mount_in_actual_process stdout ----
+
+thread 'basename_config_serves_its_external_mount_in_actual_process' (287283) panicked at native-host/tests/native_hosting.rs:45:5:
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    basename_config_serves_its_external_mount_in_actual_process
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test native_hosting`

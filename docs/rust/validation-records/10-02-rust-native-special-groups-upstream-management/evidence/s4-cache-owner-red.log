@@ -1,0 +1,21 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0277]: `Result<PreparedSnapshot, AssemblyError>` is not a future
+    --> native-host/src/runtime_snapshot.rs:1151:38
+     |
+1151 |         let prepared = host.block_on(control.prepare(config)).unwrap();
+     |                             -------- ^^^^^^^^^^^^^^^^^^^^^^^ `Result<PreparedSnapshot, AssemblyError>` is not a future
+     |                             |
+     |                             required by a bound introduced by this call
+     |
+     = help: the trait `Future` is not implemented for `Result<PreparedSnapshot, AssemblyError>`
+note: required by a bound in `HostAssembly::block_on`
+    --> native-host/src/assembly.rs:416:12
+     |
+ 414 |     pub fn block_on<F>(&self, future: F) -> F::Output
+     |            -------- required by a bound in this associated function
+ 415 |     where
+ 416 |         F: Future,
+     |            ^^^^^^ required by this bound in `HostAssembly::block_on`
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `mosdns-native-host` (lib test) due to 1 previous error

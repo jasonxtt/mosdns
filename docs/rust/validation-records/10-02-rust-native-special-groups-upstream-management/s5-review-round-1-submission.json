@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task": ".trellis/tasks/10-02-rust-native-special-groups-upstream-management",
+  "unit": "Slice 5",
+  "round": 1,
+  "base_sha": "b290a6de8e9dedeebb34f339fd36a17d55cd00bc",
+  "head_sha": "63b836b7ba0d0046cbb28763950f206b320cf201",
+  "audit_tree": "d17c3940e79dc1a52104fb9652e099f2fd607010",
+  "reviewer": {
+    "provider": "c2c-web",
+    "url": "https://chatgpt.com/c/6ac058cd-6138-83e8-af54-758358f73006",
+    "title": "Review Rust Native Groups"
+  },
+  "request_file": "docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s5-review-round-1-request.md",
+  "request_sha256": "bc19d247f2f8d7a8b25ad8e52ba073f973f2a5efb543cf37297362ae6ebea339",
+  "source_manifest": "docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-p1-1-source-manifest.json",
+  "source_manifest_sha256": "c8c7ccee51735ee298497c60a36dd3077c7e8490802fdbba7d369631e6402d66",
+  "validation": {
+    "native_host": "376 passed / 0 failed / 3 ignored; serial run; ignored subprocess probes invoked by parent tests",
+    "format": "cargo fmt --all -- --check passed",
+    "clippy": "mosdns-native-host all-targets with -D warnings passed",
+    "source_inputs": "140 files including 126 Rust files; local, isolated-host and audit-tree hashes match",
+    "regression": "gateway.yaml plus decoy config.yaml; RED reproduced 400, repaired consecutive HTTP writes and restart passed"
+  },
+  "branch_head_at_preparation": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "index_clean_at_preparation": true,
+  "review_status": "pass",
+  "result_file": "docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s5-review-round-1-result.md",
+  "finding_ids": [
+    "P1-1"
+  ]
+}

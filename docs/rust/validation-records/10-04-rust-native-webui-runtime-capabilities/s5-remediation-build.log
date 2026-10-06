@@ -1,0 +1,38 @@
+
+> mosdns-log-vue@0.1.0 build
+> vite build
+
+vite v7.3.2 building client environment for production...
+transforming...
+✓ 621 modules transformed.
+rendering chunks...
+computing gzip size...
+../coremain/www/assets/vue-log/index.html    0.37 kB │ gzip:   0.25 kB
+../coremain/www/assets/vue-log/app.css     101.73 kB │ gzip:  17.96 kB
+../coremain/www/assets/vue-log/app.js      815.99 kB │ gzip: 266.05 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.36s
+
+> mosdns-log-vue@0.1.0 build:log1
+> vite build --config vite.log1.config.js
+
+vite v7.3.2 building client environment for production...
+transforming...
+✓ 614 modules transformed.
+rendering chunks...
+computing gzip size...
+../coremain/www/assets/vue-log1/log1.index.html    0.36 kB │ gzip:   0.25 kB
+../coremain/www/assets/vue-log1/app.css          125.26 kB │ gzip:  21.17 kB
+../coremain/www/assets/vue-log1/app.js           817.45 kB │ gzip: 266.24 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.40s
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.53s

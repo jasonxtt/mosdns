@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.41s
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-51fe126f6242f7ca)
+
+running 1 test
+test capability_matrix_is_complete_and_matches_host_eligibility ... FAILED
+
+failures:
+
+---- capability_matrix_is_complete_and_matches_host_eligibility stdout ----
+
+thread 'capability_matrix_is_complete_and_matches_host_eligibility' (253988) panicked at native-host/tests/slice6_management_http.rs:1098:60:
+complete operations
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    capability_matrix_is_complete_and_matches_host_eligibility
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test slice6_management_http`

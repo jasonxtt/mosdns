@@ -1,0 +1,23 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: unused import: `super::*`
+   --> native-host/src/runtime_snapshot.rs:444:9
+    |
+444 |     use super::*;
+    |         ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: `ExchangeResponse` doesn't implement `Debug`
+   --> native-host/src/runtime_snapshot.rs:519:166
+    |
+519 | ...nup failures: {result:?}");
+    |                  ^^^^^^^^^^ `ExchangeResponse` cannot be formatted using `{:?}` because it doesn't implement `Debug`
+    |
+    = help: the trait `Debug` is not implemented for `ExchangeResponse`
+help: the trait `Debug` is implemented for `Result<T, E>`
+   --> /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/result.rs:552:15
+    = note: required for `Result<ExchangeResponse, UpstreamError>` to implement `Debug`
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `mosdns-native-host` (lib test) generated 1 warning
+error: could not compile `mosdns-native-host` (lib test) due to 1 previous error; 1 warning emitted

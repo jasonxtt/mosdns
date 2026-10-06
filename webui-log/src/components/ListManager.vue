@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
+import { getRuntimeCapabilities, supportsOperation, operationReason } from '../api/runtimeCapabilities'
+import { loadNativeLocalProfiles } from '../api/nativeManagement'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 
 const loading = ref(false)
@@ -10,12 +12,18 @@ const selectedTag = ref('')
 const content = ref('')
 const statusText = ref('未加载')
 const specialGroups = ref([])
+const runtimeCapabilities = ref(null)
 const listDrafts = ref({})
 // Tags whose POST returned 200 but whose canonical `/show` reread failed. The
 // server mutation may have happened, but the UI does not know which rules were
 // accepted, so those tags keep their local draft and stay out of the
 // confirmed-saved count until a reread succeeds.
 const uncertainTags = ref([])
+
+const isNative = computed(() => runtimeCapabilities.value?.kind === 'native')
+const canSaveList = computed(() => supportsOperation('rules.local.manage'))
+
+const nativeFixedProfiles = ref([])
 
 const fixedProfiles = [
   { tag: 'whitelist', name: '白名单' },
@@ -38,13 +46,22 @@ const profiles = computed(() => {
       tag: g.manual_plugin_tag || `special_manual_${g.slot}`,
       name: g.name || `专属分流组 ${g.slot}`
     }))
-  return [...fixedProfiles, ...dynamic]
+  if (!runtimeCapabilities.value) return []
+  return isNative.value ? (runtimeCapabilities.value?.special_groups?.enabled ? dynamic : nativeFixedProfiles.value) : [...fixedProfiles, ...dynamic]
 })
 
 const selectedHintText = computed(() => {
   const tag = selectedTag.value
   if (!tag) {
     return ''
+  }
+
+  if (isNative.value) {
+    if (!runtimeCapabilities.value?.special_groups?.enabled) return '原生本地文件规则；按每行一个规则编辑，保存后由后端验证。'
+    const profile = profiles.value.find((item) => item.tag === tag)
+    return profile
+      ? `此列表绑定到“${profile.name}”专属分流组。按每行一个规则编辑；规则由原生运行时验证后保存。`
+      : ''
   }
 
   switch (tag) {
@@ -174,6 +191,12 @@ function updateStatus(extra = '', tag = selectedTag.value) {
 async function loadProfiles() {
   resetMessage()
   try {
+    if (isNative.value && !runtimeCapabilities.value?.special_groups?.enabled) {
+      specialGroups.value = []
+      if (supportsOperation('rules.local.read')) nativeFixedProfiles.value = await loadNativeLocalProfiles(fixedProfiles, getText)
+      return
+    }
+    if (!supportsOperation('groups.read')) return
     const groups = await getJSON('/api/v1/special-groups')
     specialGroups.value = Array.isArray(groups) ? groups : []
   } catch (error) {
@@ -244,6 +267,10 @@ async function loadList(tag, options = {}) {
 }
 
 async function saveList() {
+  if (!canSaveList.value) {
+    setError('当前原生运行时不支持保存手工规则')
+    return
+  }
   if (!selectedTag.value) {
     setError('请先选择列表')
     return
@@ -388,6 +415,12 @@ function onEditorInput() {
 }
 
 async function init() {
+  try {
+    runtimeCapabilities.value = await getRuntimeCapabilities()
+  } catch (error) {
+    setError(`读取运行时能力失败: ${error.message}`)
+    return
+  }
   await loadProfiles()
   if (!selectedTag.value && profiles.value.length > 0) {
     await loadList(profiles.value[0].tag)
@@ -413,6 +446,9 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="list-page">
+    <p v-if="isNative && profiles.length === 0" class="muted" role="note">
+      当前原生运行时未启用专属组本地规则管理。
+    </p>
     <div class="list-layout">
       <aside class="list-sidebar">
         <button
@@ -433,11 +469,13 @@ onBeforeUnmount(() => {
       </aside>
 
       <main class="list-main">
+        <p v-if="!canSaveList" class="muted" role="note" data-operation-reason="rules.local.manage">{{ operationReason('rules.local.manage') }}</p>
         <textarea
           v-model="content"
           class="list-editor"
           spellcheck="false"
           :disabled="loading"
+          :readonly="!canSaveList"
           @input="onEditorInput"
           placeholder="每行一个条目"
         />
@@ -446,7 +484,7 @@ onBeforeUnmount(() => {
             <span v-if="selectedHintText" class="list-hint-inline">{{ selectedHintText }}</span>
             <span class="muted list-status-inline">{{ statusText }}</span>
           </div>
-          <button class="btn secondary save-list-btn" :disabled="saving || loading" @click="saveList">
+          <button class="btn secondary save-list-btn" :disabled="saving || loading || !canSaveList" @click="saveList">
             {{ saving ? '保存中...' : '保存全部改动' }}
           </button>
         </div>

@@ -1,0 +1,35 @@
+{
+  "base_sha": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "head_sha": "1495c508fe5ead3dc2ba9fa6c7c435a0a220cf1e",
+  "tree_sha": "b06ced93248124644b89a5a52bc420b15ee6377b",
+  "stage_pass_head": "3eaeabdd75f74c4eb86db96b46f466afbe4aa3be",
+  "checks": {
+    "s7-source-manifest.json": {
+      "files": 527,
+      "mismatches": 0,
+      "manifest_file_sha256": "cd32bcce468bd898c2d98e2023b74e51f5280af3068b6b5f244572ad968256c2"
+    },
+    "s7-evidence-manifest.json": {
+      "files": 38,
+      "mismatches": 0,
+      "manifest_file_sha256": "113a4d870fa4b111b06f894a2ca6cbe60986ee17e29fe0e6c61ef144c89e2274"
+    }
+  },
+  "real_head": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "real_index_tree": "65b21ecc1a3e3fe14f50da3d49e0cb153c1d53ac",
+  "state": "explicit_fail_recorded",
+  "provider": "c2c-web",
+  "binding_source": "c2c-reviewer",
+  "reviewer_url": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ac058cd-6138-83e8-af54-758358f73006",
+  "reviewer_title": "Review Rust Native Groups",
+  "request_bytes": 923,
+  "request_sha256": "dde665ea2f081d19c32ec3efe2312cddf3f1b04252f00ae5e0c4560bad3b6252",
+  "scope": "separate cumulative gate after authorized S1-S7 run completion",
+  "sent_at_utc": "2026-10-03T16:46:39.234050+00:00",
+  "result": {
+    "status": "fail",
+    "open_findings": [
+      "P1-1"
+    ]
+  }
+}

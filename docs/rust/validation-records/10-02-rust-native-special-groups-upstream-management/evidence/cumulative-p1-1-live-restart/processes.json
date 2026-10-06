@@ -1,0 +1,112 @@
+[
+  {
+    "pid": 220942,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25555",
+      "--answer",
+      "192.0.2.90",
+      "--peer-id",
+      "default",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 220943,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25556",
+      "--answer",
+      "192.0.2.50",
+      "--peer-id",
+      "lower",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 220944,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "tcp",
+      "--port",
+      "25557",
+      "--answer",
+      "192.0.2.51",
+      "--peer-id",
+      "higher",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 220945,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25558",
+      "--answer",
+      "192.0.2.52",
+      "--peer-id",
+      "isolated",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 220946,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25559",
+      "--answer",
+      "192.0.2.55",
+      "--peer-id",
+      "lower_v2",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 220947,
+    "returncode": 0,
+    "args": [
+      "/root/mosdns-rust-special-groups-20261003/target-candidate/debug/mosdns",
+      "start",
+      "-c",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/config.yaml"
+    ]
+  },
+  {
+    "pid": 220958,
+    "returncode": 0,
+    "args": [
+      "/root/mosdns-rust-special-groups-20261003/target-candidate/debug/mosdns",
+      "start",
+      "-c",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/config.yaml"
+    ]
+  }
+]

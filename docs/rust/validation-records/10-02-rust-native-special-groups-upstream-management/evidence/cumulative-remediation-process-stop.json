@@ -1,0 +1,37 @@
+[
+  {
+    "pid": 170590,
+    "args": "/root/mosdns-rust-special-groups-20261003/target-candidate/debug/mosdns start -c /root/mosdns-rust-special-groups-20261003/evidence/s6-browser-run/s6-browser-config.yaml ",
+    "cwd": "/root/mosdns-rust-special-groups-20261003/src",
+    "signal": "SIGTERM",
+    "state_after": "absent"
+  },
+  {
+    "pid": 170627,
+    "args": "node /root/mosdns-rust-special-groups-20261003/evidence/s6-browser-run/s6-browser-server.mjs ",
+    "cwd": "/root/mosdns-rust-special-groups-20261003/evidence/s6-browser-run",
+    "signal": "SIGTERM",
+    "state_after": "absent"
+  },
+  {
+    "pid": 169898,
+    "args": "python3 s6-controlled-dns.py serve --port 25455 --answer 198.51.100.42 --log peer-queries.jsonl ",
+    "cwd": "/root/mosdns-rust-special-groups-20261003/evidence/s6-browser-run",
+    "signal": "SIGTERM",
+    "state_after": "absent"
+  },
+  {
+    "pid": 169896,
+    "args": "bash -c cd /root/mosdns-rust-special-groups-20261003/evidence/s6-browser-run && nohup python3 s6-controlled-dns.py serve --port 25455 --answer 198.51.100.42 --log peer-queries.jsonl > peer.stdout.log 2>&1 < /dev/null & echo $! > peer.pid && sleep 1 && cat peer.pid ",
+    "cwd": "/root/mosdns-rust-special-groups-20261003/evidence/s6-browser-run",
+    "signal": "SIGTERM",
+    "state_after": "absent"
+  },
+  {
+    "pid": 157702,
+    "args": "/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81 --exact runtime_snapshot::admission_tests::managed_apply_crash_child --ignored --nocapture ",
+    "cwd": "/root/mosdns-rust-special-groups-20261003/src/rust/native-host",
+    "signal": "SIGKILL",
+    "state_after": "absent"
+  }
+]

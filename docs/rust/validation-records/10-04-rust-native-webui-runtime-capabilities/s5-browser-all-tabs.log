@@ -1,0 +1,18 @@
+{
+  "api": 44135,
+  "dns": 36137,
+  "pid": 260163,
+  "pages": [],
+  "unsupported": [],
+  "errors": [],
+  "status": "FAIL",
+  "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('nav.legacy-main-nav button').nth(7)\n",
+  "cleanup": {
+    "forced": false,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (/root/mosdns-rust-webui-20261004/evidence/s5-all-tabs/runtime/webinfo/audit_settings.json)\n"
+}

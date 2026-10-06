@@ -1,0 +1,317 @@
+TAP version 13
+# Subtest: catalog uses actual ordered tags including empty catalog and permits only explicit fallback
+ok 1 - catalog uses actual ordered tags including empty catalog and permits only explicit fallback
+  ---
+  duration_ms: 3.088449
+  ...
+# Subtest: failures and unknown/malformed schema never become the legacy fake catalog
+ok 2 - failures and unknown/malformed schema never become the legacy fake catalog
+  ---
+  duration_ms: 0.835403
+  ...
+# Subtest: metrics preserve missing values, exact tags, escaped labels and genuine zero
+ok 3 - metrics preserve missing values, exact tags, escaped labels and genuine zero
+  ---
+  duration_ms: 0.540002
+  ...
+# Subtest: partial batch failures retain specific tags and actual successful count
+ok 4 - partial batch failures retain specific tags and actual successful count
+  ---
+  duration_ms: 0.275203
+  ...
+# Subtest: runtime capability discovery caches native response for the page session
+not ok 5 - runtime capability discovery caches native response for the page session
+  ---
+  duration_ms: 5.21644
+  location: '/root/mosdns-rust-webui-20261004/source/webui-log/tests/nativeManagementUi.test.mjs:31:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected ... Lines skipped
+    
+      {
+        endpoints: {
+    ...
+          enabled: true,
+          profile: 'local_text_dns_v1'
+    +   },
+    +   ui_operations: {
+    +     'appearance.server': {
+    +       reason: '当前 Rust 原生运行时尚未实现此操作',
+    +       supported: false
+    +     },
+    +     'audit.capacity': {
+    +       reason: '旧原生后端未声明此能力',
+    +       supported: false
+    +     },
+    +     'audit.control': {
+    +       reason: '旧原生后端未声明此能力',
+    +       supported: false
+    +     },
+    +     'audit.read': {
+    +       reason: '旧原生后端未声明此能力',
+    +       supported: false
+    +     },
+    +     'cache.inventory': {
+    +       reason: '旧原生后端未声明此能力',
+    +       supported: false
+    +     },
+    +     'cache.manage': {
+    +       reason: '旧原生后端未声明此能力',
+    +       supported: false
+    +     },
+    +     'cache.requery': {
+    +       reason: '当前 Rust 原生运行时尚未实现此操作',
+    +       supported: false
+    +     },
+    +     'capture.logs': {
+    +       reason: '当前 Rust 原生运行时尚未实现此操作',
+    +       supported: false
+    +     },
+    +     'client.aliases': {
+    +       reason: '当前 Rust 原生运行时尚未实现此操作',
+    +       supported: false
+    +     },
+    +     'groups.manage': {
+    +       reason: null,
+    +       supported: true
+    +     },
+    +     'groups.read': {
+    +       reason: null,
+    +       supported: true
+    +     },
+    +     'lists.remembered': {
+    ...
+    ...
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    kind: 'native'
+    schema_version: 1
+    runtime: 'rust'
+    special_groups:
+      enabled: true
+      profile: 'local_text_dns_v1'
+    upstream_protocols:
+      0: 'udp'
+      1: 'tcp'
+      2: 'dot'
+      3: 'doh'
+    rule_formats:
+      0: 'local_text'
+    unsupported_features:
+      0: 'remote_download'
+      1: 'auto_update'
+      2: 'quic'
+      3: 'http3'
+      4: 'socks_proxy'
+    endpoints:
+      special_groups:
+        get: true
+        post: true
+        delete: true
+      upstream:
+        tags_get: true
+        config_get: true
+        config_post: true
+      diversion_sources:
+        list_get: true
+        put: true
+        delete: true
+      manual_rules:
+        show_get: true
+        save_get: true
+        post: true
+  actual:
+    kind: 'native'
+    schema_version: 1
+    runtime: 'rust'
+    special_groups:
+      enabled: true
+      profile: 'local_text_dns_v1'
+    upstream_protocols:
+      0: 'udp'
+      1: 'tcp'
+      2: 'dot'
+      3: 'doh'
+    rule_formats:
+      0: 'local_text'
+    unsupported_features:
+      0: 'remote_download'
+      1: 'auto_update'
+      2: 'quic'
+      3: 'http3'
+      4: 'socks_proxy'
+    endpoints:
+      special_groups:
+        get: true
+        post: true
+        delete: true
+      upstream:
+        tags_get: true
+        config_get: true
+        config_post: true
+      diversion_sources:
+        list_get: true
+        put: true
+        delete: true
+      manual_rules:
+        show_get: true
+        save_get: true
+        post: true
+    ui_operations:
+      system.health:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      system.version:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      audit.read:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      audit.control:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      audit.capacity:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      query.rank:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      cache.inventory:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      cache.manage:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      metrics.cache:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      rules.local.read:
+        supported: true
+        reason: ~
+      rules.local.manage:
+        supported: true
+        reason: ~
+      groups.read:
+        supported: true
+        reason: ~
+      groups.manage:
+        supported: true
+        reason: ~
+      upstreams.read:
+        supported: false
+        reason: '旧原生后端未声明此能力'
+      upstreams.manage:
+        supported: true
+        reason: ~
+      rules.diversion:
+        supported: true
+        reason: ~
+      rules.adguard:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      capture.logs:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      client.aliases:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      switches.manage:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      cache.requery:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      lists.remembered:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      appearance.server:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      system.restart:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      system.webui_port:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      system.config_management:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      system.update:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      system.domain_generation:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      system.global_overrides:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+      metrics.process:
+        supported: false
+        reason: '当前 Rust 原生运行时尚未实现此操作'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///root/mosdns-rust-webui-20261004/source/webui-log/tests/nativeManagementUi.test.mjs:38:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: only capability endpoint 404 selects the legacy Go workflow
+ok 6 - only capability endpoint 404 selects the legacy Go workflow
+  ---
+  duration_ms: 0.553264
+  ...
+# Subtest: legacy capability fallback retains successful diversion catalogs when an optional catalog is 404
+ok 7 - legacy capability fallback retains successful diversion catalogs when an optional catalog is 404
+  ---
+  duration_ms: 1.535337
+  ...
+# Subtest: network and server errors are surfaced and can be retried
+ok 8 - network and server errors are surfaced and can be retried
+  ---
+  duration_ms: 0.579238
+  ...
+# Subtest: malformed capability responses fail closed
+ok 9 - malformed capability responses fail closed
+  ---
+  duration_ms: 0.24153
+  ...
+# Subtest: native source editor accepts only supported local text records
+ok 10 - native source editor accepts only supported local text records
+  ---
+  duration_ms: 0.390285
+  ...
+# Subtest: native source payload excludes downloader and advanced-format state
+ok 11 - native source payload excludes downloader and advanced-format state
+  ---
+  duration_ms: 0.285781
+  ...
+# Subtest: native source edits cannot move ownership across catalogs
+ok 12 - native source edits cannot move ownership across catalogs
+  ---
+  duration_ms: 0.253268
+  ...
+# Subtest: unsupported upstreams stay read-only and visible
+ok 13 - unsupported upstreams stay read-only and visible
+  ---
+  duration_ms: 0.451805
+  ...
+# Subtest: present incomplete operation matrix is invalid discovery, never legacy
+ok 14 - present incomplete operation matrix is invalid discovery, never legacy
+  ---
+  duration_ms: 1.388854
+  ...
+# Subtest: old Rust schema1 uses explicit conservative operations, not Go
+ok 15 - old Rust schema1 uses explicit conservative operations, not Go
+  ---
+  duration_ms: 0.529461
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 14
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 550.447912

@@ -1,0 +1,142 @@
+plugins:
+- args:
+    files:
+    - /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/rule/catalog-50.txt
+  tag: special_route_50
+  type: domain_set
+- args:
+    files: []
+  tag: special_manual_50
+  type: domain_set
+- args:
+    dump_file: /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_50.dump
+    dump_interval: 36000
+    lazy_cache_ttl: 259200000
+    size: 20000000
+  tag: cache_special_50
+  type: cache
+- args:
+    concurrent: 2
+    upstreams:
+    - addr: udp://127.0.0.1:25559
+      tag: lower_supplier_v2
+  tag: special_upstream_50
+  type: forward
+- args:
+  - exec: flow_setter group=special_50 sequence=sequence_special_50
+  - exec: $cache_special_50
+  - exec: $special_upstream_50
+  - exec: cname_remover
+  tag: sequence_special_50
+  type: sequence
+- args:
+    enable_audit: true
+    entry: sequence_special_50
+    listen: 0.0.0.0:16556
+  tag: special_udp_server_50
+  type: udp_server
+- args:
+    enable_audit: true
+    entry: sequence_special_50
+    idle_timeout: 10
+    listen: 0.0.0.0:16556
+  tag: special_tcp_server_50
+  type: tcp_server
+- args:
+    files:
+    - /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/rule/catalog-51.txt
+  tag: special_route_51
+  type: domain_set
+- args:
+    files: []
+  tag: special_manual_51
+  type: domain_set
+- args:
+    dump_file: /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_51.dump
+    dump_interval: 36000
+    lazy_cache_ttl: 259200000
+    size: 20000000
+  tag: cache_special_51
+  type: cache
+- args:
+    concurrent: 2
+    upstreams:
+    - addr: tcp://127.0.0.1:25557
+      tag: higher_supplier
+  tag: special_upstream_51
+  type: forward
+- args:
+  - exec: flow_setter group=special_51 sequence=sequence_special_51
+  - exec: $cache_special_51
+  - exec: $special_upstream_51
+  - exec: cname_remover
+  tag: sequence_special_51
+  type: sequence
+- args:
+    enable_audit: true
+    entry: sequence_special_51
+    listen: 0.0.0.0:16557
+  tag: special_udp_server_51
+  type: udp_server
+- args:
+    enable_audit: true
+    entry: sequence_special_51
+    idle_timeout: 10
+    listen: 0.0.0.0:16557
+  tag: special_tcp_server_51
+  type: tcp_server
+- args:
+    files:
+    - /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/rule/catalog-52.txt
+  tag: special_route_52
+  type: domain_set
+- args:
+    files: []
+  tag: special_manual_52
+  type: domain_set
+- args:
+    dump_file: /root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live-restart/fixture/cache/cache_special_52.dump
+    dump_interval: 36000
+    lazy_cache_ttl: 259200000
+    size: 20000000
+  tag: cache_special_52
+  type: cache
+- args:
+    concurrent: 2
+    upstreams:
+    - addr: udp://127.0.0.1:25558
+      tag: isolated_supplier
+  tag: special_upstream_52
+  type: forward
+- args:
+  - exec: flow_setter group=special_52 sequence=sequence_special_52
+  - exec: $cache_special_52
+  - exec: $special_upstream_52
+  - exec: cname_remover
+  tag: sequence_special_52
+  type: sequence
+- args:
+    enable_audit: true
+    entry: sequence_special_52
+    listen: 0.0.0.0:16558
+  tag: special_udp_server_52
+  type: udp_server
+- args:
+    enable_audit: true
+    entry: sequence_special_52
+    idle_timeout: 10
+    listen: 0.0.0.0:16558
+  tag: special_tcp_server_52
+  type: tcp_server
+- args:
+  - exec:
+    - $sequence_special_50
+    - exit
+    matches: qname $special_route_50 $special_manual_50
+  - exec:
+    - $sequence_special_51
+    - exit
+    matches: qname $special_route_51 $special_manual_51
+  - exec: return
+  tag: special_upstream_matcher
+  type: sequence

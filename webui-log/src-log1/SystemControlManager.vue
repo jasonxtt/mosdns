@@ -1,4 +1,6 @@
 <script setup>
+import CapabilityBoundary from '../src/components/CapabilityBoundary.vue'
+import { capabilityFetch, capabilityState, supportsOperation, operationReason, switchInstances, switchValueFromResponse } from '../src/api/runtimeCapabilities'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../src/api/http'
 import UpstreamManager from '../src/components/UpstreamManager.vue'
@@ -11,6 +13,7 @@ import SystemOverridesPanel from '../src/components/system/SystemOverridesPanel.
 import SystemReplacementRulesPanel from '../src/components/system/SystemReplacementRulesPanel.vue'
 import SystemUpdatePanel from '../src/components/system/SystemUpdatePanel.vue'
 import SystemWebuiPortPanel from '../src/components/system/SystemWebuiPortPanel.vue'
+import SwitchInventoryPanel from '../src/components/system/SwitchInventoryPanel.vue'
 import { clearTopNotice, setError, setSuccess } from '../src/utils/notice'
 import { formatRelativeTime } from '../src/utils/time'
 import {
@@ -274,6 +277,7 @@ const switchGroups = computed(() =>
       .filter(Boolean),
   })),
 )
+const nativeSwitches = computed(() => switchInstances())
 
 const hasUpdate = computed(() => {
   const status = update.status
@@ -347,6 +351,7 @@ const configVersionDisplayMap = {
 }
 
 const configVersionInfo = computed(() => {
+  if (capabilityState.value?.kind === 'native') return { versionText: '不适用', statusText: operationReason('system.config_management') }
   const applied = Number(update.status?.config_schema_applied || 0)
   const required = Number(update.status?.config_schema_required || 0)
   if (!applied && !required) {
@@ -400,7 +405,7 @@ function formatConfigVersionDisplay(schema) {
 }
 
 async function requestResponse(url, options = {}) {
-  const response = await fetch(url, options)
+  const response = await capabilityFetch(url, options)
   if (!response.ok) {
     let message = `HTTP ${response.status} ${response.statusText}`
     try {
@@ -432,21 +437,24 @@ function isHttpConflictError(error) {
 }
 
 async function readSwitchValue(tag) {
-  const value = String(await getText(`/plugins/${tag}/show`) || '').trim()
+  if (!supportsOperation('switches.manage')) return
+  const value = String(await getText(`/plugins/${encodeURIComponent(tag)}/show`) || '')
   switchStates[tag] = value
   return value
 }
 
 async function loadAuditStatusAndCapacity() {
+  if (!supportsOperation('audit.read') && !supportsOperation('audit.capacity')) return
   const [statusRes, capacityRes] = await Promise.all([
-    getJSON('/api/v1/audit/status'),
-    getJSON('/api/v1/audit/capacity'),
+    supportsOperation('audit.read') ? getJSON('/api/v1/audit/status') : Promise.resolve({capturing:null}),
+    supportsOperation('audit.capacity') ? getJSON('/api/v1/audit/capacity') : Promise.resolve({capacity:null}),
   ])
   audit.capturing = Boolean(statusRes?.capturing)
   audit.capacity = Number(capacityRes?.capacity || 0)
 }
 
 async function toggleAuditCapture() {
+  if (!supportsOperation('audit.control')) return
   clearMessage()
   try {
     if (audit.capturing) {
@@ -463,6 +471,7 @@ async function toggleAuditCapture() {
 }
 
 async function clearAuditLogs() {
+  if (!supportsOperation('audit.control')) return
   if (
     !(await openConfirm('将删除当前所有内存审计日志，此操作不可恢复。', {
       tone: 'danger',
@@ -481,6 +490,7 @@ async function clearAuditLogs() {
 }
 
 async function submitCapacity() {
+  if (!supportsOperation('audit.capacity')) return
   const capacity = Number(audit.newCapacity || 0)
   if (!Number.isFinite(capacity) || capacity <= 0 || capacity > 400000) {
     setError('请输入 1 到 400000 之间的有效热日志上限')
@@ -506,23 +516,39 @@ async function submitCapacity() {
 }
 
 async function loadFeatureSwitches() {
+  if (!supportsOperation('switches.manage')) return
+  const profiles = capabilityState.value?.kind === 'native' ? nativeSwitches.value : switchProfiles
   const settled = await Promise.allSettled(
-    switchProfiles.map((profile) => getText(`/plugins/${profile.tag}/show`)),
+    profiles.map((profile) => getText(`/plugins/${encodeURIComponent(profile.tag)}/show`)),
   )
   settled.forEach((item, index) => {
-    const profile = switchProfiles[index]
+    const profile = profiles[index]
     if (item.status === 'fulfilled') {
-      switchStates[profile.tag] = String(item.value || '').trim()
+      switchStates[profile.tag] = switchValueFromResponse(item.value, capabilityState.value?.kind)
       return
     }
     switchStates[profile.tag] = 'error'
   })
 }
 
+async function saveNativeSwitch({ tag, value }) {
+  if (capabilityState.value?.kind !== 'native' || !supportsOperation('switches.manage')) return
+  clearMessage()
+  try {
+    await setSwitchValue(tag, value)
+    await readSwitchValue(tag)
+    setSuccess(`“${tag}” 已保存，当前值已回读`)
+  } catch (error) {
+    setError(`保存“${tag}”失败: ${error.message}`)
+    await loadFeatureSwitches()
+  }
+}
+
 async function setSwitchValue(tag, value, successHint = '') {
+  if (!supportsOperation('switches.manage')) return
   switchLoading[tag] = true
   try {
-    await postJSON(`/plugins/${tag}/post`, { value })
+    await postJSON(`/plugins/${encodeURIComponent(tag)}/post`, { value })
     switchStates[tag] = value
     if (successHint) {
       setSuccess(successHint)
@@ -561,6 +587,7 @@ function getMutuallyExclusiveProfile(tag) {
 }
 
 async function setCoreMode(modeValue) {
+  if (!supportsOperation('switches.manage')) return
   if (!['A', 'B'].includes(String(modeValue)) || coreMode.value === modeValue) {
     return
   }
@@ -573,7 +600,7 @@ async function setCoreMode(modeValue) {
   try {
     await setSwitchValue('switch3', modeValue, '核心模式已切换')
     try {
-      await postEmpty('/plugins/requery/trigger')
+      supportsOperation('cache.requery') ? await postEmpty('/plugins/requery/trigger') : undefined
     } catch {
       // ignore
     }
@@ -583,6 +610,7 @@ async function setCoreMode(modeValue) {
 }
 
 async function setDnsRoutingMode(modeValue) {
+  if (!supportsOperation('switches.manage')) return
   if (
     switchLoading.switch17 ||
     !['A', 'B'].includes(String(modeValue)) ||
@@ -624,7 +652,7 @@ async function setDnsRoutingMode(modeValue) {
       requestResponse('/plugins/cache_cnmihomo/flush'),
     ])
     const requeryResults = await Promise.allSettled([
-      postEmpty('/plugins/requery/trigger'),
+      ...(supportsOperation('cache.requery') ? [postEmpty('/plugins/requery/trigger')] : []),
     ])
     const backgroundErrors = [...flushResults, ...requeryResults]
       .filter((item) => item.status === 'rejected')
@@ -645,6 +673,7 @@ async function setDnsRoutingMode(modeValue) {
 }
 
 async function toggleSecondarySwitch(profile, checked) {
+  if (!supportsOperation('switches.manage')) return
   if (!profile?.tag || !profile.valueForOn) {
     return
   }
@@ -683,6 +712,7 @@ async function toggleSecondarySwitch(profile, checked) {
 }
 
 async function setIpStrategy(mode) {
+  if (!supportsOperation('switches.manage')) return
   const preferV4Profile = findSwitchProfile('switch8')
   const blockV6Profile = findSwitchProfile('switch6')
   if (!preferV4Profile || !blockV6Profile) {
@@ -759,6 +789,7 @@ function buildDomainGenerationPayload(key, checked) {
 }
 
 async function toggleDomainGeneration(profile, checked) {
+  if (!supportsOperation('system.domain_generation')) return
   if (!profile?.key) {
     return
   }
@@ -789,11 +820,13 @@ async function toggleDomainGeneration(profile, checked) {
 }
 
 async function loadDomainGenerationSettings() {
+  if (!supportsOperation('system.domain_generation')) return
   const payload = await getJSON('/api/v1/domain-generation')
   applyDomainGenerationSettings(payload)
 }
 
 async function loadOverrides() {
+  if (!supportsOperation('system.global_overrides')) return
   const data = await getJSON('/api/v1/overrides')
   overrides.socks5 = String(data?.socks5 || '')
   overrides.ecs = String(data?.ecs || '')
@@ -820,6 +853,7 @@ function removeReplacement(index) {
 }
 
 async function saveOverrides() {
+  if (!supportsOperation('system.global_overrides')) return
   clearMessage()
   applyingOverrides.value = true
   try {
@@ -867,6 +901,7 @@ function buildWebUIRootUrl(port) {
 }
 
 async function loadWebUIPortSettings() {
+  if (!supportsOperation('system.webui_port')) return
   webuiPort.loading = true
   try {
     const payload = await getJSON('/api/v1/system/webui-port')
@@ -880,6 +915,7 @@ async function loadWebUIPortSettings() {
 }
 
 async function applyWebUIPortAndRestart() {
+  if (!supportsOperation('system.webui_port')) return
   const port = Number.parseInt(String(webuiPort.input || '').trim(), 10)
   if (!Number.isFinite(port) || port < 1 || port > 65535) {
     setError('请输入 1-65535 之间的端口')
@@ -912,6 +948,7 @@ async function applyWebUIPortAndRestart() {
 }
 
 async function loadUpdateStatus() {
+  if (!supportsOperation('system.update')) return
   const status = await getJSON('/api/v1/update/status')
   update.status = status
   if (status?.config_auto_updated > 0) {
@@ -924,6 +961,7 @@ async function loadUpdateStatus() {
 }
 
 async function checkUpdate() {
+  if (!supportsOperation('system.update')) return
   clearMessage()
   update.loading = true
   try {
@@ -938,6 +976,7 @@ async function checkUpdate() {
 }
 
 function startRestartWatch() {
+  if (!supportsOperation('system.update')) return
   stopRestartWatch()
   const deadline = Date.now() + 90_000
   restartProbeTimerId = window.setInterval(async () => {
@@ -967,6 +1006,7 @@ function stopRestartWatch() {
 }
 
 async function applyUpdate(force = false, preferV3 = false) {
+  if (!supportsOperation('system.update')) return
   if (update.loading) {
     return
   }
@@ -1069,6 +1109,7 @@ function textColorPayload() {
 }
 
 async function loadTextColorSettings() {
+  if (!supportsOperation('appearance.server')) { applyTextColorForTheme(activeThemeKey(), textColorSettings); syncTextColorDraft(activeThemeKey()); return }
   try {
     const settings = await getJSON('/api/v1/appearance/text-color')
     const normalized = normalizeTextColorSettings(settings || {})
@@ -1086,6 +1127,7 @@ function buttonColorPayload() {
 }
 
 async function loadButtonColorSettings() {
+  if (!supportsOperation('appearance.server')) { applyButtonColorForTheme(activeThemeKey(), buttonColorSettings); syncButtonColorDraft(activeThemeKey()); return }
   try {
     const settings = await getJSON('/api/v1/appearance/button-color')
     const normalized = normalizeButtonColorSettings(settings || {})
@@ -1099,6 +1141,7 @@ async function loadButtonColorSettings() {
 }
 
 async function saveTextColorSettings(showMessage = true) {
+  if (!supportsOperation('appearance.server')) { saveTextColorSettingsToStorage(normalizeTextColorSettings(textColorSettings)); return }
   if (textColorSaving.value) {
     textColorSaveQueued = true
     return
@@ -1129,6 +1172,7 @@ async function saveTextColorSettings(showMessage = true) {
 }
 
 async function saveButtonColorSettings(showMessage = true) {
+  if (!supportsOperation('appearance.server')) { saveButtonColorSettingsToStorage(normalizeButtonColorSettings(buttonColorSettings)); return }
   if (buttonColorSaving.value) {
     buttonColorSaveQueued = true
     return
@@ -1335,6 +1379,7 @@ function buildPanelBackgroundPayload() {
 }
 
 async function loadPanelBackgroundSettings() {
+  if (!supportsOperation('appearance.server')) return
   if (panelBackground.applying || panelBackground.uploading) {
     return
   }
@@ -1348,6 +1393,7 @@ async function loadPanelBackgroundSettings() {
 }
 
 async function loadPanelBackgroundHistory() {
+  if (!supportsOperation('appearance.server')) return
   panelBackgroundHistoryLoading.value = true
   try {
     const payload = await getJSON(
@@ -1367,6 +1413,7 @@ async function loadPanelBackgroundHistory() {
 }
 
 async function togglePanelBackgroundHistory() {
+  if (!supportsOperation('appearance.server')) return
   panelBackgroundHistoryOpen.value = !panelBackgroundHistoryOpen.value
   if (panelBackgroundHistoryOpen.value) {
     await loadPanelBackgroundHistory()
@@ -1374,6 +1421,7 @@ async function togglePanelBackgroundHistory() {
 }
 
 async function usePanelBackgroundHistory(item) {
+  if (!supportsOperation('appearance.server')) return
   const uploadId = String(item?.id || '').trim()
   const imageUrl = String(item?.image_url || '').trim()
   if (!uploadId || !imageUrl) {
@@ -1389,6 +1437,7 @@ async function usePanelBackgroundHistory(item) {
 }
 
 async function deletePanelBackgroundHistory(item) {
+  if (!supportsOperation('appearance.server')) return
   const uploadId = String(item?.id || '').trim()
   if (!uploadId) {
     return
@@ -1400,7 +1449,7 @@ async function deletePanelBackgroundHistory(item) {
   }
   panelBackgroundHistoryBusy.value = uploadId
   try {
-    const response = await fetch(
+    const response = await capabilityFetch(
       `/api/v1/appearance/panel-background/history/${encodeURIComponent(uploadId)}`,
       {
         method: 'DELETE',
@@ -1423,6 +1472,7 @@ async function deletePanelBackgroundHistory(item) {
 }
 
 async function clearPanelBackgroundHistory() {
+  if (!supportsOperation('appearance.server')) return
   if (
     !(await openConfirm('确认清空所有历史背景图片吗？', { tone: 'danger' }))
   ) {
@@ -1430,7 +1480,7 @@ async function clearPanelBackgroundHistory() {
   }
   panelBackgroundHistoryBusy.value = 'clear-all'
   try {
-    const response = await fetch(
+    const response = await capabilityFetch(
       '/api/v1/appearance/panel-background/history',
       {
         method: 'DELETE',
@@ -1454,6 +1504,7 @@ async function clearPanelBackgroundHistory() {
 }
 
 async function applyPanelBackgroundSettings() {
+  if (!supportsOperation('appearance.server')) return
   clearMessage()
   panelBackground.applying = true
   try {
@@ -1516,6 +1567,7 @@ async function resetAppearanceSettings() {
   panelBackground.blur = 0
   panelBackgroundHistoryOpen.value = false
   await syncPanelBackgroundPreview(false)
+  if (!supportsOperation('appearance.server')) { setSuccess('本地主题已重置'); return }
 
   try {
     await Promise.all([
@@ -1563,6 +1615,7 @@ function onPanelBackgroundSliderInput() {
 }
 
 async function onPanelBackgroundFileChange(event) {
+  if (!supportsOperation('appearance.server')) return
   const input = event?.target
   const file = input?.files?.[0]
   if (input) {
@@ -1581,7 +1634,7 @@ async function onPanelBackgroundFileChange(event) {
   try {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await fetch('/api/v1/appearance/panel-background/upload', {
+    const response = await capabilityFetch('/api/v1/appearance/panel-background/upload', {
       method: 'POST',
       body: formData,
     })
@@ -1638,6 +1691,7 @@ function saveConfigManagerSettings() {
 }
 
 async function backupConfig() {
+  if (!supportsOperation('system.config_management')) return
   const dir = String(configManaging.localDir || '').trim()
   if (!dir) {
     setError('请先输入 MosDNS 本地工作目录')
@@ -1647,7 +1701,7 @@ async function backupConfig() {
   saveConfigManagerSettings()
   configManaging.backingUp = true
   try {
-    const response = await fetch('/api/v1/config/export', {
+    const response = await capabilityFetch('/api/v1/config/export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dir }),
@@ -1684,6 +1738,7 @@ async function backupConfig() {
 }
 
 async function applyRemoteConfig() {
+  if (!supportsOperation('system.config_management')) return
   const dir = String(configManaging.localDir || '').trim()
   const url = String(configManaging.remoteUrl || '').trim()
   if (!dir || !url) {
@@ -1746,6 +1801,10 @@ function onAutoRefreshIntervalChange() {
   emitAutoRefreshSettings(true)
 }
 
+async function loadSystemHealth() {
+  if (supportsOperation('system.health')) await getJSON('/api/v1/system/health')
+}
+
 async function reloadAll() {
   clearMessage()
   try {
@@ -1755,6 +1814,7 @@ async function reloadAll() {
       loadDomainGenerationSettings(),
       loadOverrides(),
       loadUpdateStatus(),
+    loadSystemHealth(),
       loadWebUIPortSettings(),
     ])
   } catch (error) {
@@ -1803,7 +1863,8 @@ onBeforeUnmount(() => {
 
     <section v-else-if="currentMode === 'system-maintenance'" class="log1-system-mode">
       <div class="control-panel-grid log1-system-grid-four">
-        <SystemUpdatePanel
+        <CapabilityBoundary operation="system.update">
+<SystemUpdatePanel
           :has-update="hasUpdate"
           :show-v3-callout="showV3Callout"
           :update="update"
@@ -1815,26 +1876,33 @@ onBeforeUnmount(() => {
           @apply-force-update="applyUpdate(true, false)"
           @apply-v3-update="applyUpdate(true, true)"
         />
+</CapabilityBoundary>
 
-        <SystemConfigManagePanel
+        <CapabilityBoundary operation="system.config_management">
+<SystemConfigManagePanel
           :config-managing="configManaging"
           :config-version="configVersionInfo"
           @save-settings="saveConfigManagerSettings"
           @backup-config="backupConfig"
           @apply-remote-config="applyRemoteConfig"
         />
+</CapabilityBoundary>
 
-        <SystemOverridesPanel
+        <CapabilityBoundary operation="system.global_overrides">
+<SystemOverridesPanel
           :applying-overrides="applyingOverrides"
           :overrides="overrides"
           @load-overrides="loadOverrides"
           @save-overrides="saveOverrides"
         />
+</CapabilityBoundary>
 
-        <SystemWebuiPortPanel
+        <CapabilityBoundary operation="system.webui_port">
+<SystemWebuiPortPanel
           :webui-port="webuiPort"
           @apply-port="applyWebUIPortAndRestart"
         />
+</CapabilityBoundary>
       </div>
 
       <div class="log1-module-toggle-row log1-module-toggle-row-center">
@@ -1849,7 +1917,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <SystemReplacementRulesPanel
+      <CapabilityBoundary operation="system.global_overrides">
+<SystemReplacementRulesPanel
         v-if="expandedAdvanced.replacementRules"
         :applying-overrides="applyingOverrides"
         :overrides="overrides"
@@ -1858,10 +1927,18 @@ onBeforeUnmount(() => {
         @save-overrides="saveOverrides"
         @remove-replacement="removeReplacement"
       />
+</CapabilityBoundary>
     </section>
 
     <section v-else-if="currentMode === 'system-behavior'" class="log1-system-mode">
-      <div class="control-panel-grid log1-system-grid-three">
+      <SwitchInventoryPanel
+        v-if="capabilityState.value?.kind === 'native'"
+        :instances="nativeSwitches"
+        :states="switchStates"
+        :loading="switchLoading"
+        @save="saveNativeSwitch"
+      />
+      <div v-else class="control-panel-grid log1-system-grid-three">
         <section class="panel control-module log1-switch-group-card">
           <header class="module-head">
             <div>
@@ -1965,7 +2042,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-if="expandedAdvanced.behaviorAdvanced" class="log1-advanced-grid">
+      <div v-if="expandedAdvanced.behaviorAdvanced && capabilityState.value?.kind !== 'native'" class="log1-advanced-grid">
         <section
           v-for="group in switchGroups"
           :key="`${group.key}-panel`"
@@ -2000,13 +2077,15 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <SystemDomainGenerationPanel
+        <CapabilityBoundary operation="system.domain_generation">
+<SystemDomainGenerationPanel
           class="log1-advanced-module-panel"
           :domain-generation-profiles="domainGenerationProfiles"
           :domain-generation-loading="domainGenerationLoading"
           :domain-generation-settings="domainGenerationSettings"
           @toggle-domain-generation="toggleDomainGeneration"
         />
+</CapabilityBoundary>
       </div>
     </section>
 
@@ -2085,11 +2164,13 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <SystemAuditCapacityPanel
+        <CapabilityBoundary operation="audit.capacity">
+<SystemAuditCapacityPanel
           class="log1-logs-card"
           :audit="audit"
           @submit-capacity="submitCapacity"
         />
+</CapabilityBoundary>
       </div>
     </section>
   </section>
@@ -2491,4 +2572,5 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 }
+fieldset.appearance-compact-row-bg { border: 0; padding: 0; margin: 0; min-width: 0; }
 </style>

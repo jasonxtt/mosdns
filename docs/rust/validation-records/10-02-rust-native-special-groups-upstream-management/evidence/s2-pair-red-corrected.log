@@ -1,0 +1,29 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.53s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-dec9d4e49d597c3a)
+
+running 2 tests
+test custom_udp_tcp_pair_serves_the_group_without_main_matching ... FAILED
+test occupied_tcp_rolls_back_the_prebound_udp_half ... FAILED
+
+failures:
+
+---- custom_udp_tcp_pair_serves_the_group_without_main_matching stdout ----
+
+thread 'custom_udp_tcp_pair_serves_the_group_without_main_matching' (19002) panicked at native-host/tests/special_groups_supervisor.rs:19:114:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[1].args.listen", reason: "port must be nonzero" }
+
+---- occupied_tcp_rolls_back_the_prebound_udp_half stdout ----
+
+thread 'occupied_tcp_rolls_back_the_prebound_udp_half' (19003) panicked at native-host/tests/special_groups_supervisor.rs:19:114:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[1].args.listen", reason: "port must be nonzero" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    custom_udp_tcp_pair_serves_the_group_without_main_matching
+    occupied_tcp_rolls_back_the_prebound_udp_half
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

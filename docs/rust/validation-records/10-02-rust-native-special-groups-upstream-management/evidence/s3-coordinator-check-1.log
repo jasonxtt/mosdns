@@ -1,0 +1,8 @@
+error: unexpected argument '--target-dir' found
+
+  tip: 'check --target-dir' exists
+
+Usage: cargo [+toolchain] [OPTIONS] [COMMAND]
+       cargo [+toolchain] [OPTIONS] -Zscript <MANIFEST_RS> [ARGS]...
+
+For more information, try '--help'.

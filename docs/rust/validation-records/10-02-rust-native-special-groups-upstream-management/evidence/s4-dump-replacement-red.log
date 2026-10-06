@@ -1,0 +1,36 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: calls to `std::mem::drop` with a value that implements `Copy` does nothing
+    --> native-host/src/runtime_snapshot.rs:1211:9
+     |
+1211 |         drop(cache);
+     |         ^^^^^-----^
+     |              |
+     |              argument has type `{closure@native-host/src/runtime_snapshot.rs:1165:21: 1165:32}`
+     |
+     = note: `#[warn(dropping_copy_types)]` on by default
+help: use `let _ = ...` to ignore the expression or result
+     |
+1211 -         drop(cache);
+1211 +         let _ = cache;
+     |
+
+warning: `mosdns-native-host` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.75s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-118750-0/webinfo/audit_settings.json)
+
+thread 'runtime_snapshot::admission_tests::managed_policy_commit_replaces_affected_dumps_and_keeps_sibling_dump' (118751) panicked at native-host/src/runtime_snapshot.rs:1200:13:
+impacted durable cache must be replaced with a valid empty dump: cache/cache_all.dump
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test runtime_snapshot::admission_tests::managed_policy_commit_replaces_affected_dumps_and_keeps_sibling_dump ... FAILED
+
+failures:
+
+failures:
+    runtime_snapshot::admission_tests::managed_policy_commit_replaces_affected_dumps_and_keeps_sibling_dump
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 134 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

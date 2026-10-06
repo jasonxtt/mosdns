@@ -1,0 +1,26 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.26s
+     Running unittests src/lib.rs (mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+test runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners ... cache dependency closure refused reuse: cache=cache_all reasons={"missing-sequence-plugin:<inline:0>"}
+cache dependency closure refused reuse: cache=quick-cache:6d61696e5f656e747279:1:0 reasons={"missing-sequence-plugin:<inline:0>"}
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-121499-0/webinfo/audit_settings.json)
+cache dependency closure refused reuse: cache=cache_all reasons={"missing-sequence-plugin:<inline:0>"}
+cache dependency closure refused reuse: cache=quick-cache:6d61696e5f656e747279:1:0 reasons={"missing-sequence-plugin:<inline:0>"}
+
+thread 'runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners' (121500) panicked at native-host/src/runtime_snapshot.rs:1490:13:
+assertion `left == right` failed: display rename and listener port do not change wire cache policy: cache_all
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 138 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

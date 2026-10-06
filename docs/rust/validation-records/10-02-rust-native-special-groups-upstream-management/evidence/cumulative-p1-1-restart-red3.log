@@ -1,0 +1,32 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0277]: the trait bound `UpstreamTransport: serde::Serialize` is not satisfied
+   --> native-host/tests/special_groups_whole_chain.rs:595:45
+    |
+595 |             assert_eq!(serde_json::to_value(selected.transport).unwrap(), json!("udp"));
+    |                        -------------------- ^^^^^^^^^^^^^^^^^^ the trait `serde_core::ser::Serialize` is not implemented for `UpstreamTransport`
+    |                        |
+    |                        required by a bound introduced by this call
+    |
+    = note: for local types consider adding `#[derive(serde::Serialize)]` to your `UpstreamTransport` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `serde_core::ser::Serialize`:
+              &'a T
+              &'a mut T
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+              (T0, T1, T2, T3, T4)
+            and 134 others
+note: required by a bound in `to_value`
+   --> /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/value/mod.rs:997:8
+    |
+995 | pub fn to_value<T>(value: T) -> Result<Value, Error>
+    |        -------- required by a bound in this function
+996 | where
+997 |     T: Serialize,
+    |        ^^^^^^^^^ required by this bound in `to_value`
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `mosdns-native-host` (test "special_groups_whole_chain") due to 1 previous error

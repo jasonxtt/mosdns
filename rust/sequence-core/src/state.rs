@@ -1,8 +1,17 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use mosdns_dns_core::{QueryHeader, QuestionInfo, ResponseError as DnsResponseError, TtlInfo};
 
 const MAX_SYNTHESIZED_RCODE: u16 = 0x0fff;
+
+/// Immutable per-admission value facts shared by cheap clones.
+///
+/// The sequence layer only stores and shares this map. It never interprets
+/// keys or values: the host defines the key space when it admits a request
+/// and every matcher that needs one of those values reads it through
+/// [`ExecutionState::admission_value`].
+pub type AdmissionFacts = Arc<BTreeMap<u32, Arc<str>>>;
 
 /// Owned query data and the typed state carried by a sequence invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,7 +21,12 @@ pub struct ExecutionState {
     pub fast_flags: u64,
     pub response: ResponseState,
     pub routing: RoutingState,
+    /// The immutable values captured when the host admitted this request.
+    /// Clones and snapshots share the same allocation; the map is never
+    /// mutated after admission.
+    pub admission_facts: AdmissionFacts,
     response_generation: u64,
+    response_origin: Option<ResponseOrigin>,
 }
 
 impl ExecutionState {
@@ -28,7 +42,9 @@ impl ExecutionState {
             fast_flags: 0,
             response: ResponseState::None,
             routing: RoutingState::default(),
+            admission_facts: AdmissionFacts::default(),
             response_generation: 0,
+            response_origin: None,
         }
     }
 
@@ -40,12 +56,26 @@ impl ExecutionState {
             fast_flags: self.fast_flags,
             response: self.response.clone(),
             routing: self.routing.clone(),
+            admission_facts: self.admission_facts.clone(),
         }
+    }
+
+    /// Replaces the immutable admission facts. Only the host calls this, once,
+    /// at request admission; sequence execution never rewrites the values.
+    pub fn set_admission_facts(&mut self, facts: AdmissionFacts) {
+        self.admission_facts = facts;
+    }
+
+    /// The immutable admitted value for one host-defined fact key.
+    #[must_use]
+    pub fn admission_value(&self, key: u32) -> Option<&str> {
+        self.admission_facts.get(&key).map(Arc::as_ref)
     }
 
     pub fn set_response(&mut self, response: ResponseState) {
         self.response_generation = self.response_generation.wrapping_add(1);
         self.response = response;
+        self.response_origin = None;
     }
 
     /// Identity of the latest response replacement event. This is distinct
@@ -58,6 +88,23 @@ impl ExecutionState {
 
     pub fn set_raw_response(&mut self, wire: Vec<u8>) {
         self.set_response(ResponseState::Raw(OwnedResponseWire(wire)));
+    }
+
+    /// The immutable supplier of this response, independent from attempts in
+    /// the current request. Explicit replacement clears it; wire decoration keeps it.
+    #[must_use]
+    pub fn response_origin(&self) -> Option<&ResponseOrigin> {
+        self.response_origin.as_ref()
+    }
+
+    pub fn set_raw_response_with_origin(&mut self, wire: Vec<u8>, origin: Option<ResponseOrigin>) {
+        self.set_raw_response(wire);
+        self.response_origin = origin;
+    }
+
+    pub fn rewrite_raw_response(&mut self, wire: Vec<u8>) {
+        let origin = self.response_origin.take();
+        self.set_raw_response_with_origin(wire, origin);
     }
 
     /// Sets a synthesized response after validating its configured RCODE.
@@ -118,6 +165,23 @@ impl ExecutionState {
             ResponseState::Raw(wire) => inspector.inspect(&wire.0).map(Some),
         }
     }
+}
+
+impl StateSnapshot {
+    /// The immutable admitted value for one host-defined fact key.
+    #[must_use]
+    pub fn admission_value(&self, key: u32) -> Option<&str> {
+        self.admission_facts.get(&key).map(Arc::as_ref)
+    }
+}
+
+/// Host-supplied provenance for the response that owns the wire. Identity is
+/// allocated once by compilation and shared across requests and cache entries.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseOrigin {
+    pub identity: std::sync::Arc<str>,
+    pub peer: Option<std::net::SocketAddr>,
+    pub transport: Option<&'static str>,
 }
 
 /// Trusted listener identity; unknown embedders never acquire a guessed peer.
@@ -274,6 +338,8 @@ pub struct StateSnapshot {
     pub fast_flags: u64,
     pub response: ResponseState,
     pub routing: RoutingState,
+    /// Shared with the observed state; snapshots never rebuild the map.
+    pub admission_facts: AdmissionFacts,
 }
 
 /// Typed matcher-produced state changes. Matchers cannot mutate state

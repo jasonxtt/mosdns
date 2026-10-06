@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "runtime": "rust",
+  "version": "dev",
+  "ordered_build": "TMPDIR=/private/tmp/mosdns-rust-tests BUILD_VERSION=dev OUTPUT=/private/tmp/mosdns-rust-tests/mosdns-native-final4 scripts/build-rust-native.sh",
+  "source_path_count": 225,
+  "source_manifest_sha256": "0eedf67f3c5851ea4a5401f68ceb610da4a577ea8b6dbda524c503636c80077c",
+  "source_manifest_path": "docs/rust/validation-records/10-05-rust-native-switch-state-management/evidence/native-source-manifest-final.json",
+  "source_manifest_file_sha256": "221767d60165911a5ead0dce82062f8ce183f5be41766daeff815646ed905217",
+  "source_manifest_binding": "The ordered manifest retains every build input path and SHA-256; the review record binds this manifest to the exact reviewed source tree.",
+  "asset_count": 8,
+  "assets": {
+    "coremain/www/assets/vue-log/app.css": "20b3136870b0fc4aec503362b6ef2939996f9a3f143e3e8c495375034b020a38",
+    "coremain/www/assets/vue-log/app.js": "6d217bffd28f42a0a7ebf800248f4049e18abdf92099fce69448079f99945de9",
+    "coremain/www/assets/vue-log/index.html": "873b4ba49fed45207465223e01d545abab15c4910762c7efa37e6cfeca4901c1",
+    "coremain/www/assets/vue-log1/app.css": "0ad64e801a692745cb2e051b07430c78756ba366d26a4241a81b5635e8f3daf4",
+    "coremain/www/assets/vue-log1/app.js": "0daf71271bf020d2d4cc2d1137387bcb9ab67e19b5d325500669b2403a378e54",
+    "coremain/www/assets/vue-log1/log1.index.html": "39ad032d17ed4e8171cd50cd3430217d7cd415a65df281528aa62bdb45429080",
+    "coremain/www/log.html": "fed9e577bfb174346a5d7289614d7ad63a325f4a7dc012e2139d8ed7fd1e0328",
+    "coremain/www/log1.html": "aeceea6d7ef08d9bc585f25cd68a1c6945647506daea0a8042d0904cf2555122"
+  },
+  "artifact": {
+    "path": "/private/tmp/mosdns-rust-tests/mosdns-native-final4",
+    "sha256": "c52e43bfe701217ca2c9188c8a5139724d88ae227a9392b739202f2b22a5992f",
+    "version_stdout": "dev\n"
+  },
+  "toolchain": "rustc 1.96.0 (ac68faa20 2026-05-25) (Homebrew)"
+}

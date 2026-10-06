@@ -2657,6 +2657,10 @@ tr.disabled {
   align-items: stretch;
 }
 
+.system-grid-feature-layout > .native-switch-inventory-panel {
+  grid-column: 1 / -1;
+}
+
 .control-module {
   display: flex;
   flex-direction: column;

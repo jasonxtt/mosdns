@@ -1,22 +1,70 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-05 当前规划：原生开关状态与管理
+
+专用组/上游管理和 WebUI 运行时能力均已完成验收归档；当前 accepted dirty
+源码为 c98dc5d1012ce73aed318504c1053b04ab15de08，真实 HEAD 仍79d93ae1。
+下一批 [switch1–17 公开规划](plans/native-switch-state-management.md) 已与
+同一 C2C 对话收敛范围，第2轮完整规划复审已返回 PLAN READY；本地任务处于
+planning，等待后续明确实施批准，未启动实现。
+六阶段覆盖声明/查询快照、持久化 owner、DNS/运行时边界、API/能力 inventory、
+两套 UI 和整链验证。后台 Lazy refresh 保留完整既有 recipe；不重读开关、不增
+一般缓存失效或 requery。外观/媒体、webinfo/别名和诊断日志留给独立后续任务。
+规划 READY 和后续人类实施批准是不同门槛；下方旧日期状态保留历史。
+
+## 2026-10-02 下一阶段规划：专用组与上游管理
+
+用户已选择标准 UDP/TCP/DoT/DoH、本地文本规则和主入口/专用端口闭环。
+[公开规划摘要](plans/special-groups-upstream-management.md) 已完成 C2C
+规划复审，结论 PLAN READY；本地任务仍处于 planning，等待最终完整规划批准。
+七个切片集中完成生成配置、查询快照与监听器所有权、事务恢复、缓存依赖失效、
+管理 API、现有 Vue 和真实进程证明。未启动实现，不表示完整 5B/5C、5D 或
+生产切换通过。下方旧日期安排保留历史证据，不代表当前待执行任务。
+
+
+## 2026-09-30 当前推进位置
+
+此节更新当前状态；下方旧日期段落保留当时的规划/证据，不表示仍待执行。
+本地规则编辑、审计控制/DNS 卡片，以及查询诊断/排名下钻的限定交付均已
+完成归档。最近查询诊断源码 HEAD 为 `860c6253`；完整范围、VM 和浏览器证据
+见 [已归档查询诊断任务](validation-records/09-30-rust-native-query-diagnostics-overview/prd.md)。
+这些子项不代表完整 P02/P34/C08/C10/C11 或整个 5B/5C 通过。
+
+下一批为 [Rust-native upstream forwarding workflow](validation-records/09-30-rust-native-upstream-forwarding/prd.md)，
+一个 PRD 集中接入多上游选择、UDP TC→TCP、bootstrap、DoT/DoH、串行连接
+复用、实际最终 supplier/attempt 诊断与真实 DNS/HTTP/Vue 证明。用户已批准
+host 默认/0 双栈解析、IPv4 优先，4/6 强制单族；此修改只映射原生 host
+配置，不改已归档 resolver 的默认契约或 Go 运行路径。
+
+任务仍为 planning；PRD/design/implement/contracts 和执行提示词已落盘，
+整个任务范围及其余列明偏差须经最新规划摘要批准后激活。专用 reviewer
+绑定与真实授权 snapshot 是 start 前置条件，不继承旧规划对话。
+规划反馈中的五个问题已落实到任务文档：调用点 descriptor 保持 ID-only
+dispatch、started-entry ledger/RAII 与异步 drain、audit-off 小型事实与启动顺序、
+resolver 规范纠错，以及用户另行批准的可选 schema1 upstream_diagnostics
+对象和真实详情显示。此处仍是修订规划，不表示 API/UI 已实现或最终复审 PASS。
+本批不含连接失败后的跨族回退、QUIC/H3、pipeline、系统 hostname resolver、
+上游编辑/完整指标面板、生产部署或最终切换。5D、Phase 6 与生产确认保留。
+
 目标仍是 Linux amd64 上纯 Rust-native 完整 MosDNS，优先正确性、稳定运行、p95/p99、有效吞吐和并发，内存其次。本次按用户“避免过度设计”的要求调整推进方式，不删除功能或降低最终发布标准。
 
 项目执行约定（2026-09-28）：用户指定所有本项目需要的构建与测试验证均使用 `mosdns-rust` SSH 别名对应的 VM；后续 Rust 构建、Cargo 测试、集成与 E2E 均连此别名执行。远端预检和传输也只用别名，不使用直连 IP 或其他 VM。
+
+2026-09-29 状态更新：下方 canary 和 `fast_mark`/`flow_setter` 的详细段落保留其当时的规划与证据轨迹，不再表示待执行状态。Canary 的替代复审任务已归档并取得 C2C `FINAL: PASS`；5B `fast_mark`/`flow_setter` 子任务也已归档，修正范围取得同一对话 `FINAL: PASS`。下一个规划任务是扩大的 [Rust-native local rule editing workflow](validation-records/09-28-rust-native-domain-set-management/prd.md)：在同一 PRD 中完成限定 `domain_set` 的 native HTTP/持久化/DNS 热生效与维护中 Vue `/` 本地规则页的隔离端到端编辑。该任务仍处于 planning，须按其修订后的 PRD/design/implement 复审并获后续实施批准；不代表完整 Vue/5C 或生产可用。
 
 ## 当前事实
 
 W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。首轮对照覆盖有限；后续测量任务已关闭为 [incomplete matrix](phase5a-measurement-reliability.md)，不补跑、不调阈值，不补称容量/恢复/热点已证明。单线程 LocalSet 的多核能力尚未验证；暂不凭猜测改 Send/runtime。
 
-当前功能瓶颈是原生配置还受固定 W1/W2/W3 图限制，已有模块未充分接入实际查询链。下一批以新增可运行配置为成果，正式测量缺口在适当链路上补，不挡住功能规划。
+5B 代表链已突破固定 W1/W2/W3 图，`fast_mark`/`flow_setter` 的限定集成也已完成。当前瓶颈是原生配置仍只覆盖完整产品的子集，管理 HTTP/持久化/UI 闭环尚未接上。下一批以新增可运行操作闭环为成果，正式测量缺口在适当链路上补，不挡住功能规划。
 
 ## 后续顺序
 
 | 次序 | 阶段与交付 | 结束条件 |
 | --- | --- | --- |
-| 1 | 已完成的 5B 代表链之后，执行隔离 `mosdns-rust` Rust-native sidecar canary | 原始功能范围已有精确范围 C2C PASS；当前 VM 目标变更须先通过计划变更 review，之后按用户已授权范围执行。canary 是功能/运行隔离验证，不是完整兼容或性能门禁 |
-| 2 | 5B 第一批：native `fast_mark` matcher/executable + `flow_setter` 序列/观测集成 | YAML 编译错误、标志 OR/set/每查询隔离、真实分支和异步路由元数据有集成证据；canary 通过，或用户明确延期并允许在无远端结果时继续；本任务精确范围 review PASS |
-| 3 | 5C 第一条闭环：单个有界 file-backed `domain_set` 的 `/show`、`/save`、`/post` → 持久化 → 下一 DNS 查询 | 默认在 5B 第一批精确范围 review PASS 后执行；两者无架构依赖。若 5B 明确延期或阻塞，须先取得用户明确的重排决定。HTTP/持久化/原子发布/并发读取/重启/关闭边界有真实 native 证据，并通过本任务精确范围 review |
+| 1 | 隔离 `mosdns-rust` Rust-native sidecar canary：已完成 | 修正运行和替代精确范围复审已 PASS；仅是限定功能验证，不是兼容或性能门禁 |
+| 2 | 5B `fast_mark` matcher/executable + `flow_setter` 集成：已完成限定范围 | 修正范围同一 C2C 对话 `FINAL: PASS`；不等于完整 5B |
+| 3 | 扩大的第一条 5C 闭环：file-backed `domain_set` native HTTP/持久化/下一 DNS 查询，加现有 Vue `/` 本地规则页隔离编辑：规划中 | 同一任务的独立行为切片覆盖 HTTP、整代发布、失败回滚、并发、重启/关闭和浏览器编辑；修订规划复审与后续实施批准后执行，完成后再做精确范围 review |
 | 4 | 补齐所有剩余 5B/5C 功能 | [覆盖表](feature-coverage.md) 的配置/插件/API/持久化/管理条目都有相应证据；复用现有 Vue UI |
 | 5 | 5D 完整整机验收与有依据的优化 | 完整配置下正式 Go/Rust 对照、容量/恢复/并发、管理干扰、长稳和资源预算通过，阻塞项为零 |
 | 6 | Phase 6 hybrid 退役和发布验证 | 去除过渡 Go/cgo/selector/mirror/fallback，必要完整回归、纯 Rust 构建/运行通过；随后才考虑生产确认 |

@@ -1,0 +1,48 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0599]: no method named `persistence` found for struct `CompiledCandidate` in the current scope
+    --> native-host/src/transaction.rs:1149:57
+     |
+ 139 | pub struct CompiledCandidate {
+     | ---------------------------- method `persistence` not found for this struct
+...
+1149 |                 owner.prepare_candidate(0, 1, candidate.persistence()),
+     |                                                         ^^^^^^^^^^^-- help: remove the arguments
+     |                                                         |
+     |                                                         field, not a method
+
+error[E0599]: no method named `persistence` found for struct `CompiledCandidate` in the current scope
+    --> native-host/src/transaction.rs:1240:57
+     |
+ 139 | pub struct CompiledCandidate {
+     | ---------------------------- method `persistence` not found for this struct
+...
+1240 |                 owner.prepare_candidate(0, 1, candidate.persistence()),
+     |                                                         ^^^^^^^^^^^-- help: remove the arguments
+     |                                                         |
+     |                                                         field, not a method
+
+error[E0599]: no method named `persistence` found for struct `CompiledCandidate` in the current scope
+    --> native-host/src/transaction.rs:1292:62
+     |
+ 139 | pub struct CompiledCandidate {
+     | ---------------------------- method `persistence` not found for this struct
+...
+1292 |         let result = owner.prepare_candidate(0, 1, candidate.persistence());
+     |                                                              ^^^^^^^^^^^-- help: remove the arguments
+     |                                                              |
+     |                                                              field, not a method
+
+error[E0599]: no method named `persistence` found for struct `CompiledCandidate` in the current scope
+    --> native-host/src/transaction.rs:1339:48
+     |
+ 139 | pub struct CompiledCandidate {
+     | ---------------------------- method `persistence` not found for this struct
+...
+1339 |             .prepare_candidate(0, 1, candidate.persistence())
+     |                                                ^^^^^^^^^^^-- help: remove the arguments
+     |                                                |
+     |                                                field, not a method
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `mosdns-native-host` (lib test) due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...

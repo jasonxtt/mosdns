@@ -1,0 +1,16 @@
+[C2C]
+MODE: REVIEW_ONLY
+STATE: REVIEW
+CONTROLLER: TRELLIS
+TASK_ID: .trellis/tasks/10-02-rust-native-special-groups-upstream-management
+UNIT: Slice 4
+REQUEST_KIND: bootstrap
+BASE_SHA: 6b50220d1fe137cd2722c44da7c0e095df9095e1
+HEAD_SHA: 18745f3acd3c6f88563d5864f3489c5ece177d4d
+PATHS: rust/native-host/src/cache.rs, rust/native-host/src/config.rs, rust/native-host/src/execution.rs, rust/native-host/src/runtime_snapshot.rs, rust/native-host/src/transaction.rs
+VALIDATION: Isolated mosdns-rust host only (/root/mosdns-rust-special-groups-20261003/src; target-candidate): native-host suite 365 passed, 0 failed, 3 explicitly invoked subprocess probes ignored by the harness across 29 test binaries; cargo fmt --all -- --check passed; strict all-targets Clippy with -D warnings passed. Exact local, isolated-host, and audit-tree SHA-256 closure: 140 files, 126 Rust files, zero differences. Focused RED/GREEN covers rule-file dependency fencing, cache-owner/upstream/membership invalidation, lazy refresh retirement, conflict preservation, durable dump replacement, and real SIGKILL/restart after marker/swap/retirement/cleanup. Evidence is in docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-*.
+ACCEPTANCE: S4 only: complete cache dependency closure and invalidate affected group/ancestor owners when upstream, rule, main membership, or custom_port_only changes; retain safe rename/port-only and unrelated sibling owners; distinguish slot incarnations; prevent retired lazy-refresh/cache writers and final dumps from publishing; transactionally replace impacted persistent dumps and recover correctly across marker, runtime swap, retirement, and cleanup crashes. Preserve ECS placement validation, shared-owner behavior, lazy refresh, durable flush, stable identities, routing/CNAME semantics, and all other frozen contracts.
+FORBIDDEN_SCOPE: Do not review or infer S5-S7 or whole-task completion. No Go fallback, excluded protocol implementation, push, deployment, production/default switch, ordinary commit, branch/index update, or unrelated scope.
+EVIDENCE: Use read-only git_compare(base_sha, head_sha, path, offset, max_bytes) for the exact committed range.
+INSTRUCTION: Review only this unit. Do not plan, execute, edit, create tasks, change Trellis state, or treat C2C DONE/PLAN/iteration limits as controller authority.
+OUTPUT: Return one final line, FINAL: PASS or FINAL: FAIL. PASS has no findings. FAIL uses P0/P1/P2/P3-N: root cause [open|closed]; keep the same ID for the same root cause on re-review.

@@ -1,0 +1,44 @@
+[
+  {
+    "case": "valid exact encoded stamp",
+    "exit_code": 0,
+    "valid": true,
+    "output": ""
+  },
+  {
+    "case": "CRLF rejected before any build",
+    "exit_code": 1,
+    "valid": false,
+    "output": "file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:8\nif (!version?.trim() || /[\\r\\n]/.test(version)) throw new Error('invalid product version')\n                                                      ^\n\nError: invalid product version\n    at file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:8:55\n    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.19.2\n"
+  },
+  {
+    "case": "missing referenced root asset",
+    "exit_code": 1,
+    "valid": false,
+    "output": "file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:39\n      if (!files.has(`coremain/www${url.pathname}`)) throw new Error(`missing root asset: ${ref}`)\n                                                           ^\n\nError: missing root asset: /assets/vue-log/app.js?v=10-04-native-ui%2Bproof\n    at file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:39:60\n    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.19.2\n"
+  },
+  {
+    "case": "forbidden asset key",
+    "exit_code": 1,
+    "valid": false,
+    "output": "file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:25\n      if (embedded && (name.startsWith('.') || /\\.(map|pem|key)$/.test(name))) throw new Error(`unsafe embedded file: ${relative}`)\n                                                                                     ^\n\nError: unsafe embedded file: coremain/www/assets/secret.key\n    at collect (file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:25:86)\n    at collect (file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:21:9)\n    at file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:31:3\n    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.19.2\n"
+  },
+  {
+    "case": "symlink fail closed",
+    "exit_code": 1,
+    "valid": false,
+    "output": "file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:17\n    if (stat.isSymbolicLink()) throw new Error(`symlink build input: ${relative}`)\n                                     ^\n\nError: symlink build input: coremain/www/assets/escape.js\n    at collect (file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:17:38)\n    at collect (file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:21:9)\n    at file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:31:3\n    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.19.2\n"
+  },
+  {
+    "case": "mismatched root version",
+    "exit_code": 1,
+    "valid": false,
+    "output": "file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:40\n      if (/\\/app\\.(js|css)$/.test(url.pathname) && url.searchParams.get('v')!==version) throw new Error(`version stamp mismatch: ${ref}`)\n                                                                                              ^\n\nError: version stamp mismatch: /assets/vue-log/app.css?v=wrong-version\n    at file:///root/mosdns-rust-webui-20261004/evidence/s6-build-preflight-fixture/scripts/native-build-manifest.mjs:40:95\n    at ModuleJob.run (node:internal/modules/esm/module_job:263:25)\n    at async ModuleLoader.import (node:internal/modules/esm/loader:540:24)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v20.19.2\n"
+  },
+  {
+    "case": "restored preflight",
+    "exit_code": 0,
+    "valid": true,
+    "output": ""
+  }
+]

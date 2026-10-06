@@ -1,0 +1,24 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.31s
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-8e172f456a41e331)
+
+running 1 test
+test external_ui_is_live_confined_and_root_pinned ... FAILED
+
+failures:
+
+---- external_ui_is_live_confined_and_root_pinned stdout ----
+
+thread 'external_ui_is_live_confined_and_root_pinned' (249975) panicked at native-host/tests/slice6_management_http.rs:950:9:
+assertion `left == right` failed
+  left: 404
+ right: 301
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    external_ui_is_live_confined_and_root_pinned
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test slice6_management_http`

@@ -1,0 +1,8 @@
+COMMAND: ['cargo', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']
+    Checking mosdns-cache-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/cache-core)
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Checking mosdns-runtime v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/runtime)
+    Checking mosdns-dns-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/dns-core)
+    Finished `dev` profile [unoptimized] target(s) in 10.84s
+
+EXIT_CODE: 0

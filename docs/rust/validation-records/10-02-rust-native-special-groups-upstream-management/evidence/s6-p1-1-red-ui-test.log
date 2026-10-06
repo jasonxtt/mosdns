@@ -1,0 +1,67 @@
+TAP version 13
+# Subtest: runtime capability discovery caches native response for the page session
+ok 1 - runtime capability discovery caches native response for the page session
+  ---
+  duration_ms: 1.925119
+  ...
+# Subtest: only capability endpoint 404 selects the legacy Go workflow
+ok 2 - only capability endpoint 404 selects the legacy Go workflow
+  ---
+  duration_ms: 0.273201
+  ...
+# Subtest: legacy capability fallback retains successful diversion catalogs when an optional catalog is 404
+not ok 3 - legacy capability fallback retains successful diversion catalogs when an optional catalog is 404
+  ---
+  duration_ms: 0.410496
+  location: '/root/mosdns-rust-special-groups-20261003/src/webui-log/tests/nativeManagementUi.test.mjs:50:1'
+  failureType: 'testCodeFailure'
+  error: 'HTTP 404 Not Found'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    file:///root/mosdns-rust-special-groups-20261003/src/webui-log/tests/nativeManagementUi.test.mjs:63:27
+    file:///root/mosdns-rust-special-groups-20261003/src/webui-log/src/api/nativeManagement.js:117:24
+    Array.map (<anonymous>)
+    loadLegacyDiversionCatalogs (file:///root/mosdns-rust-special-groups-20261003/src/webui-log/src/api/nativeManagement.js:116:46)
+    TestContext.<anonymous> (file:///root/mosdns-rust-special-groups-20261003/src/webui-log/tests/nativeManagementUi.test.mjs:61:24)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: network and server errors are surfaced and can be retried
+ok 4 - network and server errors are surfaced and can be retried
+  ---
+  duration_ms: 0.384581
+  ...
+# Subtest: malformed capability responses fail closed
+ok 5 - malformed capability responses fail closed
+  ---
+  duration_ms: 0.31599
+  ...
+# Subtest: native source editor accepts only supported local text records
+ok 6 - native source editor accepts only supported local text records
+  ---
+  duration_ms: 0.378001
+  ...
+# Subtest: native source payload excludes downloader and advanced-format state
+ok 7 - native source payload excludes downloader and advanced-format state
+  ---
+  duration_ms: 0.185438
+  ...
+# Subtest: native source edits cannot move ownership across catalogs
+ok 8 - native source edits cannot move ownership across catalogs
+  ---
+  duration_ms: 0.216921
+  ...
+# Subtest: unsupported upstreams stay read-only and visible
+ok 9 - unsupported upstreams stay read-only and visible
+  ---
+  duration_ms: 0.333409
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 8
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 131.302102

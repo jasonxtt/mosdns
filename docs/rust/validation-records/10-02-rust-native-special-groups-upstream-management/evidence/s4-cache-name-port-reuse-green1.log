@@ -1,0 +1,10 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.79s
+     Running unittests src/lib.rs (mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+test runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-121902-0/webinfo/audit_settings.json)
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 138 filtered out; finished in 0.01s
+

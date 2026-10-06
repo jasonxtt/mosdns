@@ -1,0 +1,24 @@
+log:
+  level: error
+native_management:
+  special_groups: true
+api:
+  http: '127.0.0.1:16580'
+plugins:
+  - tag: default_upstream
+    type: forward
+    args:
+      upstreams:
+        - tag: default_supplier
+          addr: 'udp://127.0.0.1:25555'
+  - tag: main_entry
+    type: sequence
+    args:
+      - exec: $special_upstream_matcher
+      - exec: $default_upstream
+  - tag: main_udp
+    type: udp_server
+    args:
+      entry: main_entry
+      listen: '127.0.0.1:16555'
+      enable_audit: true

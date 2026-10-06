@@ -1,0 +1,12 @@
+   Compiling libc v0.2.189
+   Compiling getrandom v0.2.17
+   Compiling ring v0.17.14
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.26s
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-8e172f456a41e331)
+
+running 1 test
+test embedded_ui_roots_assets_and_revalidation_are_real_http ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.01s
+

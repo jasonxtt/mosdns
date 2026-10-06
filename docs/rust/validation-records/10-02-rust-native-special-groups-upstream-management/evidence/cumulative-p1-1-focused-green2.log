@@ -1,0 +1,48 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 7.85s
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_config-c0cae653bc145d4f)
+
+running 12 tests
+test compiled_router_selects_first_provider_group_and_never_falls_through ... ok
+test conflicting_schema_or_reserved_generated_names_fail_before_assembly ... ok
+test empty_managed_profile_compiles_at_explicit_hook ... ok
+test enabled_sources_are_strict_and_disabled_unsupported_data_remains_visible ... ok
+test enabled_sources_reject_unknown_fields_even_with_valid_local_text ... ok
+test file_relative_managed_state_is_not_process_relative ... ok
+test group_identity_priority_and_listener_inventory_are_compiled_from_generated_input ... ok
+test legacy_aliapi_wrapper_does_not_authorize_signed_api_entries ... ok
+test opt_in_requires_a_reachable_hook ... ok
+test real_group_cache_keeps_supplier_when_warmed_without_audit ... ok
+test real_group_dns_normalizes_before_cache_and_reports_actual_supplier ... ok
+test standard_dns_overrides_preserve_disabled_unsupported_records_and_reject_activation ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/special_groups_whole_chain.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_whole_chain-14bd8f1c3f5532ca)
+
+running 2 tests
+test audit_off_keeps_forward_metrics_without_retaining_query_records ... ok
+test whole_chain_proves_ordered_groups_cache_publication_and_http_provenance ... FAILED
+
+failures:
+
+---- whole_chain_proves_ordered_groups_cache_publication_and_http_provenance stdout ----
+native audit settings diagnostic: using default: settings file is missing (/tmp/special-groups-whole-chain-208344-1/webinfo/audit_settings.json)
+cache startup /tmp/special-groups-whole-chain-208344-1/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/special-groups-whole-chain-208344-1/cache/cache_special_51.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/special-groups-whole-chain-208344-1/cache/cache_special_52.dump: cache persistence: No such file or directory (os error 2); starting empty
+
+thread 'whole_chain_proves_ordered_groups_cache_publication_and_http_provenance' (208347) panicked at native-host/tests/special_groups_whole_chain.rs:466:9:
+assertion `left == right` failed
+  left: Null
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    whole_chain_proves_ordered_groups_cache_publication_and_http_provenance
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_whole_chain`
+exit_code=101

@@ -1,0 +1,165 @@
+{
+  "status": "PASS",
+  "save": [
+    {
+      "tag": "cache_special_50",
+      "status": 200
+    },
+    {
+      "tag": "cache_special_51",
+      "status": 200
+    },
+    {
+      "tag": "cache_special_52",
+      "status": 200
+    }
+  ],
+  "queries": [
+    {
+      "port": 16555,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.55"
+    },
+    {
+      "port": 16557,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.51"
+    },
+    {
+      "port": 16558,
+      "qname": "exclusive.example",
+      "rcode": 0,
+      "answer": "192.0.2.52"
+    }
+  ],
+  "audit": {
+    "pagination": {
+      "total_items": 3,
+      "total_pages": 1,
+      "current_page": 1,
+      "items_per_page": 100
+    },
+    "logs": [
+      {
+        "query_time": "2026-10-03T18:07:58.172634657Z",
+        "query_name": "exclusive.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.1",
+        "trace_id": "n-cbc5deb1f140418075a983cc16bdb1ff-0000000000000003",
+        "duration_ms": 0.357712,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.52"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "matched_group": "special_52",
+        "final_sequence": "sequence_special_52",
+        "final_upstream": "isolated_supplier",
+        "upstream_targets": "127.0.0.1:25558",
+        "selected_upstream": "127.0.0.1:25558",
+        "upstream_diagnostics": {
+          "schema_version": 1,
+          "selected": {
+            "entry": "isolated_supplier",
+            "peer": "127.0.0.1:25558",
+            "transport": "udp"
+          },
+          "attempts": []
+        }
+      },
+      {
+        "query_time": "2026-10-03T18:07:58.171971056Z",
+        "query_name": "shared.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.1",
+        "trace_id": "n-cbc5deb1f140418075a983cc16bdb1ff-0000000000000002",
+        "duration_ms": 0.293108,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.51"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "matched_group": "special_51",
+        "final_sequence": "sequence_special_51",
+        "final_upstream": "higher_supplier",
+        "upstream_targets": "127.0.0.1:25557",
+        "selected_upstream": "127.0.0.1:25557",
+        "upstream_diagnostics": {
+          "schema_version": 1,
+          "selected": {
+            "entry": "higher_supplier",
+            "peer": "127.0.0.1:25557",
+            "transport": "tcp"
+          },
+          "attempts": []
+        }
+      },
+      {
+        "query_time": "2026-10-03T18:07:58.171101972Z",
+        "query_name": "shared.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.1",
+        "trace_id": "n-cbc5deb1f140418075a983cc16bdb1ff-0000000000000001",
+        "duration_ms": 0.547602,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.55"
+          }
+        ],
+        "answer_details_status": "complete",
+        "domain_set": "special_route_50",
+        "effective_tag": "\u7279\u6b8a\u4e0a\u6e3850",
+        "matched_group": "special_50",
+        "final_sequence": "sequence_special_50",
+        "final_upstream": "lower_supplier_v2",
+        "upstream_targets": "127.0.0.1:25559",
+        "selected_upstream": "127.0.0.1:25559",
+        "upstream_diagnostics": {
+          "schema_version": 1,
+          "selected": {
+            "entry": "lower_supplier_v2",
+            "peer": "127.0.0.1:25559",
+            "transport": "udp"
+          },
+          "attempts": []
+        },
+        "matched_rule_source": "domain_set:special_route_50"
+      }
+    ]
+  },
+  "peer_requests_before": 6,
+  "peer_requests_after": 6
+}

@@ -1,0 +1,20 @@
+{
+  "base": "9e9254e0a4dca188c5957715e6f0cebac8493b63",
+  "files": {
+    "rust/native-host/build.rs": "a646dc77624f649d763397fce88915c7bd2b22278da88aac65d7a996368ffe6b",
+    "rust/native-host/Cargo.toml": "72b08dcb09a001fa4d125504a2ac1e80cddcd109a5b56c539ea9fcceba974f1f",
+    "rust/native-host/src/static_ui.rs": "50c49656b7630101cfdc6c4cda9c304eaf866af49a8b375a648e5eb6258815f6",
+    "rust/native-host/src/api.rs": "a0a90dd0e86e6548d9f77dac7b28e864d6d79f23679b61fc659dda74c21d10b6",
+    "rust/native-host/src/lib.rs": "669ecb0f77a1a9d3f16eda75a253fec0b118a01bf3d4acbefcd0fedc6cc980a8",
+    "rust/native-host/tests/slice6_management_http.rs": "3c9dd6cfad680fdeb58d2a9be2c0a74dc1522aa857d0cc644a4a89fe9ad7f825",
+    "coremain/www/log.html": "4112322a8d3c22c8596c64d7998dd37e87de50cd445cb206f404d71c60d04913",
+    "coremain/www/log1.html": "17785ab13d5b969e49e981d04d21ec9d8df1fc103d8e791d91270fc2cbcd4f31",
+    "coremain/www/assets/vue-log/index.html": "202430b54e0d235a77aea7f2bb313306bff8b4ed928b1c06060a911c4da82b09",
+    "coremain/www/assets/vue-log/app.css": "5554a3dbed9c96085c92d4e103e51d533d16f4c23174dd2c7c650a7211533d37",
+    "coremain/www/assets/vue-log/app.js": "8bfd4f3da9d790ed06b37e956bbd3a0d9078c675e3bd683217d615980de23a5f",
+    "coremain/www/assets/vue-log1/log1.index.html": "d3337e9dca4a94bf1bcac34ce8289fc7c530bfd357148c5adfe0871420a766ed",
+    "coremain/www/assets/vue-log1/app.css": "0cc117cd7b72b4cdb4b9f29ac5ac8cea386b376cc58744ff6bf38ae23d01f698",
+    "coremain/www/assets/vue-log1/app.js": "b32f56c421e52c7fd236fbb5919ac4a7974a48342bca56baf01409fe9a2f02ac"
+  },
+  "remote_match": true
+}

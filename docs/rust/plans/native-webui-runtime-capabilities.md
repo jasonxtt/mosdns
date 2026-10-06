@@ -1,0 +1,23 @@
+# Native WebUI serving and truthful runtime capabilities
+
+2026-10-04. User authorized S1–S6 after planning review. Implementation, per-slice and separate cumulative code review passed at c98dc5d1012ce73aed318504c1053b04ab15de08. Parent acceptance found no new issue; task is archived. No production cutover authorization.
+
+Goal: the pure Rust-native binary serves maintained `/`, compatibility `/log` and nested generated assets on its existing api.http origin. Add safe config-base external ui/name mounts, actual supervisor readiness including503/ready:false during managed admission pause and a health-only read-only admission bypass, one build version shared by health and `mosdns version`, and an additive schema1 UI operation capability matrix with exact old-native fallback, AdGuard and server appearance read/write boundaries. Both Vue shells retain working audit/cache/local-rule/special-group/upstream workflows, while unavailable operations remain visible with reasons and generate no unsupported requests. Go capabilities404 behavior and local themes stay intact.
+
+Six coherent slices: identity/readiness; embedded static HTTP; external mount ownership/security; operation capabilities; both Vue shells; ordered native build and real-process/browser proof. Plan acceptance covers empty-runtime-directory binary-only hosting, static metadata/ETag/missing/path/method boundaries, live external files/containment/limits/drain, CLI-health agreement, all-tabs capability traffic, supported native DNS/HTTP/files/UI actions, legacy Go behavior, VM regression and final cumulative exact-source review.
+
+Proposed explicit differences for final approval: external file serving has no directory listing or symlink components/escape and a16MiB file limit; native health has null Go config-package schema fields and false config-package management, truthful Rust identity and unavailable Go/process metrics. Four concurrent static responses,5s header/10s response deadlines bound work; no performance PASS claimed. Directory mount admission changes need restart; existing mounted files are read live. No SPA/base-path rewriting; external apps configure their own subpath assets and root same-origin API requests.
+
+No restart/port mutation/updater/config-package/global-overrides/domain-generation/diagnostic-log capture/aliases/switch/requery/remembered-list/server appearance implementation in this batch. They remain owning future work. C11/C12 only gain bounded subitems after actual evidence; no whole-row/5D/Phase6 or production/default release closure. No deployment/push/unrelated cleanup.
+
+Accepted previous source is ac629018d2aa8fd2a34a26f1f7ff0b2ecab4c0fc, not branch HEAD79d93ae1; accepted source remains dirty and must be preserved. New task delta is reviewed against the accepted source with public closure/planning docs classified separately. All build/test/proof uses isolated SSH mosdns-rust. Local task `.trellis/tasks/10-04-rust-native-webui-runtime-capabilities` owns PRD/design/implement and research; public contracts/validation evidence survive a fresh clone without local tooling.
+
+[Scope/planning discussion](https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ac1a57c-a360-83ee-8fad-40126f7cc623). Final written-plan review and subsequent human approval are distinct prerequisites. Execution must bind a fresh dedicated code-review chat; ordinary planning chat/previous code PASS is not its reviewer authorization.
+
+Written-plan review round1 identified two valid P1 contract gaps (health through apply admission barrier; complete/accurately named capabilities including old-native fallback). Planning documents were corrected; subsequent same-chat rounds closed both P1 findings and the additional switch-route inventory P2. No backend implementation or code PASS.
+
+Final round3 explicit verdict: **PLAN READY — pending subsequent human implementation approval**; no remaining planning blocker. Local executor-prompt.md and final-planning-verdict.md are ready. This paragraph records the pre-implementation planning checkpoint. Review did not authorize task activation, code edits, deployment or production use.
+
+## Accepted closure — 2026-10-04
+
+[Parent acceptance](../validation-records/10-04-rust-native-webui-runtime-capabilities/owner-acceptance.md) records46 reviewed implementation/asset matches,219 matching local/VM/build inputs and independent391 native/26 frontend tests plus fmt. All S1–S6 and cumulative code reviews passed; valid findings closed. Local task archived under .trellis/tasks/archive/2026-10/10-04-rust-native-webui-runtime-capabilities, without ordinary commit/push/deploy. Public contracts/evidence remain available; source work stays dirty and preserved.

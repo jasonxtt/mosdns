@@ -1,0 +1,24 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.46s
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-8e172f456a41e331)
+
+running 1 test
+test embedded_ui_roots_assets_and_revalidation_are_real_http ... FAILED
+
+failures:
+
+---- embedded_ui_roots_assets_and_revalidation_are_real_http stdout ----
+
+thread 'embedded_ui_roots_assets_and_revalidation_are_real_http' (248259) panicked at native-host/tests/slice6_management_http.rs:921:9:
+assertion `left == right` failed
+  left: Some("/log")
+ right: Some("/log?x=1&return=%2F")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    embedded_ui_roots_assets_and_revalidation_are_real_http
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test slice6_management_http`

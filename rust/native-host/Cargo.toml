@@ -10,6 +10,7 @@ name = "mosdns"
 path = "src/main.rs"
 
 [dependencies]
+fs2 = "=0.4.3"
 flate2 = "=1.1.9"
 hickory-proto = { version = "0.25.2", default-features = false }
 mosdns-cache-core = { path = "../cache-core" }
@@ -22,6 +23,7 @@ serde_json = "1"
 getrandom = { version = "0.4.3", default-features = false, features = ["std"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
+ring = "=0.17.14"
 time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1", features = ["rt", "signal"] }
 url = "2"
@@ -37,3 +39,9 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 
 [lints]
 workspace = true
+
+[build-dependencies]
+ring = "=0.17.14"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "=1.1.4", features = ["fs"] }

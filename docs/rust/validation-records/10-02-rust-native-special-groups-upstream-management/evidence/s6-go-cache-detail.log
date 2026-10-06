@@ -1,0 +1,15 @@
+----- Cache Entry -----
+Key:           s6-go-cache.example. A IN
+StoredTime:    2026-10-03T13:18:21Z
+MsgExpire:     2026-10-03T13:19:21Z
+CacheExpire:   2026-10-03T13:23:21Z
+DNS Message:
+;; opcode: QUERY, status: NOERROR, id: 25857
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;s6-go-cache.example.	IN	 A
+
+;; ANSWER SECTION:
+s6-go-cache.example.	60	IN	A	198.51.100.42
+

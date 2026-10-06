@@ -1,0 +1,12 @@
+file:///root/mosdns-rust-webui-20261004/evidence/s5-browser-check.mjs:71
+   const oldPage=await browser.newPage();const seen=[]
+                                               ^
+
+SyntaxError: Identifier 'seen' has already been declared
+    at compileSourceTextModule (node:internal/modules/esm/utils:340:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:146:18)
+    at #translate (node:internal/modules/esm/loader:431:12)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:478:27)
+    at async ModuleJob._link (node:internal/modules/esm/module_job:110:19)
+
+Node.js v20.19.2

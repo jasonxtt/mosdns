@@ -1,0 +1,5 @@
+{
+  "status": "FAIL",
+  "cause": "fresh fixture lacked cache directory and TCP higher peer was incorrectly started as UDP; original live-proof query raised IndexError on failed response",
+  "not_accepted": true
+}

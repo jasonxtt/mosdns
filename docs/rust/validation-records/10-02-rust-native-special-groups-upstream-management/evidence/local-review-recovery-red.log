@@ -1,0 +1,40 @@
+FFE
+======================================================================
+ERROR: test_next_unit_has_independent_bootstrap (test_review_recovery.ReviewRecoveryTest.test_next_unit_has_independent_bootstrap)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/mosdns-rust-special-groups-20261003/local-tools/tests/test_review_recovery.py", line 39, in test_next_unit_has_independent_bootstrap
+    submit_review(run, "Slice 2", parent_sha="c" * 40, head_sha="d" * 40, submitted_to=target)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/mosdns-rust-special-groups-20261003/local-tools/scripts/common/automation_review.py", line 219, in submit_review
+    raise AutomationRunError(f"review unit is not current and authorized: {unit}")
+common.automation_run.AutomationRunError: review unit is not current and authorized: Slice 2
+
+======================================================================
+FAIL: test_exact_remediated_pass_without_findings_closes_prior_ledger (test_review_recovery.ReviewRecoveryTest.test_exact_remediated_pass_without_findings_closes_prior_ledger)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/mosdns-rust-special-groups-20261003/local-tools/tests/test_review_recovery.py", line 27, in test_exact_remediated_pass_without_findings_closes_prior_ledger
+    self.assertEqual(run.status, "running")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'blocked' != 'running'
+- blocked
++ running
+
+
+======================================================================
+FAIL: test_explicit_closed_narrative_is_pass_but_open_finding_is_not (test_review_recovery.ReviewRecoveryTest.test_explicit_closed_narrative_is_pass_but_open_finding_is_not)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/mosdns-rust-special-groups-20261003/local-tools/tests/test_review_recovery.py", line 33, in test_explicit_closed_narrative_is_pass_but_open_finding_is_not
+    self.assertEqual(parse_c2c_review_result(text)["status"], "pass")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'pending' != 'pass'
+- pending
++ pass
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.002s
+
+FAILED (failures=2, errors=1)

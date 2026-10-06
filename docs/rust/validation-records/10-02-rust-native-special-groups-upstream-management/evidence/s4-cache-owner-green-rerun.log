@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: field `policy_sha256` is never read
+   --> native-host/src/config.rs:450:16
+    |
+447 | pub struct CompiledConfig {
+    |            -------------- field in this struct
+...
+450 |     pub(crate) policy_sha256: Option<String>,
+    |                ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mosdns-native-host` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.55s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-118383-0/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::managed_policy_change_replaces_only_affected_cache_owners ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 133 filtered out; finished in 0.01s
+

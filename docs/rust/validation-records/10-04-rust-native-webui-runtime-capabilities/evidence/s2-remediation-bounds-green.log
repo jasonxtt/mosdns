@@ -1,0 +1,10 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.07s
+     Running unittests src/lib.rs (rust/target/debug/deps/mosdns_native_host-f99cad6ef449a523)
+
+running 2 tests
+test static_ui::tests::decoding_never_allows_component_separators_or_traversal ... ok
+test static_ui::tests::slow_body_slots_are_bounded_and_cancelled_work_releases_them ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.00s
+

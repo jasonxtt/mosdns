@@ -1,0 +1,19 @@
+    Updating crates.io index
+     Locking 2 packages to latest Rust 1.85 compatible versions
+      Adding linux-raw-sys v0.12.1
+      Adding rustix v1.1.4 (available: v1.1.5)
+ Downloading crates ...
+  Downloaded rustix v1.1.4
+  Downloaded linux-raw-sys v0.12.1
+   Compiling rustix v1.1.4
+   Compiling bitflags v2.13.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.32s
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-51fe126f6242f7ca)
+
+running 1 test
+test external_ui_is_live_confined_and_root_pinned ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.01s
+

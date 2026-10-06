@@ -1,0 +1,18 @@
+COMMAND: ['cargo', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']
+    Checking mosdns-cache-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/cache-core)
+    Checking mosdns-sequence-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/sequence-core)
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Checking mosdns-runtime v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/runtime)
+error: this function has too many lines (107/100)
+   --> native-host/tests/special_groups_config.rs:422:1
+    |
+422 | fn assert_group_cache_supplier(warm_without_audit: bool) {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_lines
+    = note: `-D clippy::too-many-lines` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::too_many_lines)]`
+
+error: could not compile `mosdns-native-host` (test "special_groups_config") due to 1 previous error
+
+EXIT_CODE: 101

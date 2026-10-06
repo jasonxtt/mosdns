@@ -1,0 +1,115 @@
+TAP version 13
+# Subtest: catalog uses actual ordered tags including empty catalog and permits only explicit fallback
+ok 1 - catalog uses actual ordered tags including empty catalog and permits only explicit fallback
+  ---
+  duration_ms: 1.885675
+  ...
+# Subtest: failures and unknown/malformed schema never become the legacy fake catalog
+ok 2 - failures and unknown/malformed schema never become the legacy fake catalog
+  ---
+  duration_ms: 0.513194
+  ...
+# Subtest: metrics preserve missing values, exact tags, escaped labels and genuine zero
+ok 3 - metrics preserve missing values, exact tags, escaped labels and genuine zero
+  ---
+  duration_ms: 0.36563
+  ...
+# Subtest: partial batch failures retain specific tags and actual successful count
+ok 4 - partial batch failures retain specific tags and actual successful count
+  ---
+  duration_ms: 0.183488
+  ...
+# Subtest: runtime capability discovery caches native response for the page session
+ok 5 - runtime capability discovery caches native response for the page session
+  ---
+  duration_ms: 2.403569
+  ...
+# Subtest: only capability endpoint 404 selects the legacy Go workflow
+ok 6 - only capability endpoint 404 selects the legacy Go workflow
+  ---
+  duration_ms: 0.327958
+  ...
+# Subtest: legacy capability fallback retains successful diversion catalogs when an optional catalog is 404
+ok 7 - legacy capability fallback retains successful diversion catalogs when an optional catalog is 404
+  ---
+  duration_ms: 0.478807
+  ...
+# Subtest: network and server errors are surfaced and can be retried
+ok 8 - network and server errors are surfaced and can be retried
+  ---
+  duration_ms: 0.499487
+  ...
+# Subtest: malformed capability responses fail closed
+ok 9 - malformed capability responses fail closed
+  ---
+  duration_ms: 0.201502
+  ...
+# Subtest: native source editor accepts only supported local text records
+ok 10 - native source editor accepts only supported local text records
+  ---
+  duration_ms: 1.218242
+  ...
+# Subtest: native source payload excludes downloader and advanced-format state
+ok 11 - native source payload excludes downloader and advanced-format state
+  ---
+  duration_ms: 0.258932
+  ...
+# Subtest: native source edits cannot move ownership across catalogs
+ok 12 - native source edits cannot move ownership across catalogs
+  ---
+  duration_ms: 0.202713
+  ...
+# Subtest: unsupported upstreams stay read-only and visible
+ok 13 - unsupported upstreams stay read-only and visible
+  ---
+  duration_ms: 0.353497
+  ...
+# Subtest: present incomplete operation matrix is invalid discovery, never legacy
+ok 14 - present incomplete operation matrix is invalid discovery, never legacy
+  ---
+  duration_ms: 1.671465
+  ...
+# Subtest: old Rust schema1 uses explicit conservative operations, not Go
+ok 15 - old Rust schema1 uses explicit conservative operations, not Go
+  ---
+  duration_ms: 0.456034
+  ...
+# Subtest: every false family suppresses actual fetch for reads, refreshes and stale writes
+ok 16 - every false family suppresses actual fetch for reads, refreshes and stale writes
+  ---
+  duration_ms: 4.011474
+  ...
+# Subtest: new matrix requires all entries and valid bool/reason, allows additive unknown keys
+ok 17 - new matrix requires all entries and valid bool/reason, allows additive unknown keys
+  ---
+  duration_ms: 1.855895
+  ...
+# Subtest: exact old native fallback maps each strict endpoint boolean and never health/process/Go families
+ok 18 - exact old native fallback maps each strict endpoint boolean and never health/process/Go families
+  ---
+  duration_ms: 0.337935
+  ...
+# Subtest: discovery errors remain retryable without optional network requests
+ok 19 - discovery errors remain retryable without optional network requests
+  ---
+  duration_ms: 32.581572
+  ...
+# Subtest: successful inventory mutations reload capabilities and named cache tags retain own gate
+ok 20 - successful inventory mutations reload capabilities and named cache tags retain own gate
+  ---
+  duration_ms: 2.355078
+  ...
+# Subtest: unadvertised audit version and separately disabled switch followup never reach fetch
+ok 21 - unadvertised audit version and separately disabled switch followup never reach fetch
+  ---
+  duration_ms: 0.565446
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 539.893106

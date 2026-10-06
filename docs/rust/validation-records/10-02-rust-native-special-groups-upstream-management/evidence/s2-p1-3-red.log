@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 1.19s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-dec9d4e49d597c3a)
+
+running 1 test
+test changing_listener_entry_invalidates_a_shared_wire_cache ... FAILED
+
+failures:
+
+---- changing_listener_entry_invalidates_a_shared_wire_cache stdout ----
+
+thread 'changing_listener_entry_invalidates_a_shared_wire_cache' (31434) panicked at native-host/tests/special_groups_supervisor.rs:38:81:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "native_management", reason: "special_groups hook must be reachable from primary entry" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    changing_listener_entry_invalidates_a_shared_wire_cache
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

@@ -92,6 +92,9 @@ pub(crate) struct ExecutionRequest<'a> {
     pub raw: &'a [u8],
     pub header: QueryHeader,
     pub question: QuestionInfo,
+    /// The immutable switch values captured when the host admitted this
+    /// datagram or frame, with the `A` fast bits already seeded.
+    pub switch_seed: crate::switch_state::SwitchAdmissionSeed,
 }
 
 pub(crate) struct RefreshEnvironment {
@@ -159,10 +162,11 @@ impl RefreshEnvironment {
                 && !cancellation.is_cancelled()
                 && Instant::now() < deadline
             {
-                if let MachineResponseState::Raw(wire) = result.state.response {
-                    let _ = token.publish_with_domain(
+                if let MachineResponseState::Raw(wire) = &result.state.response {
+                    let _ = token.publish_with_origin(
                         wire.as_bytes(),
                         result.state.routing.domain_set.as_deref().unwrap_or(""),
+                        result.state.response_origin().cloned(),
                     );
                 }
             }
@@ -747,6 +751,7 @@ struct ExecutionFacts<'a> {
     capture_audit_details: bool,
     cache_status: CacheStatus,
     response_source: Option<ResponseSource>,
+    response_origin: Option<mosdns_sequence_core::ResponseOrigin>,
     upstream_attempts: UpstreamAttemptList,
     selected_peer: Option<SocketAddr>,
     upstream_diagnostics: Option<UpstreamDiagnostics>,
@@ -909,6 +914,13 @@ impl ExecutionFacts<'_> {
         self.routing_changed_since_response = false;
     }
 
+    /// CNAME normalization changes wire bytes, while retaining the decision
+    /// and supplier that produced them. Do not classify that new wire revision
+    /// as a fresh response with empty routing provenance.
+    fn note_cname_normalization(&mut self, state: &ExecutionState) {
+        self.last_response_generation = state.response_generation();
+    }
+
     fn set_failure_provenance(&mut self, provenance: FailureProvenance) {
         if self.capture_audit_details {
             self.failure_provenance = Some(provenance);
@@ -962,6 +974,7 @@ impl ExecutionFacts<'_> {
         outcome: UpstreamAttemptOutcome,
     ) {
         self.upstream_attempts.push_metric(UpstreamMetricAttempt {
+            generation: self.config.generation,
             executable,
             entry_index,
             outcome,
@@ -1078,6 +1091,7 @@ impl Drop for ExecutionFacts<'_> {
                     }
                 });
                 self.upstream_attempts.push_metric(UpstreamMetricAttempt {
+                    generation: self.config.generation,
                     executable,
                     entry_index: slot.entry_index,
                     outcome,
@@ -1228,6 +1242,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         raw,
         header,
         question,
+        switch_seed,
     } = request;
     let capture_audit_details = checkpoint.capture_audit_details();
     let multi_forward = config.program.externals.len() > config.caches.len() + 1;
@@ -1239,6 +1254,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
             CacheStatus::Undetermined
         },
         response_source: None,
+        response_origin: None,
         upstream_attempts: UpstreamAttemptList::with_capacity_hint(if multi_forward {
             config.forwards.len()
         } else {
@@ -1278,6 +1294,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     };
     let mut state = ExecutionState::new(header, question.clone());
     state.query.client = client;
+    // The admission seed is the one immutable switch snapshot for this
+    // request; branches, fallback, preference, redirect, and lazy successors
+    // keep it through state clones.
+    state.set_admission_facts(switch_seed.facts);
+    state.fast_flags |= switch_seed.a_bits;
     // Every external leg shares this one request-owned absolute budget.
     let request_deadline = options
         .admission_deadline
@@ -1286,7 +1307,12 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         RootFuelHandle::new(DEFAULT_FUEL),
         CancellationToken::new(),
     );
-    let mut machine = match config.new_machine(state, root_control) {
+    let mut machine = match mosdns_sequence_core::ExecutionMachine::new(
+        &config.program,
+        options.entry_sequence.unwrap_or(config.sequence.sequence),
+        state,
+        root_control,
+    ) {
         Ok(machine) => machine,
         Err(_) => {
             facts.cache_status = CacheStatus::NotApplicable;
@@ -1442,6 +1468,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     }
                     let result =
                         crate::policy::apply_wire_policy(&policy.policy, machine.state_mut(), raw);
+                    if result.is_ok()
+                        && matches!(policy.policy, crate::policy::ResponsePolicy::CnameRemover)
+                    {
+                        facts.note_cname_normalization(machine.state());
+                    }
                     if matches!(result, Ok(true)) {
                         facts.set_response_source(ResponseSource::Local);
                     }
@@ -1669,7 +1700,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         if !hit.domain_set.is_empty() {
                             machine.state_mut().routing.domain_set = Some(hit.domain_set);
                         }
-                        machine.state_mut().set_raw_response(hit.response);
+                        machine
+                            .state_mut()
+                            .set_raw_response_with_origin(hit.response, hit.origin);
                         // A hit completes the successor chain that contains the
                         // cache; the caller's later rules still run. A nested
                         // cache inside that successor therefore never runs.
@@ -1785,7 +1818,17 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 }
                                 facts.failure_provenance = None;
                                 upstream_response = true;
-                                machine.state_mut().set_raw_response(wire);
+                                let origin = invocation_response_origin(
+                                    config,
+                                    dispatch.executable(),
+                                    batch.selected_entry,
+                                    batch.selected_peer,
+                                    &attempt_ledger,
+                                    branch_transport(batch.response.transport()),
+                                );
+                                machine
+                                    .state_mut()
+                                    .set_raw_response_with_origin(wire, origin);
                             }
                             None => {
                                 if !attempt_ledger.slots().is_empty() {
@@ -1913,12 +1956,13 @@ fn publish_frame(
         return;
     };
     let frame = pending_stores.remove(index);
-    let _ = frame.store_token.publish_with_domain(
+    let _ = frame.store_token.publish_with_origin(
         match &machine.state().response {
             MachineResponseState::Raw(wire) => wire.as_bytes(),
             MachineResponseState::None | MachineResponseState::Synthesized(_) => &[],
         },
         machine.state().routing.domain_set.as_deref().unwrap_or(""),
+        machine.state().response_origin().cloned(),
     );
 }
 
@@ -2207,7 +2251,9 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                         if !hit.domain_set.is_empty() {
                             machine.state_mut().routing.domain_set = Some(hit.domain_set);
                         }
-                        machine.state_mut().set_raw_response(hit.response);
+                        machine
+                            .state_mut()
+                            .set_raw_response_with_origin(hit.response, hit.origin);
                         source = Some(ResponseSource::Cache);
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
@@ -2273,6 +2319,16 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     .as_ref()
                     .ok()
                     .map(|batch| branch_transport(batch.response.transport()));
+                let origin = exchange.as_ref().ok().and_then(|batch| {
+                    invocation_response_origin(
+                        context.config,
+                        dispatch.executable(),
+                        batch.selected_entry,
+                        batch.selected_peer,
+                        &ledger.borrow(),
+                        branch_transport(batch.response.transport()),
+                    )
+                });
                 let response = match &exchange {
                     Ok(batch) => qualify_response(
                         batch.response.wire(),
@@ -2307,7 +2363,9 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                         )),
                     );
                 };
-                machine.state_mut().set_raw_response(wire);
+                machine
+                    .state_mut()
+                    .set_raw_response_with_origin(wire, origin);
                 source = identity.map(ResponseSource::Upstream);
                 step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Continue)) {
                     Ok(step) => step,
@@ -2492,7 +2550,9 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                         if !hit.domain_set.is_empty() {
                             successor.state_mut().routing.domain_set = Some(hit.domain_set);
                         }
-                        successor.state_mut().set_raw_response(hit.response);
+                        successor
+                            .state_mut()
+                            .set_raw_response_with_origin(hit.response, hit.origin);
                         return BranchOutcome::success(
                             successor.state().clone(),
                             Some(ResponseSource::Cache),
@@ -2512,9 +2572,10 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                     {
                         if let Some(token) = pending_store {
                             if let MachineResponseState::Raw(wire) = &result.state.response {
-                                let _ = token.publish_with_domain(
+                                let _ = token.publish_with_origin(
                                     wire.as_bytes(),
                                     result.state.routing.domain_set.as_deref().unwrap_or(""),
+                                    result.state.response_origin().cloned(),
                                 );
                             }
                         }
@@ -2567,6 +2628,16 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                         )),
                     );
                 };
+                let origin = exchange.as_ref().ok().and_then(|batch| {
+                    invocation_response_origin(
+                        context.config,
+                        executable,
+                        batch.selected_entry,
+                        batch.selected_peer,
+                        &ledger.borrow(),
+                        branch_transport(batch.response.transport()),
+                    )
+                });
                 let source = exchange
                     .ok()
                     .and_then(|batch| {
@@ -2578,7 +2649,9 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                             .or_else(|| upstream_identity(context.config, executable))
                     })
                     .map(ResponseSource::Upstream);
-                successor.state_mut().set_raw_response(wire);
+                successor
+                    .state_mut()
+                    .set_raw_response_with_origin(wire, origin);
                 drive_branch(successor, context, source).await
             }
         }
@@ -2708,7 +2781,7 @@ fn run_query_policy<'a, E: ExchangeExecutor + ?Sized>(
             };
             if let Some(decorated) = decorated {
                 match decorated {
-                    Ok(wire) => outcome.state.set_raw_response(wire),
+                    Ok(wire) => outcome.state.rewrite_raw_response(wire),
                     Err(error) => {
                         outcome =
                             BranchOutcome::failure(outcome.state, ExecutionError::Executor(error))
@@ -3411,6 +3484,35 @@ fn invocation_identity(
         .map(|entry| entry.identity.clone())
 }
 
+fn invocation_response_origin(
+    config: &CompiledConfig,
+    executable: ExecutableId,
+    selected_entry: Option<usize>,
+    peer: Option<SocketAddr>,
+    ledger: &UpstreamAttemptLedger,
+    fallback_transport: UpstreamTransport,
+) -> Option<mosdns_sequence_core::ResponseOrigin> {
+    let identity = selected_entry
+        .and_then(|index| {
+            config
+                .response_identities
+                .get(&(executable.0, index))
+                .cloned()
+        })
+        .or_else(|| upstream_identity(config, executable).map(std::sync::Arc::from))?;
+    let slot = selected_entry
+        .and_then(|index| ledger.slots().iter().find(|slot| slot.entry_index == index));
+    Some(mosdns_sequence_core::ResponseOrigin {
+        identity,
+        peer: peer.or_else(|| slot.and_then(|slot| slot.peer)),
+        transport: Some(
+            slot.and_then(|slot| slot.transport)
+                .unwrap_or(fallback_transport)
+                .as_str(),
+        ),
+    })
+}
+
 fn is_timeout(error: &UpstreamError) -> bool {
     match error {
         UpstreamError::DeadlineExceeded(_) => true,
@@ -3531,6 +3633,7 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
         branch_metrics
             .borrow_mut()
             .push_metric(UpstreamMetricAttempt {
+                generation: config.generation,
                 executable,
                 entry_index: 0,
                 outcome: fallback_outcome,
@@ -3580,6 +3683,7 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
         branch_metrics
             .borrow_mut()
             .push_metric(UpstreamMetricAttempt {
+                generation: config.generation,
                 executable,
                 entry_index: slot.entry_index,
                 outcome,
@@ -3652,6 +3756,9 @@ fn result_from_state(
     }
     facts.note_routing(machine.state());
     facts.note_response(machine.state());
+    if facts.capture_audit_details {
+        facts.response_origin = machine.state().response_origin().cloned();
+    }
     let response = response_from_state(machine, header, question);
     result_from_wire(response, facts)
 }
@@ -3672,13 +3779,20 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
             .take()
             .unwrap_or_else(|| std::mem::take(&mut facts.routing))
     };
-    let supplying_identity = facts.response_source.as_ref().and_then(|source| {
-        if let ResponseSource::Upstream(upstream) = source {
-            Some(upstream.clone())
-        } else {
-            None
-        }
-    });
+    let origin = (!response_wire.is_empty())
+        .then_some(facts.response_origin.as_ref())
+        .flatten();
+    let supplying_identity = origin
+        .map(|origin| origin.identity.to_string())
+        .or_else(|| {
+            facts.response_source.as_ref().and_then(|source| {
+                if let ResponseSource::Upstream(upstream) = source {
+                    Some(upstream.clone())
+                } else {
+                    None
+                }
+            })
+        });
     let derived_final_upstream = supplying_identity.clone();
     let final_sequence = routing
         .final_sequence
@@ -3709,10 +3823,15 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
     });
     let actual_upstream = (!response_wire.is_empty())
         .then(|| {
-            supplying_identity
-                .as_deref()
-                .and_then(|identity| upstream_endpoint(facts.config, identity))
-                .or_else(|| facts.selected_peer.map(|peer| peer.to_string()))
+            origin
+                .and_then(|origin| origin.peer)
+                .map(|peer| peer.to_string())
+                .or_else(|| {
+                    supplying_identity
+                        .as_deref()
+                        .and_then(|identity| upstream_endpoint(facts.config, identity))
+                        .or_else(|| facts.selected_peer.map(|peer| peer.to_string()))
+                })
         })
         .flatten();
     let response_source = facts
@@ -3721,7 +3840,21 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
         .unwrap_or(ResponseSource::Local);
     if !matches!(response_source, ResponseSource::Upstream(_)) {
         if let Some(diagnostics) = &mut facts.upstream_diagnostics {
-            diagnostics.selected = None;
+            diagnostics.selected = origin.and_then(|origin| {
+                let transport = match origin.transport? {
+                    "udp" => UpstreamTransport::Udp,
+                    "tcp" => UpstreamTransport::Tcp,
+                    "tls" => UpstreamTransport::Tls,
+                    "https" => UpstreamTransport::Https,
+                    _ => return None,
+                };
+                Some(UpstreamDiagnosticSelected {
+                    branch_id: None,
+                    entry: origin.identity.to_string(),
+                    peer: origin.peer?,
+                    transport,
+                })
+            });
         }
     }
     let response = observed_response(&response_wire, response_source);
@@ -4587,6 +4720,7 @@ mod tests {
                 raw: request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             executor,
             TransportCancellation::new(),
@@ -4626,6 +4760,7 @@ mod tests {
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &executor,
             cancellation,
@@ -4823,6 +4958,7 @@ mod tests {
                         raw: &raw,
                         header,
                         question,
+                        switch_seed: Default::default(),
                     },
                     &PendingExchange {
                         entered: task_entered,
@@ -4922,6 +5058,7 @@ plugins:
                         raw: &raw,
                         header,
                         question,
+                        switch_seed: Default::default(),
                     },
                     &PendingExchange {
                         entered: task_entered,
@@ -5001,6 +5138,7 @@ plugins:
                         raw: &raw,
                         header,
                         question,
+                        switch_seed: Default::default(),
                     },
                     &FirstLegThenPendingExchange {
                         first_leg: b,
@@ -5238,6 +5376,13 @@ plugins:
         let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
             .expect("endpoint");
         CompiledConfig {
+            ui_base: None,
+            generation: 0,
+            cache_dependencies: Vec::new(),
+            response_identities: Default::default(),
+            managed_profile: None,
+            managed_router: None,
+            listeners: Vec::new(),
             response_policies: Vec::new(),
             ip_sets: Vec::new(),
             response_ip_rules: Vec::new(),
@@ -5285,6 +5430,7 @@ plugins:
             },
             api: None,
             domain_sets: Vec::new(),
+            switches: Vec::new(),
             program,
         }
     }
@@ -5339,6 +5485,13 @@ plugins:
             .expect("endpoint");
         (
             CompiledConfig {
+                ui_base: None,
+                generation: 0,
+                cache_dependencies: Vec::new(),
+                response_identities: Default::default(),
+                managed_profile: None,
+                managed_router: None,
+                listeners: Vec::new(),
                 response_policies: Vec::new(),
                 ip_sets: Vec::new(),
                 response_ip_rules: Vec::new(),
@@ -5383,6 +5536,7 @@ plugins:
                 },
                 api: None,
                 domain_sets: Vec::new(),
+                switches: Vec::new(),
                 program,
             },
             a_id,
@@ -5411,6 +5565,7 @@ plugins:
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &executor,
             mosdns_upstream_core::TransportCancellation::new(),
@@ -5488,6 +5643,7 @@ plugins:
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &executor,
             mosdns_upstream_core::TransportCancellation::new(),
@@ -5519,6 +5675,7 @@ plugins:
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &executor,
             TransportCancellation::new(),
@@ -5606,6 +5763,7 @@ plugins:
                         raw: &cancelled_request,
                         header: cancelled_header,
                         question: cancelled_question,
+                        switch_seed: Default::default(),
                     },
                     &executor,
                     cancelled_cancellation,
@@ -5619,6 +5777,7 @@ plugins:
                         raw: &live_request,
                         header: live_header,
                         question: live_question,
+                        switch_seed: Default::default(),
                     },
                     &executor,
                     live_cancellation,
@@ -5667,6 +5826,7 @@ plugins:
                 raw: &first,
                 header: first_header,
                 question: first_question,
+                switch_seed: Default::default(),
             },
             &mock,
             cancellation.clone(),
@@ -5685,6 +5845,7 @@ plugins:
                 raw: &second,
                 header: second_header,
                 question: second_question,
+                switch_seed: Default::default(),
             },
             &mock,
             cancellation,
@@ -5722,6 +5883,7 @@ plugins:
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &wrong_owner,
             mosdns_upstream_core::TransportCancellation::new(),
@@ -5754,6 +5916,7 @@ plugins:
                 raw: &first,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &mock,
             cancellation.clone(),
@@ -5769,6 +5932,7 @@ plugins:
                 raw: &second,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &mock,
             cancellation,
@@ -5795,6 +5959,7 @@ plugins:
                 raw: &first,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &local_mock,
             cancellation.clone(),
@@ -5810,6 +5975,7 @@ plugins:
                 raw: &second,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &local_mock,
             cancellation,
@@ -5863,6 +6029,13 @@ plugins:
         let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
             .expect("endpoint");
         let config = CompiledConfig {
+            ui_base: None,
+            generation: 0,
+            cache_dependencies: Vec::new(),
+            response_identities: Default::default(),
+            managed_profile: None,
+            managed_router: None,
+            listeners: Vec::new(),
             response_policies: Vec::new(),
             ip_sets: Vec::new(),
             response_ip_rules: Vec::new(),
@@ -5910,6 +6083,7 @@ plugins:
             },
             api: None,
             domain_sets: Vec::new(),
+            switches: Vec::new(),
             program,
         };
         (config, forward_id, CacheId(0))
@@ -5966,6 +6140,13 @@ plugins:
             .expect("endpoint");
         (
             CompiledConfig {
+                ui_base: None,
+                generation: 0,
+                cache_dependencies: Vec::new(),
+                response_identities: Default::default(),
+                managed_profile: None,
+                managed_router: None,
+                listeners: Vec::new(),
                 response_policies: Vec::new(),
                 ip_sets: Vec::new(),
                 response_ip_rules: Vec::new(),
@@ -6021,6 +6202,7 @@ plugins:
                 },
                 api: None,
                 domain_sets: Vec::new(),
+                switches: Vec::new(),
                 program,
             },
             child_id,
@@ -6146,6 +6328,13 @@ plugins:
             exclude_ip: Vec::new(),
         };
         let config = CompiledConfig {
+            ui_base: None,
+            generation: 0,
+            cache_dependencies: Vec::new(),
+            response_identities: Default::default(),
+            managed_profile: None,
+            managed_router: None,
+            listeners: Vec::new(),
             response_policies: Vec::new(),
             ip_sets: Vec::new(),
             response_ip_rules: Vec::new(),
@@ -6178,6 +6367,7 @@ plugins:
             },
             api: None,
             domain_sets: Vec::new(),
+            switches: Vec::new(),
             program,
         };
         (config, forward_b_id, forward_c_id, forward_b_id)
@@ -6215,6 +6405,7 @@ plugins:
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &executor,
             TransportCancellation::new(),
@@ -6898,6 +7089,7 @@ plugins:
                 raw: &request,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &executor,
             cancellation,
@@ -7101,6 +7293,7 @@ plugins:
                 raw: &first_query,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &mock,
             cancellation.clone(),
@@ -7119,6 +7312,7 @@ plugins:
                 raw: &second_query,
                 header,
                 question,
+                switch_seed: Default::default(),
             },
             &mock,
             cancellation,

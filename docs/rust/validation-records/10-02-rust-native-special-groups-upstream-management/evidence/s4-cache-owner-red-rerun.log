@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.67s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-117792-0/webinfo/audit_settings.json)
+
+thread 'runtime_snapshot::admission_tests::managed_policy_change_replaces_only_affected_cache_owners' (117793) panicked at native-host/src/runtime_snapshot.rs:1158:9:
+assertion `left == right` failed: the disjoint sibling owner must survive
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test runtime_snapshot::admission_tests::managed_policy_change_replaces_only_affected_cache_owners ... FAILED
+
+failures:
+
+failures:
+    runtime_snapshot::admission_tests::managed_policy_change_replaces_only_affected_cache_owners
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 133 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

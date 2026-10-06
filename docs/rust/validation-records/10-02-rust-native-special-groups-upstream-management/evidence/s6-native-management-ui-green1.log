@@ -1,0 +1,50 @@
+TAP version 13
+# Subtest: runtime capability discovery caches native response for the page session
+ok 1 - runtime capability discovery caches native response for the page session
+  ---
+  duration_ms: 1.781463
+  ...
+# Subtest: only capability endpoint 404 selects the legacy Go workflow
+ok 2 - only capability endpoint 404 selects the legacy Go workflow
+  ---
+  duration_ms: 0.305186
+  ...
+# Subtest: network and server errors are surfaced and can be retried
+ok 3 - network and server errors are surfaced and can be retried
+  ---
+  duration_ms: 0.491724
+  ...
+# Subtest: malformed capability responses fail closed
+ok 4 - malformed capability responses fail closed
+  ---
+  duration_ms: 0.198297
+  ...
+# Subtest: native source editor accepts only supported local text records
+ok 5 - native source editor accepts only supported local text records
+  ---
+  duration_ms: 0.319539
+  ...
+# Subtest: native source payload excludes downloader and advanced-format state
+ok 6 - native source payload excludes downloader and advanced-format state
+  ---
+  duration_ms: 0.189496
+  ...
+# Subtest: native source edits cannot move ownership across catalogs
+ok 7 - native source edits cannot move ownership across catalogs
+  ---
+  duration_ms: 0.247597
+  ...
+# Subtest: unsupported upstreams stay read-only and visible
+ok 8 - unsupported upstreams stay read-only and visible
+  ---
+  duration_ms: 0.28022
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 129.083106

@@ -1,0 +1,183 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 58.31s
+     Running unittests src/lib.rs (rust/target/debug/deps/mosdns_native_host-0c0954d916c5f2fc)
+
+running 1 test
+test api::tests::health_probe_observes_lifecycle_through_closed_admission ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 145 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (rust/target/debug/deps/mosdns-8e4a541ebb5b6015)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cache_catalog.rs (rust/target/debug/deps/cache_catalog-d9353fa245bfe024)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/cache_http.rs (rust/target/debug/deps/cache_http-98ea1c3af579c376)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/cache_lifecycle.rs (rust/target/debug/deps/cache_lifecycle-959f1a13c4257572)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running tests/client_context.rs (rust/target/debug/deps/client_context-64284305cd23145e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/ecs_cache.rs (rust/target/debug/deps/ecs_cache-87f4ccc2a53f855e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/ecs_dump.rs (rust/target/debug/deps/ecs_dump-e1f4518b8533cfbe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/ecs_refresh.rs (rust/target/debug/deps/ecs_refresh-29c7d7396ef87228)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ecs_wire.rs (rust/target/debug/deps/ecs_wire-0d55ec91f2e9076f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/native_version.rs (rust/target/debug/deps/native_version-b6d4ef6a94fea7f8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/observability.rs (rust/target/debug/deps/observability-559532c26f7fc929)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/policy_config.rs (rust/target/debug/deps/policy_config-35635a5e6677db57)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/policy_wire.rs (rust/target/debug/deps/policy_wire-61cfdf9251efd61c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+     Running tests/slice1_cache.rs (rust/target/debug/deps/slice1_cache-c72cfff256500370)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/slice2_config.rs (rust/target/debug/deps/slice2_config-a9c953c6ff8c2116)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running tests/slice3_composition.rs (rust/target/debug/deps/slice3_composition-4da1c40801e2570b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/slice4_fast_mark_flow_setter.rs (rust/target/debug/deps/slice4_fast_mark_flow_setter-5a9c251597b9900c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/slice5_management_config.rs (rust/target/debug/deps/slice5_management_config-791d9c9edd1ade56)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-1e7785026dba784e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/slice7_management_publication.rs (rust/target/debug/deps/slice7_management_publication-d28621eb29336455)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/slice8_audit_read_http.rs (rust/target/debug/deps/slice8_audit_read_http-a635ef12c06423a3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/slice9_forwarding.rs (rust/target/debug/deps/slice9_forwarding-64ceabb6f7885239)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/special_groups_config.rs (rust/target/debug/deps/special_groups_config-9b1fcf58280bec1e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/special_groups_supervisor.rs (rust/target/debug/deps/special_groups_supervisor-968b13438e2ed7e9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.00s
+
+     Running tests/special_groups_whole_chain.rs (rust/target/debug/deps/special_groups_whole_chain-b4c93af6c900cb75)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/w1_tcp.rs (rust/target/debug/deps/w1_tcp-77a3c6028c3d8ca8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/w1_udp.rs (rust/target/debug/deps/w1_udp-2dff58d5756ad704)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/w2_cache.rs (rust/target/debug/deps/w2_cache-4d3c4df49e868065)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/w3_routing.rs (rust/target/debug/deps/w3_routing-e46e077f4b36fb67)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

@@ -1,0 +1,70 @@
+{
+  "status": "PASS",
+  "cases": [
+    {
+      "shell": "/",
+      "fault": "500",
+      "accepted": 200,
+      "rowsRetained": true,
+      "disabled": true,
+      "retryRefreshed": true,
+      "attempts": 2
+    },
+    {
+      "shell": "/",
+      "fault": "network",
+      "accepted": 200,
+      "rowsRetained": true,
+      "disabled": true,
+      "retryRefreshed": true,
+      "attempts": 2
+    },
+    {
+      "shell": "/",
+      "fault": "invalid",
+      "accepted": 200,
+      "rowsRetained": true,
+      "disabled": true,
+      "retryRefreshed": true,
+      "attempts": 2
+    },
+    {
+      "shell": "/log",
+      "fault": "500",
+      "accepted": 200,
+      "rowsRetained": true,
+      "disabled": true,
+      "retryRefreshed": true,
+      "attempts": 2
+    },
+    {
+      "shell": "/log",
+      "fault": "network",
+      "accepted": 200,
+      "rowsRetained": true,
+      "disabled": true,
+      "retryRefreshed": true,
+      "attempts": 2
+    },
+    {
+      "shell": "/log",
+      "fault": "invalid",
+      "accepted": 200,
+      "rowsRetained": true,
+      "disabled": true,
+      "retryRefreshed": true,
+      "attempts": 2
+    }
+  ],
+  "current": {
+    "shell": "/log",
+    "fault": "invalid",
+    "initialCatalogVisible": true,
+    "accepted": 200
+  },
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (./webinfo/audit_settings.json)\ncache startup /root/mosdns-rust-webui-20261004/evidence/cumulative-retention-green/runtime/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty\n"
+}

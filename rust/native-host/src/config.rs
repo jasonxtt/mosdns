@@ -20,7 +20,7 @@ use url::Url;
 use crate::managed::{DomainSetHandle, ManagedDomainSet};
 use crate::matchers::{
     ClientIpMatcher, DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher,
-    ResponseIpMatcher, TrueMatcher, build_domain_set, resolve_rule_path,
+    ResponseIpMatcher, TrueMatcher, build_domain_set_with_inputs, resolve_rule_path,
 };
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
@@ -32,7 +32,7 @@ pub enum LogLevel {
 }
 
 /// The listener transport accepted by the native host.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ListenerKind {
     Udp,
     Tcp,
@@ -61,6 +61,7 @@ pub struct ForwardDefinitionConfig {
 pub struct ForwardEntryConfig {
     pub tag: Option<String>,
     pub identity: String,
+    pub(crate) response_identity: std::sync::Arc<str>,
     /// Numeric dial endpoint for the legacy view, when this entry is already
     /// numeric or supplies an explicit numeric `dial_addr`.
     pub endpoint: Option<Endpoint>,
@@ -217,6 +218,7 @@ impl ForwardCompiler {
             }
             entries.push(ForwardEntryConfig {
                 tag: None,
+                response_identity: std::sync::Arc::from(identity.as_str()),
                 identity,
                 endpoint,
                 target,
@@ -417,6 +419,10 @@ pub struct ApiConfig {
 /// but are not management targets.
 pub struct DomainSetConfig {
     pub tag: String,
+    /// Semantic identity of the accepted rules, independent of its display
+    /// tag or source path. Cache dependency closure uses this instead of
+    /// invalidating every cache when any managed rule file changes.
+    pub(crate) semantic_sha256: String,
     pub managed: Option<Rc<ManagedDomainSet>>,
     /// Why a query-only or conflicting shape is not a management target. The
     /// bounded API reports this explicitly instead of guessing.
@@ -441,6 +447,18 @@ impl DomainSetConfig {
 
 /// The typed, validated graph consumed by pre-I/O host assembly.
 pub struct CompiledConfig {
+    /// Captured top-level configuration base for startup-only UI mounts.
+    pub(crate) ui_base: Option<PathBuf>,
+    /// Runtime generation qualifies snapshot-local executable/metric IDs.
+    pub(crate) generation: u64,
+    /// Per-cache transitive wire-policy dependency fingerprints. `None`
+    /// means the compiler cannot prove reuse safe for that cache owner.
+    pub(crate) cache_dependencies: Vec<Option<String>>,
+    pub(crate) response_identities: std::collections::HashMap<(usize, usize), std::sync::Arc<str>>,
+    pub managed_profile: Option<crate::special_groups::ManagedProfile>,
+    pub managed_router: Option<ManagedRouterConfig>,
+    /// Ordered listener inventory. `listener` remains the primary helper view.
+    pub listeners: Vec<ListenerConfig>,
     pub response_policies: Vec<ResponsePolicyConfig>,
     pub ip_sets: Vec<IpSetConfig>,
     pub response_ip_rules: Vec<ResponseIpRuleConfig>,
@@ -462,9 +480,24 @@ pub struct CompiledConfig {
     pub listener: ListenerConfig,
     /// Every compiled `domain_set` with its management eligibility.
     pub domain_sets: Vec<DomainSetConfig>,
+    /// Every declared switch1..17 owner in stable type order. Declarations
+    /// are immutable compile output; live values live in the host registry.
+    pub switches: Vec<crate::switch::SwitchDeclaration>,
     /// The scoped management HTTP listener, when one is configured.
     pub api: Option<ApiConfig>,
     pub program: ValidatedProgram,
+}
+
+/// The native router's canonical named calls. All IDs belong to this program.
+pub struct ManagedRouterConfig {
+    pub sequence: SequenceId,
+    pub groups: Vec<ManagedRouterGroup>,
+}
+pub struct ManagedRouterGroup {
+    pub slot: u32,
+    /// Snapshot-local indices into `CompiledConfig.domain_sets` in priority order.
+    pub providers: [usize; 2],
+    pub child: SequenceId,
 }
 
 pub struct ResponseIpRuleConfig {
@@ -534,10 +567,44 @@ impl std::error::Error for ConfigError {}
 
 /// Loads a UTF-8 YAML configuration without compiling or opening resources.
 pub fn load_yaml(path: &Path) -> Result<String, ConfigError> {
-    std::fs::read_to_string(path).map_err(|error| {
+    let display = path.display().to_string();
+    let file_path = path.to_path_buf();
+    let text = crate::transaction::blocking_io(move || std::fs::read_to_string(file_path))
+        .map_err(|error| {
+            ConfigError::new(
+                display.clone(),
+                format!("cannot read configuration: {error}"),
+            )
+        })?;
+    text.map_err(|error| ConfigError::new(display, format!("cannot read configuration: {error}")))
+}
+
+pub(crate) fn load_yaml_with_inputs(
+    path: &Path,
+    inputs: &mut crate::special_groups::CandidateInputSet,
+) -> Result<String, ConfigError> {
+    let display = path.display().to_string();
+    let file_path = path.to_path_buf();
+    let bytes = crate::transaction::blocking_io(move || std::fs::read(file_path))
+        .map_err(|error| {
+            ConfigError::new(
+                display.clone(),
+                format!("cannot read configuration: {error}"),
+            )
+        })?
+        .map_err(|error| {
+            ConfigError::new(
+                display.clone(),
+                format!("cannot read configuration: {error}"),
+            )
+        })?;
+    inputs
+        .record_bytes(path, &bytes)
+        .map_err(|reason| ConfigError::new(display.clone(), reason))?;
+    String::from_utf8(bytes).map_err(|error| {
         ConfigError::new(
             path.display().to_string(),
-            format!("cannot read configuration: {error}"),
+            format!("configuration is not UTF-8: {error}"),
         )
     })
 }
@@ -548,7 +615,9 @@ pub fn load_yaml(path: &Path) -> Result<String, ConfigError> {
 pub fn load_and_compile(path: &Path) -> Result<CompiledConfig, ConfigError> {
     let yaml = load_yaml(path)?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new(""));
-    compile_yaml_with_base(&yaml, base_dir)
+    let mut compiled = compile_yaml_with_base_and_origin(&yaml, base_dir, Some(path))?;
+    compiled.ui_base = Some(absolute_base(base_dir)?);
+    Ok(compiled)
 }
 
 /// Strictly decodes and compiles an in-memory configuration that resolves
@@ -562,8 +631,49 @@ pub fn compile_yaml(yaml: &str) -> Result<CompiledConfig, ConfigError> {
 /// Strictly decodes and compiles the supported YAML subset with an explicit
 /// base directory for relative include and rule-file paths.
 pub fn compile_yaml_with_base(yaml: &str, base_dir: &Path) -> Result<CompiledConfig, ConfigError> {
+    compile_yaml_with_base_and_origin(yaml, base_dir, None)
+}
+
+/// The shared file-backed and in-memory compile entry. `origin` names the
+/// configuration file itself when one exists, so switch state-file collision
+/// checks can protect it like every other known artifact.
+fn compile_yaml_with_base_and_origin(
+    yaml: &str,
+    base_dir: &Path,
+    origin: Option<&Path>,
+) -> Result<CompiledConfig, ConfigError> {
     let raw = parse_yaml(yaml)?;
-    compile_raw(&raw, base_dir)
+    let mut compiled = compile_raw(&raw, base_dir, None, None, None, origin)?;
+    if !base_dir.as_os_str().is_empty() {
+        compiled.ui_base = Some(absolute_base(base_dir)?);
+    }
+    Ok(compiled)
+}
+
+fn absolute_base(base: &Path) -> Result<PathBuf, ConfigError> {
+    if base.is_absolute() {
+        return Ok(base.to_owned());
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(base))
+        .map_err(|error| ConfigError::new("$", format!("configuration base: {error}")))
+}
+
+pub(crate) fn compile_candidate_yaml(
+    yaml: &str,
+    base_dir: &Path,
+    profile: crate::special_groups::ManagedProfile,
+    files: &crate::special_groups::StagedFiles,
+    inputs: &mut crate::special_groups::CandidateInputSet,
+) -> Result<CompiledConfig, ConfigError> {
+    compile_raw(
+        &parse_yaml(yaml)?,
+        base_dir,
+        Some(profile),
+        Some(files),
+        Some(inputs),
+        None,
+    )
 }
 
 fn parse_yaml(yaml: &str) -> Result<RawValue, ConfigError> {
@@ -571,22 +681,89 @@ fn parse_yaml(yaml: &str) -> Result<RawValue, ConfigError> {
         .map_err(|error| ConfigError::new("$", format!("invalid YAML: {error}")))
 }
 
-fn compile_raw(raw: &RawValue, base_dir: &Path) -> Result<CompiledConfig, ConfigError> {
+/// Preflight only the explicit opt-in before acquiring the state-root writer.
+/// Full compilation is deliberately deferred until durable recovery completes.
+pub(crate) fn management_enabled(yaml: &str) -> Result<bool, ConfigError> {
+    managed_opt_in(&parse_yaml(yaml)?)
+}
+
+fn managed_opt_in(raw: &RawValue) -> Result<bool, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
-    root.reject_unknown(&["log", "include", "plugins", "api"], "$")?;
+    let Some(value) = root.get("native_management") else {
+        return Ok(false);
+    };
+    let options = expect_map(
+        value,
+        "$.native_management",
+        "native_management must be a mapping",
+    )?;
+    options.reject_unknown(&["special_groups"], "$.native_management")?;
+    expect_bool(
+        options.required("special_groups", "$.native_management")?,
+        "$.native_management.special_groups",
+    )
+}
+
+fn compile_raw(
+    raw: &RawValue,
+    base_dir: &Path,
+    candidate: Option<crate::special_groups::ManagedProfile>,
+    staged: Option<&crate::special_groups::StagedFiles>,
+    mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+    config_origin: Option<&Path>,
+) -> Result<CompiledConfig, ConfigError> {
+    let root = expect_map(raw, "$", "top level must be a mapping")?;
+    root.reject_unknown(
+        &["log", "include", "plugins", "api", "native_management"],
+        "$",
+    )?;
     let log = compile_log(root.required("log", "$")?)?;
     let api = root.get("api").map(compile_api).transpose()?;
+    let managed = if managed_opt_in(raw)? {
+        Some(match candidate {
+            Some(profile) => profile,
+            None => crate::special_groups::ManagedProfile::load(base_dir)?,
+        })
+    } else {
+        if candidate.is_some() {
+            return Err(ConfigError::new(
+                "native_management",
+                "candidate requires the frozen managed opt-in",
+            ));
+        }
+        None
+    };
 
     // Definition collection: included plugin-only files load in declaration
     // order, then this file's plugins. No definition is resolved until the
     // whole ordered catalog exists, so a reference may name a later
     // definition without changing the effective order.
     let mut definitions = Vec::new();
+    let mut include_paths = Vec::new();
     if let Some(includes) = root.get("include") {
         let includes = expect_sequence(includes, "$.include")?;
         for (index, include) in includes.iter().enumerate() {
             let expression = expect_string(include, &format!("$.include[{index}]"))?;
-            collect_included(&expression, base_dir, &mut definitions)?;
+            include_paths.push(resolve_relative(&expression, base_dir));
+            if let Some(profile) = &managed {
+                let path = resolve_relative(&expression, &profile.base_dir);
+                let generated = profile.base_dir.join(crate::special_groups::GENERATED_PATH);
+                if crate::special_groups::lexical_path(&path) == generated
+                    || canonicalized_path(&path)
+                        .is_some_and(|path| canonicalized_path(&generated).as_ref() == Some(&path))
+                {
+                    return Err(ConfigError::new(
+                        "$.include",
+                        "generated special_groups input must not be explicitly included",
+                    ));
+                }
+            }
+            collect_included(
+                &expression,
+                base_dir,
+                &mut definitions,
+                inputs.as_deref_mut(),
+            )?;
         }
     }
     let plugins = expect_sequence(root.required("plugins", "$")?, "$.plugins")?;
@@ -598,7 +775,828 @@ fn compile_raw(raw: &RawValue, base_dir: &Path) -> Result<CompiledConfig, Config
         )?);
     }
 
-    compile_definitions(log, api, definitions)
+    if let Some(profile) = &managed {
+        if let Some(plugin) = definitions
+            .iter()
+            .find(|plugin| crate::special_groups::reserved_tag(&plugin.tag))
+        {
+            return Err(ConfigError::new(
+                &plugin.source_path,
+                "reserved generated plugin tag collision",
+            ));
+        }
+        // `aliapi` is also the legacy wrapper name for ordinary DNS entries.
+        // Normalize only its descriptor to the native forward compiler. Signed
+        // API fields and protocols still fail that strict compiler; no fallback.
+        for plugin in &mut definitions {
+            if plugin.kind == "aliapi" {
+                plugin.kind = "forward".into();
+            }
+        }
+        for (tag, entries) in &profile.overrides {
+            if tag.starts_with("special_upstream_") {
+                continue;
+            }
+            let plugin = definitions
+                .iter_mut()
+                .find(|plugin| &plugin.tag == tag && plugin.kind == "forward")
+                .ok_or_else(|| {
+                    ConfigError::new(
+                        "webinfo/upstream_overrides.json",
+                        format!("unknown forward tag `{tag}`"),
+                    )
+                })?;
+            let translated = crate::special_groups::forward_entries(entries, tag)?;
+            let RawValue::Map(args) = &mut plugin.args else {
+                return Err(ConfigError::new(tag, "forward args must be a mapping"));
+            };
+            let raw = parse_yaml(
+                &serde_json::to_string(&translated)
+                    .map_err(|e| ConfigError::new(tag, e.to_string()))?,
+            )?;
+            args.entries.retain(|(key, _)| key != "upstreams");
+            args.entries.push(("upstreams".into(), raw));
+        }
+        let generated = parse_yaml(&profile.generated_yaml)?;
+        let generated = expect_map(
+            &generated,
+            crate::special_groups::GENERATED_PATH,
+            "generated input",
+        )?;
+        let plugins = expect_sequence(
+            generated.required("plugins", "generated")?,
+            "generated.plugins",
+        )?;
+        for (index, plugin) in plugins.iter().enumerate() {
+            definitions.push(decode_plugin(
+                plugin,
+                &format!("@managed-generated.plugins[{index}]"),
+                &profile.base_dir,
+            )?);
+        }
+    }
+    let dependency_definitions = definitions.clone();
+    let sources = CompileSources {
+        config_origin,
+        include_paths: &include_paths,
+    };
+    let mut compiled = compile_definitions(
+        log,
+        api,
+        definitions,
+        managed.is_some(),
+        staged,
+        inputs,
+        &sources,
+    )?;
+    if let Some(profile) = managed {
+        let router = compiled
+            .program
+            .sequence_id(crate::special_groups::ROUTER_TAG)
+            .ok_or_else(|| ConfigError::new("native_management", "generated router missing"))?;
+        if !reachable_sequence(
+            &compiled,
+            compiled.sequence.sequence,
+            router,
+            &mut BTreeSet::new(),
+        ) {
+            return Err(ConfigError::new(
+                "native_management",
+                "special_groups hook must be reachable from primary entry",
+            ));
+        }
+        let groups = profile
+            .groups
+            .iter()
+            .filter(|g| !g.custom_port_only)
+            .map(|g| {
+                let provider = |tag: String| {
+                    compiled
+                        .domain_sets
+                        .iter()
+                        .position(|set| set.tag == tag)
+                        .ok_or_else(|| {
+                            ConfigError::new("native_management", "group provider missing")
+                        })
+                };
+                Ok(ManagedRouterGroup {
+                    slot: g.slot,
+                    providers: [
+                        provider(format!("special_route_{}", g.slot))?,
+                        provider(format!("special_manual_{}", g.slot))?,
+                    ],
+                    child: compiled
+                        .program
+                        .sequence_id(&format!("sequence_special_{}", g.slot))
+                        .ok_or_else(|| {
+                            ConfigError::new("native_management", "group sequence missing")
+                        })?,
+                })
+            })
+            .collect::<Result<Vec<_>, ConfigError>>()?;
+        compiled.managed_router = Some(ManagedRouterConfig {
+            sequence: router,
+            groups,
+        });
+        compiled.managed_profile = Some(profile);
+    }
+    compiled.cache_dependencies = cache_dependency_fingerprints(&compiled, &dependency_definitions);
+    Ok(compiled)
+}
+
+fn cache_dependency_fingerprints(
+    config: &CompiledConfig,
+    definitions: &[RawPlugin],
+) -> Vec<Option<String>> {
+    let plugins: BTreeMap<String, &RawPlugin> = definitions
+        .iter()
+        .map(|plugin| (plugin.tag.clone(), plugin))
+        .collect();
+    config
+        .caches
+        .iter()
+        .map(|cache| {
+            let roots: BTreeSet<SequenceId> = config
+                .program
+                .sequences
+                .iter()
+                .filter(|sequence| {
+                    sequence.rules.iter().any(|rule| {
+                        matches!(
+                            rule.executable,
+                            Some(ValidatedExecutable::External { target }) if target == cache.executable
+                        )
+                    })
+                })
+                .map(|sequence| sequence.id)
+                .collect();
+            if roots.is_empty() {
+                return None;
+            }
+
+            let mut closure = CacheDependencyClosure::new(config, &plugins);
+            closure
+                .material
+                .insert(cache_config_material(cache));
+            for root in &roots {
+                closure.add_sequence(*root);
+                closure.add_group_context_for_sequence(*root);
+            }
+
+            for listener in &config.listeners {
+                let Some(entry) = config.program.sequence_id(&listener.entry) else {
+                    closure.refuse_reuse();
+                    continue;
+                };
+                let reaches_cache = roots.iter().any(|root| {
+                    reachable_sequence(config, entry, *root, &mut BTreeSet::new())
+                });
+                if !reaches_cache {
+                    continue;
+                }
+                closure.material.insert(format!(
+                    "listener-context:{:?}:{}",
+                    listener.kind, listener.entry
+                ));
+                for root in &roots {
+                    closure.add_ancestor_context(entry, *root, &mut BTreeSet::new());
+                }
+            }
+            closure.drain();
+            closure.safe.then(|| {
+                crate::special_groups::sha256(
+                    closure
+                        .material
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                        .as_bytes(),
+                )
+            })
+        })
+        .collect()
+}
+
+struct CacheDependencyClosure<'a> {
+    config: &'a CompiledConfig,
+    plugins: &'a BTreeMap<String, &'a RawPlugin>,
+    material: BTreeSet<String>,
+    pending_sequences: Vec<SequenceId>,
+    pending_externals: Vec<ExecutableId>,
+    pending_fixtures: Vec<ExecutableId>,
+    seen_sequences: BTreeSet<SequenceId>,
+    seen_externals: BTreeSet<ExecutableId>,
+    seen_fixtures: BTreeSet<ExecutableId>,
+    seen_plugins: BTreeSet<String>,
+    safe: bool,
+}
+
+impl<'a> CacheDependencyClosure<'a> {
+    fn new(config: &'a CompiledConfig, plugins: &'a BTreeMap<String, &'a RawPlugin>) -> Self {
+        Self {
+            config,
+            plugins,
+            material: BTreeSet::new(),
+            pending_sequences: Vec::new(),
+            pending_externals: Vec::new(),
+            pending_fixtures: Vec::new(),
+            seen_sequences: BTreeSet::new(),
+            seen_externals: BTreeSet::new(),
+            seen_fixtures: BTreeSet::new(),
+            seen_plugins: BTreeSet::new(),
+            safe: true,
+        }
+    }
+
+    fn refuse_reuse(&mut self) {
+        self.safe = false;
+    }
+
+    fn drain(&mut self) {
+        loop {
+            if let Some(sequence) = self.pending_sequences.pop() {
+                self.visit_sequence(sequence);
+                continue;
+            }
+            if let Some(executable) = self.pending_externals.pop() {
+                self.visit_external(executable);
+                continue;
+            }
+            if let Some(executable) = self.pending_fixtures.pop() {
+                self.visit_fixture(executable);
+                continue;
+            }
+            break;
+        }
+    }
+
+    fn add_sequence(&mut self, sequence: SequenceId) {
+        self.pending_sequences.push(sequence);
+    }
+
+    fn visit_sequence(&mut self, id: SequenceId) {
+        if !self.seen_sequences.insert(id) {
+            return;
+        }
+        let Some(sequence) = self.config.program.sequence(id) else {
+            self.refuse_reuse();
+            return;
+        };
+        if let Some(plugin) = self.plugins.get(&sequence.name).copied() {
+            self.add_plugin(plugin);
+            self.add_references(&plugin.args);
+        } else if sequence.synthetic {
+            self.material
+                .insert(format!("synthetic-sequence-rules:{}", sequence.rules.len()));
+            for (index, rule) in sequence.rules.iter().enumerate() {
+                if !rule.matchers.is_empty() {
+                    self.refuse_reuse();
+                }
+                match rule.executable.as_ref() {
+                    Some(executable) => {
+                        if let Some(material) = self.executable_material(executable) {
+                            self.material
+                                .insert(format!("synthetic-sequence-exec:{index}:{material}"));
+                        } else {
+                            self.refuse_reuse();
+                        }
+                    }
+                    None => self.refuse_reuse(),
+                }
+            }
+        } else {
+            self.refuse_reuse();
+            return;
+        }
+        for rule in &sequence.rules {
+            let Some(executable) = &rule.executable else {
+                continue;
+            };
+            match executable {
+                ValidatedExecutable::Call { target }
+                | ValidatedExecutable::Goto { target }
+                | ValidatedExecutable::Jump { target }
+                | ValidatedExecutable::Inline { target } => self.add_sequence(*target),
+                ValidatedExecutable::Try { target } => match target {
+                    ExecutableTarget::Sequence(target) => self.add_sequence(*target),
+                    ExecutableTarget::Fixture(target) => {
+                        self.pending_fixtures.push(*target);
+                    }
+                },
+                ValidatedExecutable::Fixture { target } => {
+                    self.pending_fixtures.push(*target);
+                }
+                ValidatedExecutable::External { target } => {
+                    self.pending_externals.push(*target);
+                }
+                ValidatedExecutable::Accept
+                | ValidatedExecutable::Reject { .. }
+                | ValidatedExecutable::Return
+                | ValidatedExecutable::Exit => {}
+            }
+        }
+    }
+
+    fn executable_material(&self, executable: &ValidatedExecutable) -> Option<String> {
+        let sequence = |target: SequenceId| {
+            let sequence = self.config.program.sequence(target)?;
+            Some(if sequence.synthetic {
+                "synthetic".to_owned()
+            } else {
+                format!("sequence:{}", sequence.name)
+            })
+        };
+        let target_label = |target: NativeTarget| match target {
+            NativeTarget::Sequence(sequence_id) => sequence(sequence_id),
+            NativeTarget::Fixture(executable_id) => self
+                .config
+                .program
+                .fixture(executable_id)
+                .map(|fixture| format!("fixture:{}", fixture.name)),
+            NativeTarget::External(executable_id) => self
+                .config
+                .program
+                .external(executable_id)
+                .map(|external| format!("external:{}", external.name)),
+        };
+        Some(match executable {
+            ValidatedExecutable::Accept => "accept".to_owned(),
+            ValidatedExecutable::Reject { rcode } => format!("reject:{rcode}"),
+            ValidatedExecutable::Return => "return".to_owned(),
+            ValidatedExecutable::Call { target: id } => format!("call:{}", sequence(*id)?),
+            ValidatedExecutable::Goto { target: id } => format!("goto:{}", sequence(*id)?),
+            ValidatedExecutable::Jump { target: id } => format!("jump:{}", sequence(*id)?),
+            ValidatedExecutable::Exit => "exit".to_owned(),
+            ValidatedExecutable::Try { target: item } => {
+                let typed_target = match item {
+                    ExecutableTarget::Sequence(id) => NativeTarget::Sequence(*id),
+                    ExecutableTarget::Fixture(id) => NativeTarget::Fixture(*id),
+                };
+                format!("try:{}", target_label(typed_target)?)
+            }
+            ValidatedExecutable::Fixture { target: id } => {
+                format!("fixture:{}", self.config.program.fixture(*id)?.name)
+            }
+            ValidatedExecutable::External { target: id } => {
+                format!("external:{}", self.config.program.external(*id)?.name)
+            }
+            ValidatedExecutable::Inline { target: id } => {
+                format!("inline:{}", sequence(*id)?)
+            }
+        })
+    }
+
+    fn add_ancestor_context(
+        &mut self,
+        current: SequenceId,
+        goal: SequenceId,
+        visited: &mut BTreeSet<(SequenceId, SequenceId)>,
+    ) {
+        if current == goal || !visited.insert((current, goal)) {
+            return;
+        }
+        if self
+            .config
+            .managed_router
+            .as_ref()
+            .is_some_and(|router| router.sequence == current)
+        {
+            let groups: Vec<u32> = self
+                .config
+                .managed_router
+                .as_ref()
+                .into_iter()
+                .flat_map(|router| router.groups.iter())
+                .filter(|group| {
+                    reachable_sequence(self.config, group.child, goal, &mut BTreeSet::new())
+                })
+                .map(|group| group.slot)
+                .collect();
+            for slot in groups {
+                self.add_group_context(slot);
+            }
+            return;
+        }
+        let Some(sequence) = self.config.program.sequence(current) else {
+            self.refuse_reuse();
+            return;
+        };
+        let Some(plugin) = self.plugins.get(&sequence.name).copied() else {
+            self.refuse_reuse();
+            return;
+        };
+        self.add_plugin(plugin);
+        self.add_references(&plugin.args);
+        for rule in &sequence.rules {
+            match rule.executable.as_ref() {
+                Some(ValidatedExecutable::Call { target })
+                | Some(ValidatedExecutable::Goto { target })
+                | Some(ValidatedExecutable::Jump { target })
+                | Some(ValidatedExecutable::Inline { target }) => {
+                    self.add_ancestor_context(*target, goal, visited);
+                }
+                Some(ValidatedExecutable::Try {
+                    target: ExecutableTarget::Sequence(sequence),
+                }) => self.add_ancestor_context(*sequence, goal, visited),
+                Some(ValidatedExecutable::Try {
+                    target: ExecutableTarget::Fixture(executable),
+                })
+                | Some(ValidatedExecutable::Fixture { target: executable }) => {
+                    self.pending_fixtures.push(*executable);
+                }
+                Some(ValidatedExecutable::External { target }) => {
+                    self.pending_externals.push(*target);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn add_group_context_for_sequence(&mut self, sequence: SequenceId) {
+        let Some(sequence) = self.config.program.sequence(sequence) else {
+            return;
+        };
+        let Some(slot) = sequence
+            .name
+            .strip_prefix("sequence_special_")
+            .and_then(|slot| slot.parse::<u32>().ok())
+        else {
+            return;
+        };
+        self.add_group_context(slot);
+    }
+
+    fn add_group_context(&mut self, slot: u32) {
+        let Some(profile) = self.config.managed_profile.as_ref() else {
+            self.refuse_reuse();
+            return;
+        };
+        let Some(group) = profile.groups.iter().find(|group| group.slot == slot) else {
+            self.refuse_reuse();
+            return;
+        };
+        self.material.insert(format!(
+            "managed-group:{slot}:main-enabled:{}",
+            !group.custom_port_only
+        ));
+        if let Some(router_group) = self
+            .config
+            .managed_router
+            .as_ref()
+            .and_then(|router| router.groups.iter().find(|item| item.slot == slot))
+        {
+            for provider in router_group.providers {
+                if let Some(domain_set) = self.config.domain_sets.get(provider) {
+                    self.material.insert(format!(
+                        "managed-route:{}:{}",
+                        domain_set.tag, domain_set.semantic_sha256
+                    ));
+                } else {
+                    self.refuse_reuse();
+                }
+            }
+        }
+    }
+
+    fn visit_external(&mut self, id: ExecutableId) {
+        if !self.seen_externals.insert(id) {
+            return;
+        }
+        let Some(external) = self.config.program.external(id) else {
+            self.refuse_reuse();
+            return;
+        };
+        self.material.insert(format!("external:{}", external.name));
+        let mut recognized = false;
+        if let Some(plugin) = self.plugins.get(&external.name).copied() {
+            self.add_plugin(plugin);
+            recognized = true;
+        }
+        if let Some(invocation) = self
+            .config
+            .forward_invocations
+            .iter()
+            .find(|invocation| invocation.executable == id)
+        {
+            recognized = true;
+            let Some(definition) = self.config.forward_definitions.get(invocation.definition)
+            else {
+                self.refuse_reuse();
+                return;
+            };
+            self.material.insert(format!(
+                "forward-definition:{}:{}",
+                definition.tag, definition.concurrent
+            ));
+            for index in &invocation.entries {
+                if let Some(entry) = definition.entries.get(*index) {
+                    self.material
+                        .insert(format!("forward-entry:{}:{entry:?}", definition.tag));
+                } else {
+                    self.refuse_reuse();
+                }
+            }
+        }
+        if let Some(cache) = self
+            .config
+            .caches
+            .iter()
+            .find(|cache| cache.executable == id)
+        {
+            self.material.insert(cache_config_material(cache));
+            recognized = true;
+        }
+        if let Some(fallback) = self
+            .config
+            .fallbacks
+            .iter()
+            .find(|fallback| fallback.executable == id)
+        {
+            recognized = true;
+            self.material.insert(format!(
+                "fallback:{}:{}:{}:{}:{}",
+                fallback.tag,
+                target_name(self.config, fallback.primary),
+                target_name(self.config, fallback.secondary),
+                fallback.threshold.as_millis(),
+                fallback.always_standby
+            ));
+            self.add_target(fallback.primary);
+            self.add_target(fallback.secondary);
+        }
+        if let Some(preference) = self
+            .config
+            .preferences
+            .iter()
+            .find(|preference| preference.executable == id)
+        {
+            let family = match preference.family {
+                PreferenceFamily::Ipv4 => "ipv4",
+                PreferenceFamily::Ipv6 => "ipv6",
+            };
+            self.material.insert(format!("preference:{family}"));
+            recognized = true;
+        }
+        if let Some(policy) = self
+            .config
+            .response_policies
+            .iter()
+            .find(|policy| policy.executable == id)
+        {
+            self.material
+                .insert(format!("response-policy:{}", policy.tag));
+            recognized = true;
+        }
+        if external.name.starts_with("@native-cname:") || external.name.starts_with("@native-ecs:")
+        {
+            recognized = true;
+        }
+        if !recognized {
+            self.refuse_reuse();
+        }
+    }
+
+    fn visit_fixture(&mut self, id: ExecutableId) {
+        if !self.seen_fixtures.insert(id) {
+            return;
+        }
+        let Some(fixture) = self.config.program.fixture(id) else {
+            self.refuse_reuse();
+            return;
+        };
+        self.material.insert(format!("fixture:{}", fixture.name));
+        if let Some(tag) = fixture.name.strip_prefix("__native_plugin_") {
+            if let Some(plugin) = self.plugins.get(tag).copied() {
+                self.add_plugin(plugin);
+            } else {
+                self.refuse_reuse();
+            }
+        } else if !fixture.name.starts_with("__native_quick_") {
+            self.refuse_reuse();
+        }
+    }
+
+    fn add_target(&mut self, target: NativeTarget) {
+        match target {
+            NativeTarget::Sequence(sequence) => self.add_sequence(sequence),
+            NativeTarget::Fixture(executable) => self.pending_fixtures.push(executable),
+            NativeTarget::External(executable) => self.pending_externals.push(executable),
+        }
+    }
+
+    fn add_plugin(&mut self, plugin: &RawPlugin) {
+        if !self.seen_plugins.insert(plugin.tag.clone()) {
+            return;
+        }
+        self.material.insert(format!(
+            "plugin:{}:{}:{:?}:{:?}",
+            plugin.tag, plugin.kind, plugin.args, plugin.base_dir
+        ));
+        if matches!(plugin.kind.as_str(), "hosts" | "redirect" | "ip_set")
+            || (plugin.kind == "sequence" && sequence_has_file_backed_ip_matcher(&plugin.args))
+        {
+            // These loaders currently expose no stable, complete semantic
+            // fingerprint. Caches depending on them must start fresh. The
+            // response-IP matcher also accepts external `&file` inputs which
+            // are not represented in the raw sequence arguments' semantics.
+            self.refuse_reuse();
+        }
+    }
+
+    fn add_references(&mut self, value: &RawValue) {
+        let mut strings = Vec::new();
+        collect_raw_strings(value, &mut strings);
+        for field in strings.iter().flat_map(|value| value.split_whitespace()) {
+            let field = field.trim_start_matches('!');
+            let Some(tag) = field.strip_prefix('$') else {
+                continue;
+            };
+            if let Some(domain_set) = self
+                .config
+                .domain_sets
+                .iter()
+                .find(|domain_set| domain_set.tag == tag)
+            {
+                self.material.insert(format!(
+                    "domain-set:{}:{}",
+                    domain_set.tag, domain_set.semantic_sha256
+                ));
+            }
+            if let Some(plugin) = self.plugins.get(tag).copied() {
+                self.add_plugin(plugin);
+            }
+        }
+    }
+}
+
+fn collect_raw_strings(value: &RawValue, output: &mut Vec<String>) {
+    match value {
+        RawValue::String(value) => output.push(value.clone()),
+        RawValue::Sequence(values) => {
+            for value in values {
+                collect_raw_strings(value, output);
+            }
+        }
+        RawValue::Map(map) => {
+            for (_, value) in &map.entries {
+                collect_raw_strings(value, output);
+            }
+        }
+        RawValue::Null | RawValue::Bool(_) | RawValue::Number(_) => {}
+    }
+}
+
+fn sequence_has_file_backed_ip_matcher(args: &RawValue) -> bool {
+    let RawValue::Sequence(rules) = args else {
+        return false;
+    };
+    rules.iter().any(|rule| {
+        let RawValue::Map(rule) = rule else {
+            return false;
+        };
+        let Some(matches) = rule.get("matches") else {
+            return false;
+        };
+        let mut expressions = Vec::new();
+        collect_raw_strings(matches, &mut expressions);
+        expressions.iter().any(|expression| {
+            let expression = expression.strip_prefix('!').unwrap_or(expression).trim();
+            let mut fields = expression.split_whitespace();
+            matches!(fields.next(), Some("client_ip" | "resp_ip"))
+                && fields.any(|field| field.starts_with('&'))
+        })
+    })
+}
+
+fn cache_config_material(cache: &CachePluginConfig) -> String {
+    let kind = match cache.kind {
+        CacheKind::Named => "named",
+        CacheKind::Quick => "quick",
+    };
+    format!(
+        "cache:{}:{kind}:{}:{}:{}:{:?}:{}:{:?}",
+        cache.tag,
+        cache.capacity,
+        cache.enable_ecs,
+        cache.lazy_cache_ttl_secs,
+        cache.dump_file,
+        cache.dump_interval_secs,
+        cache.exclude_ip
+    )
+}
+
+fn target_name(config: &CompiledConfig, target: NativeTarget) -> String {
+    match target {
+        NativeTarget::Sequence(sequence) => config
+            .program
+            .sequence(sequence)
+            .map(|sequence| sequence.name.clone())
+            .unwrap_or_else(|| "<missing-sequence>".into()),
+        NativeTarget::Fixture(executable) => config
+            .program
+            .fixture(executable)
+            .map(|fixture| fixture.name.clone())
+            .unwrap_or_else(|| "<missing-fixture>".into()),
+        NativeTarget::External(executable) => config
+            .program
+            .external(executable)
+            .map(|external| external.name.clone())
+            .unwrap_or_else(|| "<missing-external>".into()),
+    }
+}
+
+fn reachable_sequence(
+    config: &CompiledConfig,
+    sequence: SequenceId,
+    target: SequenceId,
+    visited: &mut BTreeSet<SequenceId>,
+) -> bool {
+    if sequence == target {
+        return true;
+    }
+    if !visited.insert(sequence) {
+        return false;
+    }
+    let Some(sequence) = config.program.sequence(sequence) else {
+        return false;
+    };
+    for rule in &sequence.rules {
+        if let Some(exec) = &rule.executable {
+            let found = match *exec {
+                ValidatedExecutable::Call {target:child} | ValidatedExecutable::Inline {target:child} | ValidatedExecutable::Jump {target:child} | ValidatedExecutable::Goto {target:child} | ValidatedExecutable::Try {target:ExecutableTarget::Sequence(child)} => reachable_sequence(config,child,target,visited),
+                ValidatedExecutable::External {target:id} => config.fallbacks.iter().filter(|p| p.executable==id).any(|p| [p.primary,p.secondary].iter().any(|t| matches!(*t, NativeTarget::Sequence(child) if reachable_sequence(config,child,target,visited)))),
+                _ => false,
+            };
+            if found {
+                return true;
+            }
+            if rule.matchers.is_empty()
+                && matches!(*exec, ValidatedExecutable::Call{target:child}|ValidatedExecutable::Inline{target:child} if !sequence_can_return(config,child,&mut BTreeSet::new()))
+            {
+                break;
+            }
+            if rule.matchers.is_empty()
+                && matches!(
+                    exec,
+                    ValidatedExecutable::Accept
+                        | ValidatedExecutable::Reject { .. }
+                        | ValidatedExecutable::Exit
+                        | ValidatedExecutable::Return
+                        | ValidatedExecutable::Goto { .. }
+                )
+            {
+                break;
+            }
+        }
+    }
+    false
+}
+
+fn sequence_can_return(
+    config: &CompiledConfig,
+    sequence: SequenceId,
+    visiting: &mut BTreeSet<SequenceId>,
+) -> bool {
+    if !visiting.insert(sequence) {
+        return false;
+    }
+    let Some(sequence_config) = config.program.sequence(sequence) else {
+        return false;
+    };
+    for rule in &sequence_config.rules {
+        if !rule.matchers.is_empty() {
+            continue;
+        }
+        let Some(exec) = &rule.executable else {
+            continue;
+        };
+        match *exec {
+            ValidatedExecutable::Exit => {
+                visiting.remove(&sequence);
+                return false;
+            }
+            ValidatedExecutable::Accept
+            | ValidatedExecutable::Reject { .. }
+            | ValidatedExecutable::Return => {
+                visiting.remove(&sequence);
+                return true;
+            }
+            ValidatedExecutable::Goto { target } | ValidatedExecutable::Jump { target } => {
+                let result = sequence_can_return(config, target, visiting);
+                visiting.remove(&sequence);
+                return result;
+            }
+            ValidatedExecutable::Call { target } | ValidatedExecutable::Inline { target }
+                if !sequence_can_return(config, target, visiting) =>
+            {
+                visiting.remove(&sequence);
+                return false;
+            }
+            _ => {}
+        }
+    }
+    visiting.remove(&sequence);
+    true
 }
 
 /// Compiles the scoped management listener. Only `http` is supported; every
@@ -618,10 +1616,15 @@ fn collect_included(
     expression: &str,
     base_dir: &Path,
     definitions: &mut Vec<RawPlugin>,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<(), ConfigError> {
     let path = resolve_relative(expression, base_dir);
     let display = path.display().to_string();
-    let yaml = load_yaml(&path).map_err(|error| {
+    let loaded = match inputs {
+        Some(inputs) => load_yaml_with_inputs(&path, inputs),
+        None => load_yaml(&path),
+    };
+    let yaml = loaded.map_err(|error| {
         ConfigError::new(
             "$.include",
             format!("cannot read included file `{expression}`: {}", error.reason),
@@ -650,13 +1653,20 @@ fn collect_included(
     Ok(())
 }
 
-fn resolve_relative(value: &str, base_dir: &Path) -> PathBuf {
+pub(crate) fn resolve_relative(value: &str, base_dir: &Path) -> PathBuf {
     let path = Path::new(value);
     if path.is_absolute() || base_dir.as_os_str().is_empty() {
         path.to_path_buf()
     } else {
         base_dir.join(path)
     }
+}
+
+pub(crate) fn canonicalized_path(path: &Path) -> Option<PathBuf> {
+    let path = path.to_path_buf();
+    crate::transaction::blocking_io(move || std::fs::canonicalize(path))
+        .ok()?
+        .ok()
 }
 
 /// The declared kind of one plugin definition. Domain sets and sequences are
@@ -676,6 +1686,7 @@ enum PluginKind {
     FastMark,
     FlowSetter,
     Fallback,
+    Switch,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -685,6 +1696,7 @@ struct PluginCatalog<'a> {
     ip_sets: &'a [IpSetConfig],
     response_ip_rules: &'a RefCell<Vec<ResponseIpRuleConfig>>,
     ip_budgets: &'a RefCell<BTreeMap<String, policy::RuleBudget>>,
+    inputs: &'a RefCell<Option<crate::special_groups::CandidateInputSet>>,
     kinds: &'a [(String, PluginKind, usize)],
     domain_sets: &'a [(String, DomainSetHandle)],
     fast_marks: &'a [(String, FastMarkConfig)],
@@ -726,11 +1738,25 @@ impl PluginCatalog<'_> {
     }
 }
 
+/// File locations of the compilation inputs, used for switch state-file
+/// ownership checks.
+struct CompileSources<'a> {
+    /// The configuration file itself, when compiling from a file.
+    config_origin: Option<&'a Path>,
+    /// Every top-level `include` target resolved against the base.
+    include_paths: &'a [PathBuf],
+}
+
 fn compile_definitions(
     log: LogLevel,
     api: Option<ApiConfig>,
     definitions: Vec<RawPlugin>,
+    managed_listeners: bool,
+    staged: Option<&crate::special_groups::StagedFiles>,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+    sources: &CompileSources<'_>,
 ) -> Result<CompiledConfig, ConfigError> {
+    let candidate_inputs = RefCell::new(inputs.as_deref().cloned());
     let mut kinds: Vec<(String, PluginKind, usize)> = Vec::with_capacity(definitions.len());
     for (index, plugin) in definitions.iter().enumerate() {
         let kind = match plugin.kind.as_str() {
@@ -746,6 +1772,7 @@ fn compile_definitions(
             "fast_mark" => PluginKind::FastMark,
             "flow_setter" => PluginKind::FlowSetter,
             "fallback" => PluginKind::Fallback,
+            other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
                     format!("{}.type", plugin.source_path),
@@ -776,16 +1803,31 @@ fn compile_definitions(
     let mut compiled_domain_sets: Vec<CompiledDomainSet> = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
-            compiled_domain_sets.push(compile_domain_set(plugin)?);
+            let mut inputs = candidate_inputs.borrow_mut();
+            compiled_domain_sets.push(compile_domain_set(
+                plugin,
+                managed_listeners,
+                staged,
+                inputs.as_mut(),
+            )?);
         }
     }
     let mut file_owners: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();
+    // Every persistent file the compiled configuration reads or writes that
+    // is visible to the compiler. Switch state files are durable POST
+    // targets and may never alias any of these artifacts.
+    let mut known_artifacts: Vec<PathBuf> = Vec::new();
+    if let Some(origin) = sources.config_origin {
+        known_artifacts.push(origin.to_path_buf());
+    }
+    known_artifacts.extend(sources.include_paths.iter().cloned());
     for set in &compiled_domain_sets {
         for reference in &set.references {
             file_owners
                 .entry(reference.clone())
                 .or_default()
                 .insert(set.tag.clone());
+            known_artifacts.push(reference.clone());
         }
     }
     let mut domain_sets: Vec<(String, DomainSetHandle)> = Vec::new();
@@ -829,6 +1871,7 @@ fn compile_definitions(
         domain_sets.push((set.tag.clone(), handle.clone()));
         domain_set_configs.push(DomainSetConfig {
             tag: set.tag,
+            semantic_sha256: set.semantic_sha256,
             managed,
             ineligible_reason,
             handle,
@@ -839,12 +1882,13 @@ fn compile_definitions(
     let response_ip_rules = RefCell::new(Vec::new());
     let ip_budgets = RefCell::new(BTreeMap::new());
     let mut forwards = Vec::new();
+    let mut switches: Vec<crate::switch::SwitchDeclaration> = Vec::new();
     let mut fast_marks = Vec::new();
     let mut flow_setters = Vec::new();
     let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
-    let mut listener = None;
+    let mut listeners = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
             PluginKind::Ecs => {
@@ -864,11 +1908,24 @@ fn compile_definitions(
                     &["entries", "files"],
                     &["rules", "files"],
                 )?;
+                known_artifacts.extend(files.iter().cloned());
                 let path = format!("{}.args", plugin.source_path);
                 let policy = if kinds[index].1 == PluginKind::Hosts {
-                    ResponsePolicy::Hosts(Rc::new(policy::hosts(&inline, &files, &path)?))
+                    let mut candidate_inputs = candidate_inputs.borrow_mut();
+                    ResponsePolicy::Hosts(Rc::new(policy::hosts_with_inputs(
+                        &inline,
+                        &files,
+                        &path,
+                        candidate_inputs.as_mut(),
+                    )?))
                 } else {
-                    ResponsePolicy::Redirect(Rc::new(policy::redirects(&inline, &files, &path)?))
+                    let mut candidate_inputs = candidate_inputs.borrow_mut();
+                    ResponsePolicy::Redirect(Rc::new(policy::redirects_with_inputs(
+                        &inline,
+                        &files,
+                        &path,
+                        candidate_inputs.as_mut(),
+                    )?))
                 };
                 policies.borrow_mut().push((plugin.tag.clone(), policy));
             }
@@ -892,16 +1949,35 @@ fn compile_definitions(
                 }
                 let (inline, files) =
                     policy_sources(plugin, "ips", &["ips", "files", "sets"], &[])?;
+                known_artifacts.extend(files.iter().cloned());
+                let mut candidate_inputs = candidate_inputs.borrow_mut();
                 ip_sets.push(IpSetConfig {
                     tag: plugin.tag.clone(),
-                    prefixes: policy::ip_list(
+                    prefixes: policy::ip_list_with_inputs(
                         &inline,
                         &files,
                         &format!("{}.args", plugin.source_path),
+                        candidate_inputs.as_mut(),
                     )?,
                 });
             }
             PluginKind::DomainSet | PluginKind::Sequence => {}
+            PluginKind::Switch => {
+                let declaration = compile_switch_declaration(plugin)?;
+                if let Some(existing) = switches
+                    .iter()
+                    .find(|existing| existing.type_number == declaration.type_number)
+                {
+                    return Err(ConfigError::new(
+                        format!("{}.type", plugin.source_path),
+                        format!(
+                            "duplicate switch{} declaration `{}`; at most one instance of each                              switch type is supported (already declared as `{}`)",
+                            declaration.type_number, declaration.tag, existing.tag
+                        ),
+                    ));
+                }
+                switches.push(declaration);
+            }
             PluginKind::FastMark => {
                 let config = compile_fast_mark(plugin)?;
                 fast_marks.push((plugin.tag.clone(), config));
@@ -936,23 +2012,72 @@ fn compile_definitions(
                 forwards.push(forward);
             }
             PluginKind::Cache => {
-                caches.push((
-                    plugin.tag.clone(),
-                    compile_cache(plugin)?,
-                    plugin.source_path.clone(),
-                ));
+                let compiled = compile_cache(plugin)?;
+                if let Some(dump_file) = &compiled.dump_file {
+                    known_artifacts.push(dump_file.clone());
+                }
+                caches.push((plugin.tag.clone(), compiled, plugin.source_path.clone()));
             }
             PluginKind::Listener => {
-                if listener.is_some() {
+                if !managed_listeners && !listeners.is_empty() {
                     return Err(ConfigError::new(
-                        format!("{}.tag", plugin.source_path),
-                        "exactly one listener plugin is supported",
+                        &plugin.source_path,
+                        "exactly one listener plugin is supported without native management",
                     ));
                 }
-                listener = Some((compile_listener(plugin)?, plugin.source_path.clone()));
+                let candidate = compile_listener(plugin)?;
+                if listeners
+                    .iter()
+                    .any(|(existing, _): &(ListenerConfig, String)| {
+                        existing.kind == candidate.kind && existing.listen == candidate.listen
+                    })
+                {
+                    return Err(ConfigError::new(
+                        format!("{}.tag", plugin.source_path),
+                        "duplicate listener protocol/address",
+                    ));
+                }
+                listeners.push((candidate, plugin.source_path.clone()));
             }
         }
     }
+    if let Some(staged) = staged {
+        known_artifacts.extend(staged.keys().cloned());
+    }
+    if let Some(inputs) = candidate_inputs.borrow().as_ref() {
+        known_artifacts.extend(inputs.files.keys().cloned());
+    }
+    // A switch state file is a durable POST target. Rejecting every alias
+    // here keeps one owner's write from rewriting another switch's state or
+    // a known configuration, rule, or cache-dump artifact.
+    for (index, declaration) in switches.iter().enumerate() {
+        for other in switches.iter().skip(index + 1) {
+            if crate::switch::paths_collide(&declaration.state_file, &other.state_file) {
+                return Err(ConfigError::new(
+                    format!("{}.args.initial_value", other.source_path),
+                    format!(
+                        "switch state file `{}` collides with switch `{}`",
+                        other.state_file.display(),
+                        declaration.tag
+                    ),
+                ));
+            }
+        }
+        for artifact in &known_artifacts {
+            if crate::switch::paths_collide(&declaration.state_file, artifact) {
+                return Err(ConfigError::new(
+                    format!("{}.args.initial_value", declaration.source_path),
+                    format!(
+                        "switch state file `{}` collides with known artifact `{}`",
+                        declaration.state_file.display(),
+                        artifact.display()
+                    ),
+                ));
+            }
+        }
+    }
+    switches.sort_by_key(|declaration| declaration.type_number);
+
     let forward_compiler = RefCell::new(ForwardCompiler {
         definitions: forwards,
         invocations: Vec::new(),
@@ -964,6 +2089,7 @@ fn compile_definitions(
         ip_sets: &ip_sets,
         response_ip_rules: &response_ip_rules,
         ip_budgets: &ip_budgets,
+        inputs: &candidate_inputs,
         kinds: &kinds,
         domain_sets: &domain_sets,
         fast_marks: &fast_marks,
@@ -983,6 +2109,12 @@ fn compile_definitions(
         fixtures.push(mosdns_sequence_core::FixtureSpec::new(
             plugin_fixture_name(tag),
             config.executor(),
+        ));
+    }
+    for declaration in &switches {
+        fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+            plugin_fixture_name(&declaration.tag),
+            Box::new(crate::switch::SwitchNoopExecutor),
         ));
     }
     let resolved_fallback_definitions = fallback_definitions
@@ -1009,20 +2141,23 @@ fn compile_definitions(
             sequences.push(compile_sequence(plugin, &catalog, &mut fixtures)?);
         }
     }
-
     if sequences.is_empty() {
         return Err(ConfigError::new("$.plugins", "missing sequence plugin"));
     }
-    let (listener, listener_source_path) =
-        listener.ok_or_else(|| ConfigError::new("$.plugins", "missing listener plugin"))?;
-    if !kinds
-        .iter()
-        .any(|(tag, kind, _)| *kind == PluginKind::Sequence && tag.as_str() == listener.entry)
-    {
-        return Err(ConfigError::new(
-            format!("{listener_source_path}.args.entry"),
-            format!("unknown sequence reference `{}`", listener.entry),
-        ));
+    let (listener, listener_source_path) = listeners
+        .first()
+        .cloned()
+        .ok_or_else(|| ConfigError::new("$.plugins", "missing listener plugin"))?;
+    for (listener, listener_source_path) in &listeners {
+        if !kinds
+            .iter()
+            .any(|(tag, kind, _)| *kind == PluginKind::Sequence && tag.as_str() == listener.entry)
+        {
+            return Err(ConfigError::new(
+                format!("{listener_source_path}.args.entry"),
+                format!("unknown sequence reference `{}`", listener.entry),
+            ));
+        }
     }
     if forward_compiler.borrow().definitions.is_empty() {
         return Err(ConfigError::new(
@@ -1228,7 +2363,28 @@ fn compile_definitions(
             })
         })
         .collect::<Result<Vec<_>, ConfigError>>()?;
+    let mut response_identities = std::collections::HashMap::new();
+    for invocation in &forward_invocations {
+        for index in &invocation.entries {
+            response_identities.insert(
+                (invocation.executable.0, *index),
+                forward_compiler.definitions[invocation.definition].entries[*index]
+                    .response_identity
+                    .clone(),
+            );
+        }
+    }
     let compiled = CompiledConfig {
+        ui_base: None,
+        generation: 0,
+        cache_dependencies: Vec::new(),
+        response_identities,
+        managed_profile: None,
+        managed_router: None,
+        listeners: listeners
+            .into_iter()
+            .map(|(listener, _)| listener)
+            .collect(),
         response_policies,
         ip_sets,
         response_ip_rules: response_ip_rules.into_inner(),
@@ -1247,6 +2403,7 @@ fn compile_definitions(
         },
         listener,
         domain_sets: domain_set_configs,
+        switches,
         api,
         program,
     };
@@ -1277,6 +2434,9 @@ fn compile_definitions(
         }
     }
     crate::cache_placement::validate(&compiled, &client_rules)?;
+    if let (Some(destination), Some(collected)) = (inputs, candidate_inputs.into_inner()) {
+        *destination = collected;
+    }
     Ok(compiled)
 }
 
@@ -1520,6 +2680,7 @@ fn compile_forward(plugin: &RawPlugin) -> Result<ForwardDefinitionConfig, Config
         });
         entries.push(ForwardEntryConfig {
             tag,
+            response_identity: std::sync::Arc::from(identity.as_str()),
             identity,
             endpoint,
             target,
@@ -1539,6 +2700,36 @@ fn hex_identity(value: &str) -> String {
         let _ = write!(output, "{byte:02x}");
     }
     output
+}
+
+/// Compiles one `switchN` declaration. The state file is resolved but never
+/// read, created, or validated for readability: compilation stays
+/// side-effect-free and startup owns the bounded file admission.
+fn compile_switch_declaration(
+    plugin: &RawPlugin,
+) -> Result<crate::switch::SwitchDeclaration, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "switch args must be a mapping")?;
+    args.reject_unknown(&["initial_value"], &path)?;
+    let declared = expect_string(
+        args.required("initial_value", &path)?,
+        &format!("{path}.initial_value"),
+    )?;
+    if declared.is_empty() {
+        return Err(ConfigError::new(
+            format!("{path}.initial_value"),
+            "switch initial_value must name a state file",
+        ));
+    }
+    let type_number = crate::switch::switch_type_number(&plugin.kind)
+        .expect("switch kind is validated before compilation");
+    let state_file = crate::switch::resolved_state_file(&declared, &plugin.base_dir, &path)?;
+    Ok(crate::switch::SwitchDeclaration {
+        type_number,
+        tag: plugin.tag.clone(),
+        state_file,
+        source_path: plugin.source_path.clone(),
+    })
 }
 
 fn compile_fast_mark(plugin: &RawPlugin) -> Result<FastMarkConfig, ConfigError> {
@@ -1666,7 +2857,7 @@ fn resolve_policy_target_name(
             | PluginKind::Redirect
             | PluginKind::Ecs,
         ) => Ok(PolicyTargetName::External(tag.to_owned())),
-        Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
+        Some(PluginKind::FastMark | PluginKind::FlowSetter | PluginKind::Switch) => {
             Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag)))
         }
         Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
@@ -1689,6 +2880,7 @@ fn quick_fixture_name(path: &str) -> String {
 
 /// One compiled `domain_set` before management eligibility is decided.
 struct CompiledDomainSet {
+    semantic_sha256: String,
     tag: String,
     matcher: MixMatcher<()>,
     /// Present when the declared shape is a single-`.txt` management candidate.
@@ -1709,33 +2901,127 @@ struct ManagedCandidate {
     source_path: String,
 }
 
-fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigError> {
+fn compile_domain_set(
+    plugin: &RawPlugin,
+    immutable: bool,
+    staged: Option<&crate::special_groups::StagedFiles>,
+    mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+) -> Result<CompiledDomainSet, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
     args.reject_unknown(&["exps", "files"], &path)?;
     let expressions = string_list(args.get("exps"), &format!("{path}.exps"))?;
     let files = string_list(args.get("files"), &format!("{path}.files"))?;
-    if expressions.is_empty() && files.is_empty() {
+    if expressions.is_empty()
+        && files.is_empty()
+        && !plugin.source_path.starts_with("@managed-generated.")
+    {
         return Err(ConfigError::new(
             &path,
             "a domain_set requires at least one expression or file",
         ));
     }
-    let (matcher, accepted) =
-        build_domain_set(&expressions, &files, &plugin.base_dir).map_err(|error| match error {
-            DomainSetError::Expression { index, .. } => {
-                ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
+    // Managed routing cannot silently drop a malformed enabled rule file.
+    // Preserve the legacy tolerant loader for ordinary unmanaged providers.
+    let strict = plugin.source_path.starts_with("@managed-generated.");
+    let mut strict_expressions = expressions.clone();
+    let mut remaining_files = Vec::new();
+    for file in &files {
+        let path = resolve_rule_path(file, &plugin.base_dir);
+        let candidate =
+            staged.and_then(|files| files.get(&crate::special_groups::lexical_path(&path)));
+        if !strict && candidate.is_none() {
+            remaining_files.push(file.clone());
+            continue;
+        }
+        let bytes = match candidate {
+            Some(Some(bytes)) => bytes.clone(),
+            Some(None) => {
+                return Err(ConfigError::new(
+                    path.display().to_string(),
+                    "enabled rule file is deleted in candidate",
+                ));
             }
-            DomainSetError::File { index, .. } => {
-                ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
+            None => {
+                let display = path.display().to_string();
+                let file_path = path.clone();
+                let worker_display = display.clone();
+                let read_display = display.clone();
+                let bytes = crate::transaction::blocking_io(move || {
+                    let metadata = std::fs::metadata(&file_path).map_err(|error| {
+                        ConfigError::new(worker_display.clone(), error.to_string())
+                    })?;
+                    if metadata.len() > crate::policy::POLICY_BYTES_LIMIT as u64 {
+                        return Err(ConfigError::new(
+                            worker_display,
+                            "rule file exceeds byte limit",
+                        ));
+                    }
+                    std::fs::read(file_path).map_err(|error| {
+                        ConfigError::new(
+                            read_display,
+                            format!("invalid enabled rule file: {error}"),
+                        )
+                    })
+                })
+                .map_err(|error| {
+                    ConfigError::new(
+                        display.clone(),
+                        format!("bounded I/O worker failed: {error}"),
+                    )
+                })??;
+                if let Some(inputs) = inputs.as_deref_mut() {
+                    inputs
+                        .record_bytes(&path, &bytes)
+                        .map_err(|reason| ConfigError::new(path.display().to_string(), reason))?;
+                }
+                bytes
             }
+        };
+        if bytes.len() > crate::policy::POLICY_BYTES_LIMIT {
+            return Err(ConfigError::new(
+                path.display().to_string(),
+                "rule file exceeds byte limit",
+            ));
+        }
+        let text = std::str::from_utf8(&bytes).map_err(|e| {
+            ConfigError::new(
+                path.display().to_string(),
+                format!("invalid enabled rule file: {e}"),
+            )
         })?;
+        strict_expressions.extend(
+            text.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_owned),
+        );
+    }
+    let (matcher, accepted) = build_domain_set_with_inputs(
+        &strict_expressions,
+        &remaining_files,
+        &plugin.base_dir,
+        inputs,
+    )
+    .map_err(|error| match error {
+        DomainSetError::Expression { index, .. } => {
+            ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
+        }
+        DomainSetError::File { index, .. } => {
+            ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
+        }
+    })?;
 
     // A managed profile needs exactly one unambiguous writable `.txt` source,
     // matching Go's POST precondition, so an edit can never silently drop part
     // of the configured rule set. Everything else stays query-only.
-    let single_txt_file = expressions.is_empty()
+    let semantic_sha256 = crate::special_groups::sha256(format!("{accepted:?}").as_bytes());
+    let single_txt_file = !immutable && expressions.is_empty()
         && files.len() == 1
+        // Generated routing providers belong to the immutable snapshot. Their
+        // future management writes must rebuild a complete candidate instead
+        // of replacing a live handle behind queries already admitted.
+        && !plugin.source_path.starts_with("@managed-generated.")
         && Path::new(&files[0])
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"));
@@ -1745,7 +3031,7 @@ fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigErr
         .iter()
         .map(|file| {
             let path = resolve_rule_path(file, &plugin.base_dir);
-            std::fs::canonicalize(&path).unwrap_or(path)
+            canonicalized_path(&path).unwrap_or(path)
         })
         .collect();
     let candidate = if single_txt_file {
@@ -1763,6 +3049,7 @@ fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigErr
         None
     };
     Ok(CompiledDomainSet {
+        semantic_sha256,
         tag: plugin.tag.clone(),
         matcher,
         candidate,
@@ -2077,10 +3364,33 @@ fn compile_matcher(
                     "named matcher references require exactly `$tag` without arguments",
                 ));
             }
-            let config = catalog.fast_mark(tag).ok_or_else(|| {
-                ConfigError::new(path, format!("unknown matcher reference `${tag}`"))
-            })?;
+            let config = match catalog.fast_mark(tag) {
+                Some(config) => config,
+                None if catalog.kind_of(tag) == Some(PluginKind::Switch) => {
+                    return Err(ConfigError::new(
+                        path,
+                        format!(
+                            "switch plugin `${tag}` is not a matcher; use the `switchN <value>` \
+                             quick matcher"
+                        ),
+                    ));
+                }
+                None => {
+                    return Err(ConfigError::new(
+                        path,
+                        format!("unknown matcher reference `${tag}`"),
+                    ));
+                }
+            };
             config.matcher()
+        }
+        name if crate::switch::switch_type_number(name).is_some() => {
+            let type_number = crate::switch::switch_type_number(name)
+                .expect("switch kind is validated before compilation");
+            Box::new(crate::switch::SwitchMatcher::new(
+                type_number,
+                crate::switch::trim_expectation(args).to_owned(),
+            ))
         }
         "fast_mark" => FastMarkConfig::parse(args)
             .map_err(|reason| ConfigError::new(path, reason))?
@@ -2270,6 +3580,26 @@ fn compile_exec_item(
         None => (expression, ""),
     };
     match name {
+        name if crate::switch::switch_type_number(name).is_some() => Err(ConfigError::new(
+            path,
+            format!(
+                "switch `{name}` has no quick executable; reference its configured tag as \
+                     `$tag`"
+            ),
+        )),
+        "cname_remover" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, "cname_remover takes no arguments"));
+            }
+            let tag = format!("@native-cname:{sequence_tag}:{rule_index}:{exec_index}");
+            catalog
+                .policies
+                .borrow_mut()
+                .push((tag.clone(), ResponsePolicy::CnameRemover));
+            Ok(ExecutableSpec::External {
+                target: ExternalRef::new(tag),
+            })
+        }
         "ecs" => {
             let mut policy = crate::ecs::EcsPolicy::default();
             let mut tokens = args.split_whitespace();
@@ -2497,7 +3827,7 @@ fn compile_exec_item(
                 ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
-                Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
+                Some(PluginKind::FastMark | PluginKind::FlowSetter | PluginKind::Switch) => {
                     Ok(ExecutableSpec::Fixture {
                         target: mosdns_sequence_core::FixtureRef::new(plugin_fixture_name(tag)),
                     })
@@ -3192,16 +4522,21 @@ fn compile_response_ip(
     }
     let mut prefixes = mosdns_matcher_core::IpPrefixList::new();
     let mut budgets = catalog.ip_budgets.borrow_mut();
+    let mut inputs = catalog.inputs.borrow_mut();
     let key = path.split(".args[").next().unwrap_or(path).to_owned();
-    budgets
-        .entry(key)
-        .or_default()
-        .load(&inline, &files, true, path, |line, location| {
+    budgets.entry(key).or_default().load_with_inputs(
+        &inline,
+        &files,
+        true,
+        path,
+        inputs.as_mut(),
+        |line, location| {
             let (ip, bits) =
                 policy::ip_prefix(line.split_whitespace().next().unwrap_or(""), location)?;
             prefixes.append(ip, bits);
             Ok(())
-        })?;
+        },
+    )?;
     prefixes.rebuild();
     lists.push(Rc::new(prefixes));
     Ok(lists)
@@ -3214,10 +4549,73 @@ mod tests {
     use mosdns_sequence_core::{ExecutionControl, ExecutionState};
     use mosdns_upstream_core::Transport;
 
-    use super::{ListenerKind, LogLevel, PreferenceFamily, compile_yaml};
+    use super::{ListenerKind, LogLevel, PreferenceFamily, compile_yaml, compile_yaml_with_base};
 
     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
     const TCP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
+
+    #[test]
+    fn cache_dependency_fingerprint_fails_closed_for_file_backed_ip_matchers() {
+        let root =
+            std::env::temp_dir().join(format!("native-cache-ip-dependency-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        for (index, matcher) in ["client_ip", "resp_ip"].into_iter().enumerate() {
+            let rules = root.join(format!("rules-{index}.txt"));
+            std::fs::write(&rules, b"192.0.2.0/24\n").unwrap();
+            let rules_yaml = if matcher == "client_ip" {
+                format!(
+                    "      - matches: client_ip &rules-{index}.txt\n        exec: $cache\n      - exec: $upstream\n"
+                )
+            } else {
+                format!(
+                    "      - exec: $cache\n      - exec: $upstream\n      - matches: resp_ip &rules-{index}.txt\n        exec: reject\n"
+                )
+            };
+            let yaml = format!(
+                r#"log: {{level: error}}
+plugins:
+  - tag: upstream
+    type: forward
+    args: {{upstreams: [{{addr: "udp://127.0.0.1:15453"}}]}}
+  - tag: cache
+    type: cache
+    args: {{size: 64}}
+  - tag: entry
+    type: sequence
+    args:
+{rules_yaml}
+  - tag: listener
+    type: udp_server
+    args: {{entry: entry, listen: "127.0.0.1:15353", enable_audit: false}}
+"#
+            );
+
+            let before = compile_yaml_with_base(&yaml, &root).unwrap();
+            let cache = before
+                .caches
+                .iter()
+                .find(|cache| cache.tag == "cache")
+                .unwrap();
+            let before = before.cache_dependencies[cache.id.0].clone();
+            std::fs::write(&rules, b"203.0.113.0/24\n").unwrap();
+            let after = compile_yaml_with_base(&yaml, &root).unwrap();
+            let cache = after
+                .caches
+                .iter()
+                .find(|cache| cache.tag == "cache")
+                .unwrap();
+            let after = after.cache_dependencies[cache.id.0].clone();
+
+            assert!(
+                before.is_none() && after.is_none(),
+                "{matcher} file-backed IP rules lack a complete reusable fingerprint"
+            );
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn compiles_the_frozen_udp_and_tcp_shapes_without_rewriting_them() {

@@ -1,0 +1,28 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error: this function has too many lines (103/100)
+   --> native-host/tests/special_groups_supervisor.rs:762:1
+    |
+762 | fn concurrent_managed_writes_and_cache_management_preserve_committed_state() {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_lines
+    = note: `-D clippy::too-many-lines` implied by `-D clippy::pedantic`
+    = help: to override `-D clippy::pedantic` add `#[allow(clippy::too_many_lines)]`
+
+error: this function has too many lines (260/100)
+   --> native-host/tests/special_groups_supervisor.rs:874:1
+    |
+874 | fn upstream_http_snapshot_save_changes_generation_and_dns_supplier() {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_lines
+
+error: this function has too many lines (135/100)
+    --> native-host/tests/special_groups_supervisor.rs:1150:1
+     |
+1150 | fn diversion_catalog_http_uses_single_transaction_for_source_rename() {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_lines
+
+error: could not compile `mosdns-native-host` (test "special_groups_supervisor") due to 3 previous errors
