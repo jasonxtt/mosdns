@@ -702,6 +702,53 @@ fn fallback_failure<E: ExchangeExecutor + ?Sized>(
     BranchOutcome::failure(state, error)
 }
 
+/// How one `sleep` ended.
+enum SleepEnd {
+    Elapsed,
+    Cancelled,
+    DeadlineReached,
+}
+
+/// Waits `duration`, but never past `deadline` and never after any of the
+/// given tokens is cancelled. Nothing is spawned: dropping the future ends
+/// the wait, so no timer task outlives its request.
+async fn wait_sleep(
+    duration: Duration,
+    deadline: Instant,
+    cancellations: &[&TransportCancellation],
+) -> SleepEnd {
+    if duration.is_zero() {
+        return SleepEnd::Elapsed;
+    }
+    if cancellations.iter().any(|token| token.is_cancelled()) {
+        return SleepEnd::Cancelled;
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let cancelled = async {
+        match cancellations {
+            [only] => only.cancelled().await,
+            [first, second] => {
+                tokio::select! {
+                    () = first.cancelled() => {}
+                    () = second.cancelled() => {}
+                }
+            }
+            _ => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        biased;
+        () = cancelled => SleepEnd::Cancelled,
+        () = tokio::time::sleep(duration.min(remaining)) => {
+            if duration >= remaining {
+                SleepEnd::DeadlineReached
+            } else {
+                SleepEnd::Elapsed
+            }
+        }
+    }
+}
+
 fn ensure_branch_alive<E: ExchangeExecutor + ?Sized>(
     machine: &ExecutionMachine<'_>,
     context: &BranchContext<'_, E>,
@@ -867,6 +914,21 @@ impl ExecutionFacts<'_> {
         }
     }
 
+    /// The earlier supplier, its peer and its selection must not be reported
+    /// for a final wire that no upstream supplied.
+    fn forget_response_supplier(&mut self) {
+        self.response_source = None;
+        self.selected_peer = None;
+        if self.capture_audit_details {
+            if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                diagnostics.selected = None;
+            }
+            if let Some(trace) = &self.policy_trace {
+                trace.borrow_mut().clear_selection();
+            }
+        }
+    }
+
     /// Records the actual executed named sequence. A synthetic inline scope
     /// never reaches here, so the position is always a real configured name.
     fn note_origin(&mut self, origin: Option<SequenceId>) {
@@ -883,6 +945,16 @@ impl ExecutionFacts<'_> {
 
     fn note_routing(&mut self, state: &ExecutionState) {
         if self.routing != state.routing {
+            // A field written while the committed response is still the
+            // current one (nothing replaced it since) is a later write to the
+            // request's label store, for example `tag_setter` after a cached
+            // child or after a `sleep`. It overrides that field of the
+            // committed snapshot and leaves the other fields as they were.
+            if self.last_response_generation == state.response_generation() {
+                if let Some(committed) = self.response_routing.as_mut() {
+                    overlay_routing(committed, &self.routing, &state.routing);
+                }
+            }
             self.routing = state.routing.clone();
             self.routing_changed_since_response = true;
             self.routing_origin = self.current_origin;
@@ -894,9 +966,17 @@ impl ExecutionFacts<'_> {
             return;
         }
         self.response_routing = match &state.response {
-            MachineResponseState::None => None,
+            MachineResponseState::None => {
+                // The response was forgotten (`drop_resp`): no upstream
+                // supplies the final wire any more.
+                self.forget_response_supplier();
+                None
+            }
             MachineResponseState::Raw(_) | MachineResponseState::Synthesized(_) => {
                 if matches!(&state.response, MachineResponseState::Synthesized(_)) {
+                    // A local answer (`reject`) replaced whatever was there,
+                    // including an upstream response dropped in the same step.
+                    self.forget_response_supplier();
                     self.response_source = Some(ResponseSource::Local);
                 }
                 Some(
@@ -1403,6 +1483,37 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 };
             }
             MachineStep::Dispatch(dispatch) => {
+                if let Some(sleep) = config
+                    .sleeps
+                    .iter()
+                    .find(|sleep| sleep.executable == dispatch.executable())
+                {
+                    match wait_sleep(sleep.duration, request_deadline, &[&request_shutdown]).await {
+                        SleepEnd::Elapsed => {}
+                        SleepEnd::Cancelled => return canceled_execution(facts),
+                        SleepEnd::DeadlineReached => {
+                            // The request budget ended while it slept: the
+                            // reference entry turns that error into SERVFAIL.
+                            // No upstream was involved, so no upstream failure
+                            // provenance is recorded.
+                            set_servfail(&mut machine);
+                            facts.set_response_source(ResponseSource::Local);
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    }
+                    step = match machine
+                        .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                    {
+                        Ok(step) => step,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    continue;
+                }
                 if let Some(policy) = config
                     .response_policies
                     .iter()
@@ -2062,6 +2173,43 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                 };
             }
             MachineStep::Dispatch(dispatch) => {
+                if let Some(sleep) = context
+                    .config
+                    .sleeps
+                    .iter()
+                    .find(|sleep| sleep.executable == dispatch.executable())
+                {
+                    match wait_sleep(
+                        sleep.duration,
+                        context.deadline,
+                        &[&context.root_cancellation, &context.branch_cancellation],
+                    )
+                    .await
+                    {
+                        SleepEnd::Elapsed => {}
+                        SleepEnd::Cancelled => {
+                            return BranchOutcome::failure(
+                                machine.state().clone(),
+                                ExecutionError::Cancelled,
+                            );
+                        }
+                        SleepEnd::DeadlineReached => {
+                            return BranchOutcome::failure(
+                                machine.state().clone(),
+                                ExecutionError::BudgetExceeded,
+                            );
+                        }
+                    }
+                    step = match machine
+                        .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                    {
+                        Ok(step) => step,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                    continue;
+                }
                 if let Some(policy) = context
                     .config
                     .response_policies
@@ -2470,6 +2618,30 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
             NativeTarget::External(executable) => {
                 if let Err(error) = consume_external_target(&mut successor, &context) {
                     return BranchOutcome::failure(successor.state().clone(), error);
+                }
+                if let Some(sleep) = context
+                    .config
+                    .sleeps
+                    .iter()
+                    .find(|sleep| sleep.executable == executable)
+                {
+                    return match wait_sleep(
+                        sleep.duration,
+                        context.deadline,
+                        &[&context.root_cancellation, &context.branch_cancellation],
+                    )
+                    .await
+                    {
+                        SleepEnd::Elapsed => drive_branch(successor, context, source).await,
+                        SleepEnd::Cancelled => BranchOutcome::failure(
+                            successor.state().clone(),
+                            ExecutionError::Cancelled,
+                        ),
+                        SleepEnd::DeadlineReached => BranchOutcome::failure(
+                            successor.state().clone(),
+                            ExecutionError::BudgetExceeded,
+                        ),
+                    };
                 }
                 if let Some(policy) = context
                     .config
@@ -3883,6 +4055,27 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
         upstream_diagnostics: facts.upstream_diagnostics.take(),
         failure_provenance: facts.failure_provenance.take(),
     }
+}
+
+/// Copies every field that differs between `before` and `after` onto `target`.
+fn overlay_routing(target: &mut RoutingState, before: &RoutingState, after: &RoutingState) {
+    macro_rules! overlay {
+        ($($field:ident),+) => {
+            $(if before.$field != after.$field {
+                target.$field.clone_from(&after.$field);
+            })+
+        };
+    }
+    overlay!(
+        domain_set,
+        effective_tag,
+        matched_group,
+        final_sequence,
+        final_upstream,
+        final_upstream_targets,
+        selected_upstream,
+        matched_rule_source
+    );
 }
 
 fn upstream_endpoint(config: &CompiledConfig, identity: &str) -> Option<String> {
@@ -5416,6 +5609,7 @@ plugins:
             }],
             fallbacks: Vec::new(),
             preferences: Vec::new(),
+            sleeps: Vec::new(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -5523,6 +5717,7 @@ plugins:
                 caches: Vec::new(),
                 fallbacks: Vec::new(),
                 preferences: Vec::new(),
+                sleeps: Vec::new(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -6071,6 +6266,7 @@ plugins:
             }],
             fallbacks: Vec::new(),
             preferences: Vec::new(),
+            sleeps: Vec::new(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -6191,6 +6387,7 @@ plugins:
                 }],
                 fallbacks: Vec::new(),
                 preferences: Vec::new(),
+                sleeps: Vec::new(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -6357,6 +6554,7 @@ plugins:
             ],
             fallbacks: Vec::new(),
             preferences: Vec::new(),
+            sleeps: Vec::new(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -7659,6 +7857,149 @@ plugins:
             );
             assert!(result.completion.is_none());
         }
+    }
+
+    fn sleep_config(sequence: &str, extra: &str) -> CompiledConfig {
+        compile_yaml(&format!(
+            r#"
+log: {{ level: error }}
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+{sequence}
+{extra}  - tag: forward
+    type: forward
+    args: {{ upstreams: [ {{ addr: "udp://127.0.0.1:15453" }} ] }}
+  - tag: listener
+    type: udp_server
+    args: {{ entry: entry, listen: "127.0.0.1:15353", enable_audit: true }}
+"#
+        ))
+        .expect("sleep configuration")
+    }
+
+    /// Runs one request, optionally cancelling it after `cancel_after`, and
+    /// reports the result, the upstream calls, and the wall time.
+    fn run_with_sleep(
+        config: &CompiledConfig,
+        options: &HostOptions,
+        cancel_after: Option<Duration>,
+    ) -> (super::ExecutionResult, u32, Duration) {
+        let request = query(41);
+        let (header, question) = parse_query(&request).expect("query");
+        let calls = Rc::new(Cell::new(0));
+        let executor = MockExchange {
+            calls: Rc::clone(&calls),
+            response: response(&request),
+            fail: false,
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let cancellation = TransportCancellation::new();
+        let started = std::time::Instant::now();
+        let catalog = cache.catalog();
+        let mut checkpoint = ExecutionCheckpoint::new(true);
+        let result = futures_like_block_on(async {
+            let execution = execute_request_with_observation(
+                ExecutionRequest {
+                    client: mosdns_sequence_core::ClientContext::default(),
+                    config,
+                    cache: &catalog,
+                    options,
+                    raw: &request,
+                    header,
+                    question,
+                    switch_seed: Default::default(),
+                },
+                &executor,
+                cancellation.clone(),
+                &mut checkpoint,
+            );
+            let canceller = async {
+                if let Some(after) = cancel_after {
+                    tokio::time::sleep(after).await;
+                    cancellation.cancel();
+                }
+            };
+            tokio::join!(execution, canceller).0
+        });
+        (result, calls.get(), started.elapsed())
+    }
+
+    #[test]
+    fn sleep_waits_then_the_sequence_continues() {
+        let config = sleep_config("      - exec: sleep 80\n      - exec: $forward\n", "");
+        let (result, calls, elapsed) = run_with_sleep(&config, &HostOptions::default(), None);
+        assert!(elapsed >= Duration::from_millis(80), "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(calls, 1);
+        assert!(!result.response_wire.is_empty());
+
+        // `sleep 0` and a negative wait do not wait at all.
+        let config = sleep_config(
+            "      - exec: sleep 0\n      - exec: sleep -50\n      - exec: $forward\n",
+            "",
+        );
+        let (result, calls, elapsed) = run_with_sleep(&config, &HostOptions::default(), None);
+        assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
+        assert_eq!((calls, result.response_wire.is_empty()), (1, false));
+    }
+
+    #[test]
+    fn a_cancelled_sleep_returns_at_once_and_never_reaches_the_forward() {
+        let config = sleep_config("      - exec: sleep 60000\n      - exec: $forward\n", "");
+        let (result, calls, elapsed) = run_with_sleep(
+            &config,
+            &HostOptions::default(),
+            Some(Duration::from_millis(40)),
+        );
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(calls, 0);
+        assert!(
+            result.response_wire.is_empty(),
+            "cancellation sends nothing"
+        );
+    }
+
+    #[test]
+    fn a_sleep_never_outlives_the_request_budget() {
+        // The budget ends first: SERVFAIL (the reference entry's answer to an
+        // error), and the later forward is not reached.
+        let config = sleep_config("      - exec: sleep 60000\n      - exec: $forward\n", "");
+        let options = HostOptions::with_deadline(Duration::from_millis(120));
+        let (result, calls, elapsed) = run_with_sleep(&config, &options, None);
+        assert!(elapsed >= Duration::from_millis(100), "{elapsed:?}");
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(calls, 0);
+        assert_eq!(result.response_wire[3] & 0x0f, 2, "SERVFAIL");
+    }
+
+    #[test]
+    fn a_sleeping_fallback_branch_is_released_when_the_other_branch_wins() {
+        // The standby secondary starts at once and sleeps; the primary
+        // answers; the loser must be cancelled instead of waited for.
+        let config = sleep_config(
+            "      - exec: $fb\n",
+            "  - tag: primary\n    type: sequence\n    args: [ { exec: \"$forward\" } ]\n  - tag: secondary\n    type: sequence\n    args: [ { exec: sleep 60000 }, { exec: \"$forward\" } ]\n  - tag: fb\n    type: fallback\n    args: { primary: primary, secondary: secondary, always_standby: true }\n",
+        );
+        let (result, calls, elapsed) = run_with_sleep(&config, &HostOptions::default(), None);
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(calls, 1, "only the primary reaches an upstream");
+        assert_eq!(result.response_wire[3] & 0x0f, 0);
+
+        // And the same release when the whole request is cancelled mid-sleep.
+        let config = sleep_config(
+            "      - exec: $fb\n",
+            "  - tag: primary\n    type: sequence\n    args: [ { exec: sleep 60000 }, { exec: \"$forward\" } ]\n  - tag: secondary\n    type: sequence\n    args: [ { exec: sleep 60000 }, { exec: \"$forward\" } ]\n  - tag: fb\n    type: fallback\n    args: { primary: primary, secondary: secondary, threshold: 10 }\n",
+        );
+        let (result, calls, elapsed) = run_with_sleep(
+            &config,
+            &HostOptions::default(),
+            Some(Duration::from_millis(80)),
+        );
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        assert_eq!(calls, 0);
+        assert!(result.response_wire.is_empty());
     }
 
     fn futures_like_block_on<F: std::future::Future>(future: F) -> F::Output {

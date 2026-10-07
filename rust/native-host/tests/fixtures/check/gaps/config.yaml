@@ -34,11 +34,11 @@ plugins:
       - exec: $rewrite_x
       - matches:
           - qname $light_set
-          - rcode 2
-        exec: drop_resp
+          - qclass 1
+        exec: debug_print
       - exec:
           - $rewrite_x
-          - tag_setter x
+          - black_hole 192.0.2.1
           - $fwd
       - matches: qtype 1
         exec: $fwd

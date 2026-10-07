@@ -41,10 +41,10 @@ GAP two_bad_params cache {GAPS}:plugins[2].args.first_unknown  unsupported field
 GAP udp_in udp_server {GAPS}:plugins[5].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
 CASCADE entry sequence {GAPS}:plugins[4].args[0].exec  references removed `rewrite_x`; unknown executable reference `$rewrite_x`
 CASCADE entry sequence {GAPS}:plugins[4].args[1].matches[0]  references removed `light_set`; unknown domain_set reference `$light_set`
-GAP entry sequence {GAPS}:plugins[4].args[1].matches[1]  unsupported matcher `rcode`
-GAP entry sequence {GAPS}:plugins[4].args[1].exec  unsupported executable `drop_resp`
+GAP entry sequence {GAPS}:plugins[4].args[1].matches[1]  unsupported matcher `qclass`
+GAP entry sequence {GAPS}:plugins[4].args[1].exec  unsupported executable `debug_print`
 CASCADE entry sequence {GAPS}:plugins[4].args[2].exec[0]  references removed `rewrite_x`; unknown executable reference `$rewrite_x`
-GAP entry sequence {GAPS}:plugins[4].args[2].exec[1]  unsupported executable `tag_setter`
+GAP entry sequence {GAPS}:plugins[4].args[2].exec[1]  unsupported executable `black_hole`
 CASCADE entry sequence {GAPS}:plugins[4].args[4].exec  references removed `no_args`; unknown executable reference `$no_args`
 SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
 NOTE first-error-per-definition; rerun after fixing to see further gaps
@@ -105,7 +105,7 @@ fn a_reference_to_a_never_declared_tag_is_a_direct_gap() {
 fn every_item_of_a_long_exec_list_is_checked() {
     let root = TempDir::new("long-exec");
     let config = root.path().join("config.yaml");
-    let items = "drop_resp, ".repeat(12);
+    let items = "debug_print, ".repeat(12);
     std::fs::write(
         &config,
         format!(

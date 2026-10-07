@@ -17,6 +17,12 @@ M1-a 的全部插件缺口（`domain_set_light`、`sd_set_light`、`domain_mappe
 `adguard_rule`）和它们的连带已关闭，原始输出与差分见
 [validation-records/10-07-m1-a1-rule-providers](validation-records/10-07-m1-a1-rule-providers/README.md)。
 剩余直接缺口：sequence 项 27、`domain_output` 8、`aliapi` 5、`fallback` 裸 tag 2、`rewrite`/`webinfo`/`requery` 各 1。
+**M1-b2 完成后**（`10-07-rust-native-m1-b2-primitives`）：`SUMMARY gaps=16 cascades=66 globals=1`，
+sequence 里的 `rcode`（6）、`tag_setter`（10）、`drop_resp`（10）、`sleep`（1）和 `fallback` 裸 tag（2）
+全部关闭（直接缺口 45 → 16；`config_all` 与生产快照输出仍逐字节相同），原始输出见
+[validation-records/10-07-m1-b2-primitives](validation-records/10-07-m1-b2-primitives/README.md)。
+剩余直接缺口：`domain_output` 8、`aliapi` 5、`rewrite`/`webinfo`/`requery` 各 1；连带数不变（66）是因为
+`sbnodefallback` 的连带消失、`prefer_foreign_nocache`（其 `primary: foreign` 已能解析）由直接缺口变成连带。
 M1-0 之前的读法如下：
 
 - **直接缺口（GAP/GLOBAL）** 是要做的事；**连带错误（CASCADE）** 只因引用了被剔除的定义，
@@ -45,11 +51,11 @@ M1-0 之前的读法如下：
 | 插件类型 `rewrite` | 1 | |
 | 插件类型 `adguard_rule` | 1 | |
 | 插件类型 `webinfo` | 1 | |
-| exec `tag_setter` | 10 | |
-| exec `drop_resp` | 10 | |
-| matcher `rcode` | 6 | |
-| exec `sleep` | 1 | `for_singbox.yaml` 中的 `sleep 1000` |
-| `fallback` 的 `primary`/`secondary` 写裸 tag | 2 | 原生只接受 `$tag`；Go 接受 `primary: foreign` 形式 |
+| exec `tag_setter` | 10 | **M1-b2 已关闭** |
+| exec `drop_resp` | 10 | **M1-b2 已关闭** |
+| matcher `rcode` | 6 | **M1-b2 已关闭** |
+| exec `sleep` | 1 | **M1-b2 已关闭**（`for_singbox.yaml` 中的 `sleep 1000`） |
+| `fallback` 的 `primary`/`secondary` 写裸 tag | 2 | **M1-b2 已关闭**：现在同时接受裸 tag 与 `$tag`（Go 只认裸 tag） |
 
 ### M1-c 输出与再查询
 
@@ -73,7 +79,7 @@ M1-0 之前的读法如下：
 ## 2. 原生已接受的 `config_all` 用法
 
 `check` 在这些用法上没有报错（不等于产品验收）：`sequence` 控制流（`exit`、`reject`、
-`try`、`$ref`）、`qtype`、`fast_mark`（matcher/exec）、`flow_setter`、`switch1`–`switch17`
+`try`、`$ref`）、`qtype`、`rcode`、`tag_setter`、`drop_resp`、`sleep`、`fast_mark`（matcher/exec）、`flow_setter`、`switch1`–`switch17`
 声明与 quick matcher、`client_ip`、`resp_ip`（字面量/文件形式）、`ttl`、`cname_remover`、
 `prefer_ipv4`、quick `ecs`、`cache`（7 个，含 `dump_file`）、`ip_set`（2 个）、`api.http`。
 M1-0 之后还包括：2 个 `domain_set`（`gen/*.txt`）、全部 20 个 `udp_server`/`tcp_server`
