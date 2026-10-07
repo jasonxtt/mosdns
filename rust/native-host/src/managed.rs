@@ -317,6 +317,11 @@ impl std::error::Error for ManagedSetError {}
 pub(crate) enum DomainSetHandle {
     Fixed(Rc<MixMatcher<()>>),
     Managed(Rc<ManagedDomainSet>),
+    /// `adguard_rule`: matches when no allow rule matches and a block rule does.
+    Filtered {
+        allow: Rc<MixMatcher<()>>,
+        deny: Rc<MixMatcher<()>>,
+    },
 }
 
 impl DomainSetHandle {
@@ -324,13 +329,22 @@ impl DomainSetHandle {
         match self {
             Self::Fixed(matcher) => matcher.r#match(domain).is_some(),
             Self::Managed(provider) => provider.matches(domain),
+            Self::Filtered { allow, deny } => {
+                allow.r#match(domain).is_none() && deny.r#match(domain).is_some()
+            }
         }
+    }
+
+    /// True for the sets that match the reference's presentation-form name.
+    pub(crate) fn uses_presentation_name(&self) -> bool {
+        matches!(self, Self::Filtered { .. })
     }
 
     pub(crate) fn rule_count(&self) -> usize {
         match self {
             Self::Fixed(matcher) => matcher.len(),
             Self::Managed(provider) => provider.rule_count(),
+            Self::Filtered { allow, deny } => allow.len() + deny.len(),
         }
     }
 }

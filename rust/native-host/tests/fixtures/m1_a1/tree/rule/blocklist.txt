@@ -1,0 +1,17 @@
+# comment line
+domain:blocked.example
+full:Exact.Block.Example
+keyword:adtrack
+regexp:^ban[0-9]+\.example$
+regexp:([unclosed
+regexp:a**
+regexp:^\d+\.digits\.example$
+regexp:(?i)^CaseFold\.example$
+nocolon.example
+weird:type.example
+
+  domain:spaced.example  
+keyword:
+keyword:.
+domain:.lead.example
+domain:trail.example..

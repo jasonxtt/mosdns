@@ -1,0 +1,6 @@
+OK   codex example X.example. {'domain_set': 't1|t3', 'flags': [1, 3], 'marks': [], 'matched': True, 'source': 'p1|p3'}
+OK   parent spelled differently A.B.example. {'domain_set': 't1|t3|t4', 'flags': [1, 3, 4], 'marks': [], 'matched': True, 'source': 'p1|p3|p4'}
+OK   only lower domain Q.example. {'domain_set': 't1|t2', 'flags': [1, 2], 'marks': [], 'matched': True, 'source': 'p1|p2'}
+OK   only upper domain Q.example. {'domain_set': 't1|t2', 'flags': [1, 2], 'marks': [], 'matched': True, 'source': 'p1|p2'}
+OK   deep tails W.X.Y.example. {'domain_set': 't1|t5|t3', 'flags': [1, 3, 5], 'marks': [], 'matched': True, 'source': 'p1|p5|p3'}
+OK   unrelated case Mixed.Example. {'domain_set': 't1|t2|t3', 'flags': [1, 2, 3], 'marks': [], 'matched': True, 'source': 'p1|p2|p3'}

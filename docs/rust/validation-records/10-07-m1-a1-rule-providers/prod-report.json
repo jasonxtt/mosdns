@@ -1,0 +1,130 @@
+{
+ "by_class": {
+  "case": {
+   "deviation_footprint": 8207,
+   "native_equals_reference": 314296,
+   "total": 314296
+  },
+  "case-twin": {
+   "deviation_footprint": 533,
+   "native_equals_reference": 20208,
+   "total": 20208
+  },
+  "domain-deep": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 279656,
+   "total": 279656
+  },
+  "domain-neighbor": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 279656,
+   "total": 279656
+  },
+  "domain-parent": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 2164,
+   "total": 2164
+  },
+  "domain-self": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 279412,
+   "total": 279412
+  },
+  "domain-sub": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 279656,
+   "total": 279656
+  },
+  "edge": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 14,
+   "total": 14
+  },
+  "full-neighbor": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 17358,
+   "total": 17358
+  },
+  "full-parent": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 2932,
+   "total": 2932
+  },
+  "full-self": {
+   "deviation_footprint": 11,
+   "native_equals_reference": 16816,
+   "total": 16816
+  },
+  "full-sub": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 17358,
+   "total": 17358
+  },
+  "ip-after": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 5805,
+   "total": 5805
+  },
+  "ip-before": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 5801,
+   "total": 5801
+  },
+  "ip-edge": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 7,
+   "total": 7
+  },
+  "ip-first": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 5805,
+   "total": 5805
+  },
+  "ip-last": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 5788,
+   "total": 5788
+  },
+  "ip-random": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 5000,
+   "total": 5000
+  },
+  "ip-random6": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 2000,
+   "total": 2000
+  },
+  "keyword": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 52,
+   "total": 52
+  },
+  "random": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 39410,
+   "total": 39410
+  },
+  "regexp": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 36,
+   "total": 36
+  },
+  "regexp-neg": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 2,
+   "total": 2
+  },
+  "root": {
+   "deviation_footprint": 0,
+   "native_equals_reference": 2,
+   "total": 2
+  }
+ },
+ "cases_where_case_insensitive_full_changes_the_reference_answer": 8751,
+ "native_different": 0,
+ "native_identical_to_reference": 1579234,
+ "native_same_modulo_join_order": 0,
+ "samples": [],
+ "total": 1579234
+}

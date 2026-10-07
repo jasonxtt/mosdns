@@ -12,6 +12,11 @@
 `SUMMARY gaps=64 cascades=80 globals=1 definitions=126`，两份逐字节相同，stderr 为空。唯一
 GLOBAL 是 `at least one forward plugin is required`（全部上游经 `aliapi`，属 M1-b）；其余
 64 个直接缺口全部是下文 M1-a/b/c 的插件类型或 sequence 项，已无加载/listener/路径类缺口。
+**M1-a1 完成后**（`10-07-rust-native-m1-a1-rule-providers`）：`SUMMARY gaps=45 cascades=66 globals=1`，
+M1-a 的全部插件缺口（`domain_set_light`、`sd_set_light`、`domain_mapper`、`si_set`，以及移入本批的
+`adguard_rule`）和它们的连带已关闭，原始输出与差分见
+[validation-records/10-07-m1-a1-rule-providers](validation-records/10-07-m1-a1-rule-providers/README.md)。
+剩余直接缺口：sequence 项 27、`domain_output` 8、`aliapi` 5、`fallback` 裸 tag 2、`rewrite`/`webinfo`/`requery` 各 1。
 M1-0 之前的读法如下：
 
 - **直接缺口（GAP/GLOBAL）** 是要做的事；**连带错误（CASCADE）** 只因引用了被剔除的定义，
@@ -23,7 +28,7 @@ M1-0 之前的读法如下：
 
 ## 1. 直接缺口（按批次）
 
-### M1-a 规则 provider 与数据格式
+### M1-a 规则 provider 与数据格式（**查询侧已由 M1-a1 关闭**；管理侧归 M1-a2）
 
 | 缺口 | 数量 | 说明 |
 | --- | --- | --- |

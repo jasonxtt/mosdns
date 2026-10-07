@@ -1,6 +1,6 @@
 plugins:
   - tag: light_set
-    type: domain_set_light
+    type: sd_set
     args:
       files:
         - "rules.txt"

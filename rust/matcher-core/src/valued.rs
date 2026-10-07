@@ -180,43 +180,80 @@ impl ValuedDomainMatcher {
     /// a partially compiled snapshot.
     pub fn build(rules: &[ValuedRule]) -> Result<Self, ValuedBuildError> {
         let mut aggregated: HashMap<String, AggregatedRule> = HashMap::new();
+        let mut full_own: HashMap<String, AccumulatedResult> = HashMap::new();
         for (order, rule) in rules.iter().enumerate() {
-            let (_, pattern) = parse_rule(&rule.rule)?;
+            let (kind, pattern) = parse_rule(&rule.rule)?;
+            if kind == RuleKind::Full && pattern.is_ascii() {
+                full_own
+                    .entry(pattern.to_ascii_lowercase())
+                    .or_default()
+                    .merge_rule(rule);
+            }
             if !pattern.is_ascii() {
                 return Err(ValuedBuildError::UnsupportedRule {
                     rule: rule.rule.clone(),
                     error: NonAsciiRule.to_string(),
                 });
             }
-            let entry = aggregated
-                .entry(rule.rule.clone())
-                .or_insert_with(|| AggregatedRule {
-                    order,
-                    result: AccumulatedResult::default(),
-                });
+            let key = rule.rule.clone();
+            let entry = aggregated.entry(key).or_insert_with(|| AggregatedRule {
+                order,
+                result: AccumulatedResult::default(),
+            });
             entry.result.merge_rule(rule);
         }
 
         let mut ordered_keys: Vec<String> = aggregated.keys().cloned().collect();
         ordered_keys.sort_by_key(|key| aggregated[key].order);
 
-        let mut effective = HashMap::with_capacity(aggregated.len());
+        let index = DomainIndex::new(&aggregated);
+        // Inheritance without recursion: an ancestor's pattern is strictly
+        // shorter than its descendant's (a `domain:` rule of the same name
+        // only precedes the `full:` rule that inherits it), so processing by
+        // pattern length finishes every ancestor first.
+        let mut by_depth: Vec<(usize, bool, &String)> = Vec::with_capacity(ordered_keys.len());
         for key in &ordered_keys {
-            effective_result(key, &aggregated, &mut effective)?;
+            let (kind, pattern) = parse_rule(key)?;
+            by_depth.push((pattern.len(), kind != RuleKind::Domain, key));
+        }
+        by_depth.sort();
+        let mut effective: HashMap<String, AccumulatedResult> =
+            HashMap::with_capacity(aggregated.len());
+        for (_, _, key) in by_depth {
+            let mut result = aggregated[key.as_str()].result.clone();
+            if let Some(inherited) = inherited_result(key, &index, &effective)? {
+                result.merge_result(inherited);
+            }
+            effective.insert(key.clone(), result);
         }
 
         let mut pool: HashMap<ValuedMatchResult, Arc<ValuedMatchResult>> = HashMap::new();
-        let mut full = HashMap::new();
+        let mut full: HashMap<String, Arc<ValuedMatchResult>> = HashMap::new();
+        // `full:` rules that differ only in ASCII case are one rule (approved
+        // deviation: they match the same names). Each variant first inherits
+        // exactly as in the reference (from its own spelling); the variants'
+        // results are then merged in input order.
+        let mut full_groups: Vec<(String, Vec<&str>)> = Vec::new();
+        let mut full_group_index: HashMap<String, usize> = HashMap::new();
+        let mut full_rules = 0usize;
         let mut domain = DomainSuffixMatcher::new();
         let mut overlaps = Vec::new();
 
         for key in &ordered_keys {
             let (kind, pattern) = parse_rule(key)?;
+            if kind == RuleKind::Full {
+                full_rules += 1;
+                let lowered = pattern.to_ascii_lowercase();
+                let slot = *full_group_index.entry(lowered.clone()).or_insert_with(|| {
+                    full_groups.push((lowered, Vec::new()));
+                    full_groups.len() - 1
+                });
+                full_groups[slot].1.push(key);
+                continue;
+            }
             let result = intern_result(&mut pool, effective[key].clone().into_result());
             match kind {
-                RuleKind::Full => {
-                    full.insert(normalize(pattern), result);
-                }
+                RuleKind::Full => unreachable!("handled above"),
                 RuleKind::Domain => domain.add(pattern, result),
                 RuleKind::Keyword => overlaps.push(OverlapRule::Keyword {
                     pattern: normalize(pattern),
@@ -230,9 +267,9 @@ impl ValuedDomainMatcher {
                                 error: error.to_string(),
                             }
                         }
-                        crate::RegexBuildError::Compile(error) => ValuedBuildError::InvalidRegex {
+                        other => ValuedBuildError::InvalidRegex {
                             rule: key.clone(),
-                            error: error.to_string(),
+                            error: other.to_string(),
                         },
                     })?;
                     overlaps.push(OverlapRule::Regexp { matcher, result });
@@ -240,11 +277,29 @@ impl ValuedDomainMatcher {
             }
         }
 
+        let full_group_count = full_groups.len();
+        for (lowered, keys) in full_groups {
+            // The variants' own rules in input order, then what each
+            // spelling inherits.
+            let mut merged = full_own.remove(&lowered).unwrap_or_default();
+            for key in keys {
+                if let Some(inherited) = inherited_result(key, &index, &effective)? {
+                    merged.merge_result(inherited);
+                }
+            }
+            // A rule that differs only by the trailing dot replaces the
+            // earlier one, as in the reference's map.
+            full.insert(
+                full_key(&lowered),
+                intern_result(&mut pool, merged.into_result()),
+            );
+        }
+
         Ok(Self {
             full,
             domain,
             overlaps,
-            rule_count: ordered_keys.len(),
+            rule_count: ordered_keys.len() - full_rules + full_group_count,
             pooled_result_count: pool.len(),
         })
     }
@@ -282,16 +337,19 @@ impl ValuedDomainMatcher {
         let normalized = normalize(name);
         let mut merged = self
             .full
-            .get(&normalized)
+            .get(&full_key(name))
             .map(|result| result.as_ref().clone());
 
-        if let Some(result) = self.domain.r#match(&normalized) {
+        if let Some(result) = self.domain.match_normalized(&normalized) {
             merged = Some(merge_results(merged, result));
         }
 
         for overlap in &self.overlaps {
             let matches = match overlap {
-                OverlapRule::Keyword { pattern, .. } => normalized.contains(pattern),
+                // The reference ignores a keyword that normalizes to nothing.
+                OverlapRule::Keyword { pattern, .. } => {
+                    !pattern.is_empty() && normalized.contains(pattern)
+                }
                 OverlapRule::Regexp { matcher, .. } => matcher.is_match(&normalized),
             };
             if matches {
@@ -308,6 +366,15 @@ impl ValuedDomainMatcher {
     }
 }
 
+/// The `full:` lookup key: ASCII-lowercased, with one trailing dot ensured.
+fn full_key(name: &str) -> String {
+    let mut key = name.to_ascii_lowercase();
+    if !key.ends_with('.') {
+        key.push('.');
+    }
+    key
+}
+
 fn parse_rule(rule: &str) -> Result<(RuleKind, &str), ValuedBuildError> {
     let Some((kind, pattern)) = rule.split_once(':') else {
         return Err(ValuedBuildError::InvalidRule(rule.to_owned()));
@@ -322,39 +389,80 @@ fn parse_rule(rule: &str) -> Result<(RuleKind, &str), ValuedBuildError> {
     Ok((kind, pattern))
 }
 
-fn effective_result(
+/// What a rule inherits: the reference merges the results of every
+/// `domain:` rule named by the pattern's dotted tails (longest first), and
+/// each of those has already merged the tails below it, so the longest
+/// existing one carries everything (a `full:` rule starts with the `domain:`
+/// rule of its own name, which in turn carries all the tails).
+fn inherited_result<'a>(
     key: &str,
-    aggregated: &HashMap<String, AggregatedRule>,
-    cache: &mut HashMap<String, AccumulatedResult>,
-) -> Result<AccumulatedResult, ValuedBuildError> {
-    if let Some(result) = cache.get(key) {
-        return Ok(result.clone());
-    }
-
+    index: &DomainIndex,
+    effective: &'a HashMap<String, AccumulatedResult>,
+) -> Result<Option<&'a AccumulatedResult>, ValuedBuildError> {
     let (kind, pattern) = parse_rule(key)?;
-    let mut result = aggregated
-        .get(key)
-        .map_or_else(AccumulatedResult::default, |entry| entry.result.clone());
+    Ok(index
+        .nearest_ancestor(kind == RuleKind::Full, pattern)
+        .and_then(|ancestor| effective.get(ancestor)))
+}
 
-    let mut ancestors = Vec::new();
-    if kind == RuleKind::Full {
-        ancestors.push(format!("domain:{pattern}"));
-    }
+/// The `domain:` rules, indexed by their dot-separated labels from the right,
+/// so the rules a pattern's dotted tails name are found in one walk of the
+/// pattern without building a string per tail. Flat arena (node 0 is the
+/// root): a rule with a huge number of labels must not recurse.
+struct DomainIndex {
+    nodes: Vec<IndexNode>,
+}
 
-    let mut suffix = pattern;
-    while let Some(dot) = suffix.find('.') {
-        suffix = &suffix[dot + 1..];
-        ancestors.push(format!("domain:{suffix}"));
-    }
+#[derive(Default)]
+struct IndexNode {
+    children: HashMap<String, usize>,
+    /// The aggregated key (`domain:<labels>`) of a rule that ends here.
+    key: Option<String>,
+}
 
-    for ancestor in ancestors {
-        if aggregated.contains_key(&ancestor) {
-            let inherited = effective_result(&ancestor, aggregated, cache)?;
-            result.merge_result(&inherited);
+impl DomainIndex {
+    fn new(aggregated: &HashMap<String, AggregatedRule>) -> Self {
+        let mut nodes = vec![IndexNode::default()];
+        for key in aggregated.keys() {
+            if let Some(pattern) = key.strip_prefix("domain:") {
+                let mut node = 0;
+                for label in pattern.rsplit('.') {
+                    node = match nodes[node].children.get(label) {
+                        Some(&child) => child,
+                        None => {
+                            nodes.push(IndexNode::default());
+                            let child = nodes.len() - 1;
+                            nodes[node].children.insert(label.to_owned(), child);
+                            child
+                        }
+                    };
+                }
+                nodes[node].key = Some(key.clone());
+            }
         }
+        Self { nodes }
     }
-    cache.insert(key.to_owned(), result.clone());
-    Ok(result)
+
+    /// The longest `domain:` rule among those a pattern inherits from (its
+    /// own name for `full:` rules, then each tail after a dot).
+    fn nearest_ancestor(&self, include_whole: bool, pattern: &str) -> Option<&str> {
+        let labels = pattern.split('.').count();
+        let mut nearest = None;
+        let mut node = 0;
+        for (consumed, label) in pattern.rsplit('.').enumerate() {
+            let Some(&child) = self.nodes[node].children.get(label) else {
+                break;
+            };
+            node = child;
+            let tail_start = labels - 1 - consumed;
+            if let Some(key) = &self.nodes[node].key
+                && (tail_start >= 1 || include_whole)
+            {
+                nearest = Some(key.as_str());
+            }
+        }
+        nearest
+    }
 }
 
 fn intern_result(
@@ -585,6 +693,126 @@ mod tests {
     };
 
     #[test]
+    fn full_rules_that_differ_only_in_case_merge_instead_of_overwriting() {
+        let rules = vec![
+            ValuedRule::new("full:Case.Example.com", 1, [], "first", "src-a"),
+            ValuedRule::new("full:case.example.com", 2, [], "second", "src-b"),
+        ];
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        for name in ["case.example.com.", "CASE.EXAMPLE.COM.", "Case.Example.Com"] {
+            let result = matcher.r#match(name).expect("case-insensitive full match");
+            assert_eq!(result.fast_marks, 3, "{name}");
+            assert_eq!(result.joined_tags, "first|second", "{name}");
+            assert_eq!(result.joined_sources, "src-a|src-b", "{name}");
+        }
+    }
+
+    #[test]
+    fn a_trailing_dot_makes_a_different_full_rule_and_the_later_one_replaces() {
+        let rules = vec![
+            ValuedRule::new("full:x.example", 1, [], "A", "sa"),
+            ValuedRule::new("full:x.example.", 2, [], "B", "sb"),
+            ValuedRule::new("full:y.example..", 4, [], "C", "sc"),
+        ];
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        // The reference keeps one entry per dotted name; the later rule wins.
+        let result = matcher.r#match("x.example.").expect("match");
+        assert_eq!((result.fast_marks, result.joined_tags.as_str()), (2, "B"));
+        // A doubled dot is a different name and never matches a query name.
+        assert!(matcher.r#match("y.example.").is_none());
+        assert!(matcher.r#match("y.example").is_none());
+    }
+
+    #[test]
+    fn case_variant_full_rules_join_tags_and_sources_in_input_order() {
+        let rules = vec![
+            ValuedRule::new("full:X.example", 1, [], "A", "sa"),
+            ValuedRule::new("full:x.example", 2, [], "B", "sb"),
+            ValuedRule::new("full:X.example", 4, [], "C", "sc"),
+        ];
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        let result = matcher.r#match("x.example.").expect("match");
+        assert_eq!(result.fast_marks, 7);
+        assert_eq!(result.joined_tags, "A|B|C");
+        assert_eq!(result.joined_sources, "sa|sb|sc");
+        assert_eq!(matcher.len(), 1, "one normalized rule");
+    }
+
+    #[test]
+    fn case_variants_keep_each_spellings_own_inheritance() {
+        // `full:X.example` inherits only from the domain rule spelled `X.example`
+        // (reference behaviour), even though it also matches `x.example.`.
+        let rules = vec![
+            ValuedRule::new("full:X.example", 1, [], "A", "sa"),
+            ValuedRule::new("domain:x.example", 2, [], "B", "sb"),
+            ValuedRule::new("domain:X.example", 4, [], "C", "sc"),
+        ];
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        for query in ["X.example.", "x.example.", "x.EXAMPLE."] {
+            let result = matcher.r#match(query).expect("match");
+            // The two domain rules share one trie node (normalized), the later one wins.
+            assert_eq!(
+                (result.fast_marks, result.joined_tags.as_str()),
+                (5, "A|C"),
+                "{query}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_chain_of_nested_domain_rules_builds_without_recursion() {
+        // 6,000 rules, each a dotted tail of the previous one, listed from
+        // the deepest to the shallowest.
+        let mut rules = Vec::new();
+        for depth in (1..=6_000usize).rev() {
+            let name = format!("{}example", "a.".repeat(depth));
+            rules.push(ValuedRule::new(
+                format!("domain:{name}"),
+                1 << (depth % 40),
+                [],
+                format!("t{}", depth % 7),
+                "s",
+            ));
+        }
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        let result = matcher
+            .r#match(&format!("x.{}example.", "a.".repeat(6_000)))
+            .expect("match");
+        // Every rule on the chain contributes (the deepest inherits them all).
+        assert_eq!(result.joined_tags.split('|').count(), 7);
+    }
+
+    #[test]
+    fn a_huge_dotted_domain_rule_builds_and_drops_without_recursion() {
+        let deep = format!("domain:{}", "a.".repeat(524_288));
+        let rules = vec![
+            ValuedRule::new(&deep, 1, [], "d", "s"),
+            ValuedRule::new("domain:a", 2, [], "e", "s"),
+        ];
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        assert!(matcher.r#match("b.a.").is_some());
+        drop(matcher);
+    }
+
+    #[test]
+    fn a_huge_dotted_keyword_does_not_allocate_per_suffix() {
+        // 524288 labels: one string per suffix would need hundreds of GiB.
+        let keyword = format!("keyword:{}a", "a.".repeat(524_288));
+        let rules = vec![
+            ValuedRule::new(&keyword, 1, [], "k", "s"),
+            ValuedRule::new("domain:a", 2, [], "d", "s"),
+            ValuedRule::new("domain:a.a", 4, [], "e", "s"),
+        ];
+        let matcher = ValuedDomainMatcher::build(&rules).expect("valid valued rules");
+        // The keyword inherits from both domain rules, the longer tail first.
+        let result = matcher
+            .r#match(&format!("{}ax.", "a.".repeat(524_288)))
+            .expect("match");
+        assert_eq!(result.fast_marks, 7);
+        assert_eq!(result.joined_tags, "k|e|d");
+    }
+
+    #[test]
     fn merges_overlapping_rule_types_and_inherits_domain_results() {
         let rules = vec![
             ValuedRule::new("domain:example.com", 1, [10], "base", "base-source"),
@@ -635,7 +863,7 @@ mod tests {
             "domain:例.example",
             "keyword:例",
             "regexp:^例$",
-            r"regexp:^\w+$",
+            r"regexp:^\p{L}+$",
         ] {
             let rules = [ValuedRule::new(rule, 0, [], "", "")];
             assert!(
@@ -790,6 +1018,18 @@ mod tests {
             result.joined_sources,
             "full-source|example-source|com-source|keyword-source|regexp-source"
         );
+    }
+
+    #[test]
+    fn empty_keywords_never_match() {
+        let matcher = ValuedDomainMatcher::build(&[
+            ValuedRule::new("keyword:", 1, [], "empty", "s"),
+            ValuedRule::new("keyword:.", 2, [], "dot", "s"),
+            ValuedRule::new("keyword:real", 4, [], "real", "s"),
+        ])
+        .expect("valid valued rules");
+        assert!(matcher.r#match("unrelated.example.").is_none());
+        assert_eq!(matcher.r#match("a.real.example.").unwrap().fast_marks, 4);
     }
 
     #[test]

@@ -1,0 +1,33 @@
+{
+ "cases": 1579236,
+ "classes": {
+  "case": 314296,
+  "case-twin": 20208,
+  "count": 2,
+  "domain-deep": 279656,
+  "domain-neighbor": 279656,
+  "domain-parent": 2164,
+  "domain-self": 279412,
+  "domain-sub": 279656,
+  "edge": 14,
+  "full-neighbor": 17358,
+  "full-parent": 2932,
+  "full-self": 16816,
+  "full-sub": 17358,
+  "ip-after": 5805,
+  "ip-before": 5801,
+  "ip-edge": 7,
+  "ip-first": 5805,
+  "ip-last": 5788,
+  "ip-random": 5000,
+  "ip-random6": 2000,
+  "keyword": 52,
+  "random": 39410,
+  "regexp": 36,
+  "regexp-neg": 2,
+  "root": 2
+ },
+ "ip_cases": 30206,
+ "regexp_rules_without_a_derived_positive": 1,
+ "unique_rules": 148532
+}

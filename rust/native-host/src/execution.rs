@@ -5385,6 +5385,7 @@ plugins:
             listeners: Vec::new(),
             response_policies: Vec::new(),
             ip_sets: Vec::new(),
+            domain_mappers: Vec::new(),
             response_ip_rules: Vec::new(),
             log_level: LogLevel::Error,
             forward: Some(ForwardConfig {
@@ -5494,6 +5495,7 @@ plugins:
                 listeners: Vec::new(),
                 response_policies: Vec::new(),
                 ip_sets: Vec::new(),
+                domain_mappers: Vec::new(),
                 response_ip_rules: Vec::new(),
                 log_level: LogLevel::Error,
                 forward: Some(ForwardConfig {
@@ -6038,6 +6040,7 @@ plugins:
             listeners: Vec::new(),
             response_policies: Vec::new(),
             ip_sets: Vec::new(),
+            domain_mappers: Vec::new(),
             response_ip_rules: Vec::new(),
             log_level: LogLevel::Error,
             forward: Some(ForwardConfig {
@@ -6149,6 +6152,7 @@ plugins:
                 listeners: Vec::new(),
                 response_policies: Vec::new(),
                 ip_sets: Vec::new(),
+                domain_mappers: Vec::new(),
                 response_ip_rules: Vec::new(),
                 log_level: LogLevel::Error,
                 forward: Some(ForwardConfig {
@@ -6337,6 +6341,7 @@ plugins:
             listeners: Vec::new(),
             response_policies: Vec::new(),
             ip_sets: Vec::new(),
+            domain_mappers: Vec::new(),
             response_ip_rules: Vec::new(),
             log_level: LogLevel::Error,
             forward: Some(forward_config(&forward_b, forward_b_id)),

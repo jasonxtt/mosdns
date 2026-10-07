@@ -35,7 +35,7 @@ fn every_gap_is_listed_with_location_and_classification() {
 GLOBAL {GAPS}:log.production  unsupported field
 GLOBAL {GAPS}:log.encoding  unsupported field
 GAP no_args domain_output {GAPS}:plugins[3].args  required field is missing
-GAP light_set domain_set_light sub/rules.yaml:plugins[0].type  unsupported plugin type `domain_set_light`
+GAP light_set sd_set sub/rules.yaml:plugins[0].type  unsupported plugin type `sd_set`
 GAP rewrite_x rewrite {GAPS}:plugins[1].type  unsupported plugin type `rewrite`
 GAP two_bad_params cache {GAPS}:plugins[2].args.first_unknown  unsupported field
 GAP udp_in udp_server {GAPS}:plugins[5].args.listen  only a numeric IP SocketAddr with a nonzero port is supported

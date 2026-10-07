@@ -22,11 +22,14 @@ use crate::matchers::{
     ClientIpMatcher, DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher,
     ResponseIpMatcher, TrueMatcher, build_domain_set_with_inputs, resolve_rule_path,
 };
-use crate::plugins::{FastMarkConfig, FlowSetterConfig};
+use crate::plugins::{FastMarkConfig, FlowSetterConfig, MarkConfig};
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
 
 mod check;
+mod providers;
 pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config, check_config_in};
+pub(crate) use providers::presentation_name;
+pub use providers::{DomainMapperConfig, MapperOutcome};
 
 /// The diagnostic threshold of the `log.level` section; ordered from the most
 /// to the least verbose.
@@ -479,6 +482,8 @@ pub struct CompiledConfig {
     pub listeners: Vec<ListenerConfig>,
     pub response_policies: Vec<ResponsePolicyConfig>,
     pub ip_sets: Vec<IpSetConfig>,
+    /// Every compiled `domain_mapper`, in declaration order.
+    pub domain_mappers: Vec<DomainMapperConfig>,
     pub response_ip_rules: Vec<ResponseIpRuleConfig>,
     pub log_level: LogLevel,
     /// Legacy convenience view of one reachable forward. This value does not
@@ -1483,8 +1488,10 @@ impl<'a> CacheDependencyClosure<'a> {
             "plugin:{}:{}:{:?}:{:?}",
             plugin.tag, plugin.kind, plugin.args, plugin.root_dir
         ));
-        if matches!(plugin.kind.as_str(), "hosts" | "redirect" | "ip_set")
-            || (plugin.kind == "sequence" && sequence_has_file_backed_ip_matcher(&plugin.args))
+        if matches!(
+            plugin.kind.as_str(),
+            "hosts" | "redirect" | "ip_set" | "si_set" | "domain_mapper" | "adguard_rule"
+        ) || (plugin.kind == "sequence" && sequence_has_file_backed_ip_matcher(&plugin.args))
         {
             // These loaders currently expose no stable, complete semantic
             // fingerprint. Caches depending on them must start fresh. The
@@ -1812,6 +1819,11 @@ enum PluginKind {
     FlowSetter,
     Fallback,
     Switch,
+    DomainSetLight,
+    SdSetLight,
+    AdguardRule,
+    SiSet,
+    DomainMapper,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -1824,6 +1836,8 @@ struct PluginCatalog<'a> {
     inputs: &'a RefCell<Option<crate::special_groups::CandidateInputSet>>,
     kinds: &'a [(String, PluginKind, usize)],
     domain_sets: &'a [(String, DomainSetHandle)],
+    /// `adguard_rule` definitions, which `qname $tag` may reference directly.
+    adguard_rules: &'a BTreeMap<String, providers::AdguardRules>,
     fast_marks: &'a [(String, FastMarkConfig)],
     forwards: &'a RefCell<ForwardCompiler>,
     preferences: &'a RefCell<Vec<(String, PreferenceFamily)>>,
@@ -1853,6 +1867,11 @@ impl PluginCatalog<'_> {
             .iter()
             .find(|(name, _)| name.as_str() == tag)
             .map(|(_, handle)| handle.clone())
+    }
+
+    /// The direct matcher of an `adguard_rule` definition.
+    fn adguard_matcher(&self, tag: &str) -> Option<Result<DomainSetHandle, String>> {
+        self.adguard_rules.get(tag).map(|rules| rules.matcher(tag))
     }
 
     fn fast_mark(&self, tag: &str) -> Option<FastMarkConfig> {
@@ -1897,6 +1916,11 @@ fn compile_definitions(
             "fast_mark" => PluginKind::FastMark,
             "flow_setter" => PluginKind::FlowSetter,
             "fallback" => PluginKind::Fallback,
+            "domain_set_light" => PluginKind::DomainSetLight,
+            "sd_set_light" => PluginKind::SdSetLight,
+            "adguard_rule" => PluginKind::AdguardRule,
+            "si_set" => PluginKind::SiSet,
+            "domain_mapper" => PluginKind::DomainMapper,
             other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
@@ -2014,6 +2038,8 @@ fn compile_definitions(
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
     let mut listeners = Vec::new();
+    let mut provider_rules: BTreeMap<String, providers::ProviderRules> = BTreeMap::new();
+    let mut adguard_rules: BTreeMap<String, providers::AdguardRules> = BTreeMap::new();
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
             PluginKind::Ecs => {
@@ -2087,6 +2113,32 @@ fn compile_definitions(
                 });
             }
             PluginKind::DomainSet | PluginKind::Sequence => {}
+            PluginKind::DomainSetLight | PluginKind::SdSetLight | PluginKind::AdguardRule => {
+                let mut inputs = candidate_inputs.borrow_mut();
+                let entries = match kinds[index].1 {
+                    PluginKind::DomainSetLight => {
+                        Rc::new(providers::load_domain_set_light(plugin, inputs.as_mut())?)
+                    }
+                    PluginKind::SdSetLight => {
+                        Rc::new(providers::load_sd_set_light(plugin, inputs.as_mut())?)
+                    }
+                    _ => {
+                        let rules = providers::load_adguard_rule(plugin, inputs.as_mut())?;
+                        let deny = Rc::clone(&rules.deny);
+                        adguard_rules.insert(plugin.tag.clone(), rules);
+                        deny
+                    }
+                };
+                provider_rules.insert(plugin.tag.clone(), entries);
+            }
+            PluginKind::SiSet => {
+                let mut inputs = candidate_inputs.borrow_mut();
+                ip_sets.push(IpSetConfig {
+                    tag: plugin.tag.clone(),
+                    prefixes: providers::load_si_set(plugin, inputs.as_mut())?,
+                });
+            }
+            PluginKind::DomainMapper => {}
             PluginKind::Switch => {
                 let declaration = compile_switch_declaration(plugin)?;
                 if let Some(existing) = switches
@@ -2197,6 +2249,32 @@ fn compile_definitions(
     }
     switches.sort_by_key(|declaration| declaration.type_number);
 
+    // Mappers compile after every provider is loaded, so a rule may name a
+    // provider declared later without changing the result.
+    let mut domain_mappers: Vec<DomainMapperConfig> = Vec::new();
+    {
+        let provider_kinds: Vec<(String, String)> = definitions
+            .iter()
+            .map(|plugin| (plugin.tag.clone(), plugin.kind.clone()))
+            .collect();
+        let kind_name = |tag: &str| {
+            provider_kinds
+                .iter()
+                .find(|(name, _)| name == tag)
+                .map(|(_, kind)| kind.clone())
+        };
+        for (index, plugin) in definitions.iter().enumerate() {
+            if kinds[index].1 == PluginKind::DomainMapper {
+                domain_mappers.push(providers::compile_domain_mapper(
+                    plugin,
+                    &kind_name,
+                    &provider_rules,
+                )?);
+            }
+        }
+    }
+    drop(provider_rules);
+
     let forward_compiler = RefCell::new(ForwardCompiler {
         definitions: forwards,
         invocations: Vec::new(),
@@ -2211,6 +2289,7 @@ fn compile_definitions(
         inputs: &candidate_inputs,
         kinds: &kinds,
         domain_sets: &domain_sets,
+        adguard_rules: &adguard_rules,
         fast_marks: &fast_marks,
         forwards: &forward_compiler,
         preferences: &preference_invocations,
@@ -2234,6 +2313,12 @@ fn compile_definitions(
         fixtures.push(mosdns_sequence_core::FixtureSpec::new(
             plugin_fixture_name(&declaration.tag),
             Box::new(crate::switch::SwitchNoopExecutor),
+        ));
+    }
+    for mapper in &domain_mappers {
+        fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+            plugin_fixture_name(&mapper.tag),
+            mapper.executor(),
         ));
     }
     let resolved_fallback_definitions = fallback_definitions
@@ -2514,6 +2599,7 @@ fn compile_definitions(
             .collect(),
         response_policies,
         ip_sets,
+        domain_mappers,
         response_ip_rules: response_ip_rules.into_inner(),
         log_level: log,
         forward: primary.clone(),
@@ -3004,12 +3090,24 @@ fn resolve_policy_target_name(
             | PluginKind::Redirect
             | PluginKind::Ecs,
         ) => Ok(PolicyTargetName::External(tag.to_owned())),
-        Some(PluginKind::FastMark | PluginKind::FlowSetter | PluginKind::Switch) => {
-            Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag)))
-        }
-        Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
-            ConfigError::new(path, format!("`${tag}` is not executable")),
-        ),
+        Some(
+            PluginKind::FastMark
+            | PluginKind::FlowSetter
+            | PluginKind::Switch
+            | PluginKind::DomainMapper,
+        ) => Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag))),
+        Some(
+            PluginKind::DomainSet
+            | PluginKind::Listener
+            | PluginKind::IpSet
+            | PluginKind::SiSet
+            | PluginKind::DomainSetLight
+            | PluginKind::SdSetLight
+            | PluginKind::AdguardRule,
+        ) => Err(ConfigError::new(
+            path,
+            format!("`${tag}` is not executable"),
+        )),
         None => Err(ConfigError::unknown_reference(
             path,
             format!("unknown executable reference `${tag}`"),
@@ -3545,6 +3643,9 @@ fn compile_matcher(
         "fast_mark" => FastMarkConfig::parse(args)
             .map_err(|reason| ConfigError::new(path, reason))?
             .matcher(),
+        "mark" => MarkConfig::parse(args)
+            .map_err(|reason| ConfigError::new(path, reason))?
+            .matcher(),
         "qname" => Box::new(compile_qname(args, path, catalog)?),
         "qtype" => {
             let mut types = Vec::new();
@@ -3636,6 +3737,13 @@ fn compile_qname(
     let mut first_inline_index = None;
     for field in args.split_whitespace() {
         if let Some(tag) = field.strip_prefix('$') {
+            if let Some(handle) = catalog.adguard_matcher(tag) {
+                groups.push((
+                    format!("domain_set:{tag}"),
+                    handle.map_err(|reason| ConfigError::new(path, reason))?,
+                ));
+                continue;
+            }
             let set = catalog.domain_set(tag).ok_or_else(|| {
                 let reason = format!("unknown domain_set reference `${tag}`");
                 if catalog.kind_of(tag).is_none() {
@@ -3896,6 +4004,18 @@ fn compile_exec_item(
                 target: mosdns_sequence_core::FixtureRef::new(fixture_name),
             })
         }
+        "mark" => {
+            let config =
+                MarkConfig::parse(args).map_err(|reason| ConfigError::new(path, reason))?;
+            let fixture_name = quick_fixture_name(path);
+            fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+                fixture_name.clone(),
+                config.executor(),
+            ));
+            Ok(ExecutableSpec::Fixture {
+                target: mosdns_sequence_core::FixtureRef::new(fixture_name),
+            })
+        }
         "flow_setter" => {
             let config = FlowSetterConfig::from_quick_args(args)
                 .map_err(|reason| ConfigError::new(path, reason))?;
@@ -3984,14 +4104,26 @@ fn compile_exec_item(
                 ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
-                Some(PluginKind::FastMark | PluginKind::FlowSetter | PluginKind::Switch) => {
-                    Ok(ExecutableSpec::Fixture {
-                        target: mosdns_sequence_core::FixtureRef::new(plugin_fixture_name(tag)),
-                    })
-                }
-                Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
-                    ConfigError::new(path, format!("`{name}` is not executable")),
-                ),
+                Some(
+                    PluginKind::FastMark
+                    | PluginKind::FlowSetter
+                    | PluginKind::Switch
+                    | PluginKind::DomainMapper,
+                ) => Ok(ExecutableSpec::Fixture {
+                    target: mosdns_sequence_core::FixtureRef::new(plugin_fixture_name(tag)),
+                }),
+                Some(
+                    PluginKind::DomainSet
+                    | PluginKind::Listener
+                    | PluginKind::IpSet
+                    | PluginKind::SiSet
+                    | PluginKind::DomainSetLight
+                    | PluginKind::SdSetLight
+                    | PluginKind::AdguardRule,
+                ) => Err(ConfigError::new(
+                    path,
+                    format!("`{name}` is not executable"),
+                )),
                 None => Err(ConfigError::unknown_reference(
                     path,
                     format!("unknown executable reference `{name}`"),
