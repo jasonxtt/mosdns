@@ -1,0 +1,8 @@
+[
+  {"Name": "nullfiles", "Files": null, "Enabled": false, "rule_count": null},
+  {"name": "srs_main", "type": "geosite", "files": "srs/domains.srs", "enabled": true, "enable_regexp": true},
+  {"name": "srs_noregex", "type": "geosite", "files": "srs/domains.srs", "enabled": true, "enable_regexp": false},
+  {"name": "switched_off", "files": "srs/domains.srs", "enabled": false},
+  {"name": "gone", "files": "srs/missing.srs", "enabled": true},
+  {"name": "", "files": "srs/domains.srs", "enabled": true}
+]

@@ -10,6 +10,7 @@ name = "mosdns_matcher_core"
 crate-type = ["rlib"]
 
 [dependencies]
+flate2 = "=1.1.9"
 regex = { version = "=1.11.1", features = ["perf"] }
 
 [lints]

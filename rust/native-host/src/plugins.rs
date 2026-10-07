@@ -59,6 +59,69 @@ impl Executor for FastMarkExecutor {
     }
 }
 
+/// The typed native representation of one quick `mark` configuration: a list
+/// of context marks (not fast-mark bits), each an unsigned decimal `u32`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MarkConfig {
+    marks: Vec<u32>,
+}
+
+impl MarkConfig {
+    pub(crate) fn parse(args: &str) -> Result<Self, String> {
+        let marks = args
+            .split_whitespace()
+            .map(|token| {
+                // `strconv.ParseUint(_, 10, 32)`: digits only, no sign.
+                if !token.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(format!("invalid mark `{token}`"));
+                }
+                token
+                    .parse::<u32>()
+                    .map_err(|_| format!("invalid mark `{token}`"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { marks })
+    }
+
+    pub(crate) fn matcher(&self) -> Box<dyn Matcher> {
+        Box::new(MarkMatcher {
+            marks: self.marks.clone(),
+        })
+    }
+
+    pub(crate) fn executor(&self) -> Box<dyn Executor> {
+        Box::new(MarkExecutor {
+            marks: self.marks.clone(),
+        })
+    }
+}
+
+struct MarkMatcher {
+    marks: Vec<u32>,
+}
+
+impl Matcher for MarkMatcher {
+    fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
+        Ok(MatchOutcome::new(
+            self.marks.iter().any(|mark| state.marks.contains(mark)),
+            None,
+        ))
+    }
+}
+
+struct MarkExecutor {
+    marks: Vec<u32>,
+}
+
+impl Executor for MarkExecutor {
+    fn execute(&self, state: &mut ExecutionState) -> Result<ExecutorOutcome, ExecutorError> {
+        for mark in &self.marks {
+            state.apply_mutation(StateMutation::AddMark(*mark));
+        }
+        Ok(ExecutorOutcome::Continue)
+    }
+}
+
 /// The three routing fields accepted by the native `flow_setter` subset.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct FlowSetterConfig {

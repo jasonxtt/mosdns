@@ -1,0 +1,54 @@
+log: {level: error}
+plugins:
+  - tag: fwd
+    type: forward
+    args: {upstreams: [{addr: "udp://127.0.0.1:15453"}]}
+  - tag: blocklist
+    type: domain_set_light
+    args:
+      exps: ["domain:inline.example"]
+      sets: ["ignored"]
+      files: ["rule/blocklist.txt", "rule/missing.txt"]
+  - tag: subscribed
+    type: sd_set_light
+    args: {socks5: "", local_config: "srs/sd.json"}
+  - tag: adguard
+    type: adguard_rule
+    args: {dir: "adguard/", socks5: ""}
+  - tag: geoip
+    type: si_set
+    args: {local_config: "srs/ip.json"}
+  - tag: unified
+    type: domain_mapper
+    args:
+      default_mark: 17
+      default_tag: "none"
+      rules:
+        - {tag: blocklist, mark: 1, output_tag: "black"}
+        - {tag: subscribed, mark: 2, ctx_mark: 77, output_tag: "sub"}
+        - {tag: adguard, mark: 5, output_tag: "ads"}
+        - {tag: blocklist, mark: 3, output_tag: "black2"}
+  - tag: special_matcher
+    type: domain_mapper
+    args: {rules: []}
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $unified
+      - exec: $special_matcher
+      - matches: qname $adguard
+        exec: reject 1
+      - matches: mark 77
+        exec: reject 2
+      - matches: fast_mark 1
+        exec: reject 3
+      - matches: fast_mark 5
+        exec: mark 99
+      - matches: mark 99
+        exec: reject 5
+      - matches: fast_mark 17
+        exec: reject 0
+      - exec: reject 4
+  - tag: listener
+    type: udp_server
+    args: {entry: entry, listen: "127.0.0.1:__PORT__"}

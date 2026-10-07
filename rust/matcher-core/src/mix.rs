@@ -92,7 +92,7 @@ impl<V> MixMatcher<V> {
             self.full.insert(pattern, value);
             Ok(())
         } else if type_name == MATCHER_DOMAIN {
-            self.domain.add(&pattern, value);
+            self.domain.add_normalized(&pattern, value);
             Ok(())
         } else if type_name == MATCHER_KEYWORD {
             self.keyword.push((pattern, value));
@@ -119,7 +119,7 @@ impl<V> MixMatcher<V> {
             return Some(v);
         }
         // 2. Domain suffix
-        if let Some(v) = self.domain.r#match(&d) {
+        if let Some(v) = self.domain.match_normalized(&d) {
             return Some(v);
         }
         // 3. Regex
@@ -184,6 +184,17 @@ mod tests {
         let mut mix = MixMatcher::new();
         mix.set_default(MATCHER_DOMAIN);
         mix
+    }
+
+    #[test]
+    fn domain_rules_are_normalised_once_before_the_scanner() {
+        // Go trims one dot in `NormalizeDomain` and one in the scanner: a rule
+        // with three trailing dots keeps an empty label and matches no real name.
+        let mut mix = m();
+        mix.add("domain:trail.example...", 1).unwrap();
+        assert_eq!(mix.r#match("trail.example."), None);
+        mix.add("domain:two.example..", 2).unwrap();
+        assert_eq!(mix.r#match("two.example."), Some(&2));
     }
 
     #[test]

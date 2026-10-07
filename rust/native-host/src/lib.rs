@@ -41,11 +41,12 @@ pub use cache::{
 pub use cli::{CliCommand, CliError, parse_args, resolve_config_paths};
 pub use config::{
     ApiConfig, CacheId, CacheKind, CachePluginConfig, CheckFinding, CheckFindingKind, CheckReport,
-    CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig, ForwardDefinitionConfig,
-    ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme, ForwardTargetConfig,
-    ListenerConfig, ListenerKind, LogLevel, ManagedRouterConfig, ManagedRouterGroup,
-    ResponseIpRuleConfig, SequenceConfig, check_config, check_config_in, compile_yaml,
-    compile_yaml_with_base, compile_yaml_with_roots, load_and_compile, load_yaml,
+    CompiledConfig, ConfigError, DomainMapperConfig, DomainSetConfig, ForwardConfig,
+    ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme,
+    ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, ManagedRouterConfig,
+    ManagedRouterGroup, MapperOutcome, ResponseIpRuleConfig, SequenceConfig, check_config,
+    check_config_in, compile_yaml, compile_yaml_with_base, compile_yaml_with_roots,
+    load_and_compile, load_yaml,
 };
 pub use diag::record_fatal;
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};

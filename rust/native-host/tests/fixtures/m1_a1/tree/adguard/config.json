@@ -1,0 +1,6 @@
+[
+  {"id": "aaaa", "name": "main list", "url": "https://example.invalid/a.txt", "enabled": true, "rule_count": 99},
+  {"id": "bbbb", "name": "disabled list", "url": "https://example.invalid/b.txt", "enabled": false},
+  {"id": "dddd", "name": "long line", "url": "https://example.invalid/d.txt", "enabled": true},
+  {"id": "cccc", "name": "not downloaded", "url": "https://example.invalid/c.txt", "enabled": true}
+]

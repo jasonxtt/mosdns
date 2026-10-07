@@ -1,0 +1,16 @@
+! comment
+# comment
+||ads.guard.example^
+||*.wild.guard.example^
+||trk*.guard.example^
+/^pat[0-9]+\.guard\.example$/
+/^\d+\.dig\.guard\.example$/
+@@||allowed.guard.example^
+||allowed.guard.example^
+plain.guard.example
+127.0.0.1 hosts.guard.example
+example.com##.banner
+||..dots.guard.example^
+||trail.guard.example...^
+||tr2.guard.example^
+@@||tr2.guard.example...^

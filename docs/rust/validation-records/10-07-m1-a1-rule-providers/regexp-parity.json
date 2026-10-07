@@ -1,0 +1,9 @@
+{
+ "patterns": 257,
+ "names": 39,
+ "both_ok_identical": 143,
+ "refused_unsupported": 37,
+ "both_invalid": 77,
+ "violations": 0,
+ "violations_detail": []
+}

@@ -26,10 +26,24 @@ impl QnameMatcher {
 
 impl Matcher for QnameMatcher {
     fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
-        let Some(domain) = wire_name_to_ascii_domain(&state.query.question.qname_wire) else {
-            return Ok(MatchOutcome::new(false, None));
-        };
-        let Some((source, _set)) = self.groups.iter().find(|(_, set)| set.matches(&domain)) else {
+        // Most sets match the hostname-grammar form; an `adguard_rule` matches
+        // the reference presentation form (so `_srv._tcp.…` names are seen).
+        let wire = &state.query.question.qname_wire;
+        let hostname = wire_name_to_ascii_domain(wire);
+        let presentation = self
+            .groups
+            .iter()
+            .any(|(_, set)| set.uses_presentation_name())
+            .then(|| crate::config::presentation_name(wire))
+            .flatten();
+        let Some((source, _set)) = self.groups.iter().find(|(_, set)| {
+            let name = if set.uses_presentation_name() {
+                presentation.as_deref()
+            } else {
+                hostname.as_deref()
+            };
+            name.is_some_and(|name| set.matches(name))
+        }) else {
             return Ok(MatchOutcome::new(false, None));
         };
         let is_provider = source.starts_with("domain_set:");

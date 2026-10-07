@@ -1,0 +1,6 @@
+[
+  {"name": "ranges", "files": "srs/ips.srs", "enabled": true},
+  {"name": "off", "files": "srs/ips.srs", "enabled": false},
+  {"name": "missing", "files": "srs/nothere.srs", "enabled": true},
+  {"name": "notsrs", "files": "rule/blocklist.txt", "enabled": true}
+]

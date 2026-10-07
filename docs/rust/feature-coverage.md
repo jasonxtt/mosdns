@@ -317,13 +317,13 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 
 | ID | 条目 | M1 标注 | 已归档证据 |
 | --- | --- | --- | --- |
-| P01 | `domain_mapper` | M1；`check` 报缺口（M1-a，2 个） |  |
+| P01 | `domain_mapper` | 查询侧已有原生接入（M1-a1）：`config_all` 的 2 个实例 `check` 通过，生产规则集 157 万条差分与参考一致（`full:` 大小写为已批准偏差）；订阅重建/`QuickAdd`/`domain_output` 复用归 M1-a2/M1-c | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md)、[契约](contracts/native-rule-providers.md) |
 | P02 | `domain_set` | 已有原生接入；M1-0 起 `config_all` 的 2 个实例（`gen/*.txt`）按配置根目录解析，`check` 通过 | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md)、[domain_set 管理](validation-records/09-28-rust-native-domain-set-management/prd.md) |
-| P03 | `domain_set_light` | M1；`check` 报缺口（M1-a，11 个） |  |
+| P03 | `domain_set_light` | 加载侧已有原生接入（M1-a1，11 个实例 `check` 通过）；show/save/post 与热更新归 M1-a2 | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md) |
 | P04 | `ip_set` | 已有原生接入（`config_all` 用法 `check` 通过）；文件路径基准见 §3.1 | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
 | P05 | `sd_set` | 替换后 |  |
-| P06 | `sd_set_light` | M1；`check` 报缺口（M1-a，4 个） |  |
-| P07 | `si_set` | M1；`check` 报缺口（M1-a，1 个） |  |
+| P06 | `sd_set_light` | 加载侧已有原生接入（M1-a1，4 个实例 `check` 通过；SRS 解码）；来源管理/下载/自动更新归 M1-a2 | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md) |
+| P07 | `si_set` | 加载侧已有原生接入（M1-a1，`resp_ip $geoip_cn` 连带消失）；管理归 M1-a2 | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md) |
 | P08 | `client_ip` | 已有原生接入（`config_all` 用法 `check` 通过） | [client/ECS](validation-records/10-02-rust-native-client-context-ecs/) |
 | P09 | `cname` | 替换后（`config_all` 未使用） |  |
 | P10 | `env` | 替换后 |  |
@@ -338,7 +338,7 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | P19 | `rcode` | M1；`check` 报缺口（M1-b，6 处 matcher） |  |
 | P20 | `resp_ip` | 已有原生接入（`config_all` 用法 `check` 通过）；`$geoip_cn` 引用随 P07 | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
 | P21 | `string_exp` | 替换后 |  |
-| P22 | `adguard_rule` | M1；`check` 报缺口；因被 `unified_matcher1` 引用，规则加载移入 M1-a1，管理归 M1-a2 |  |
+| P22 | `adguard_rule` | 规则加载（deny 导出）已有原生接入（M1-a1）；不下载缺失列表，管理/下载归 M1-a2；直接 `qname $tag` 的 allow-first/deny matcher 已实现 | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md) |
 | P23 | `aliapi` | M1；`check` 报缺口（M1-b，5 个） |  |
 | P24 | `arbitrary` | 替换后 |  |
 | P25 | `black_hole` | 替换后 |  |
@@ -383,7 +383,7 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | P64 | `tag_setter` | M1；`check` 报缺口（M1-b，10 处 exec） |  |
 | P65 | `ttl` | 已有原生接入（`config_all` 用法 `check` 通过） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
 | P66 | `webinfo` | M1；`check` 报缺口（M1-b） |  |
-| P67 | `mark` | 替换后（`config_all` 未使用） |  |
+| P67 | `mark` | quick matcher/executor 已有原生接入（M1-a1，上下文 mark，与 `fast_mark` 独立）；`config_all` 自身只在生成的 `special_groups.yaml` 里经 `mark <slot>` 使用，托管生成器对齐归 M1-e | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md) |
 | P68 | `http_server` | 替换后 |  |
 | P69 | `quic_server` | 替换后 |  |
 | P70 | `tcp_server` | 已有原生接入；M1-0 起 `listen: ":port"`（双栈）、`enable_audit`/`idle_timeout` 可选、多 listener 无需 `native_management`（`config_all` 的 listener `check` 通过） | [5A routing](validation-records/09-22-rust-phase5a-native-routing/)、[5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
