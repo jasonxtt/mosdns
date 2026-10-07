@@ -22,7 +22,10 @@ use crate::matchers::{
     ClientIpMatcher, DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher,
     ResponseIpMatcher, TrueMatcher, build_domain_set_with_inputs, resolve_rule_path,
 };
-use crate::plugins::{FastMarkConfig, FlowSetterConfig, MarkConfig};
+use crate::plugins::{
+    DropRespExecutor, FastMarkConfig, FlowSetterConfig, MarkConfig, RcodeConfig, TagSetterConfig,
+    parse_sleep_millis,
+};
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
 
 mod check;
@@ -349,6 +352,14 @@ pub struct FallbackConfig {
     pub always_standby: bool,
 }
 
+/// One compiled `sleep`: the external the sequence dispatches and its wait.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SleepConfig {
+    pub tag: String,
+    pub executable: ExecutableId,
+    pub duration: Duration,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeTarget {
     Sequence(SequenceId),
@@ -499,6 +510,7 @@ pub struct CompiledConfig {
     pub caches: Vec<CachePluginConfig>,
     pub fallbacks: Vec<FallbackConfig>,
     pub preferences: Vec<PreferenceConfig>,
+    pub sleeps: Vec<SleepConfig>,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
     /// Every compiled `domain_set` with its management eligibility.
@@ -1443,6 +1455,16 @@ impl<'a> CacheDependencyClosure<'a> {
                 .insert(format!("response-policy:{}", policy.tag));
             recognized = true;
         }
+        if let Some(sleep) = self
+            .config
+            .sleeps
+            .iter()
+            .find(|sleep| sleep.executable == id)
+        {
+            self.material
+                .insert(format!("sleep:{}", sleep.duration.as_millis()));
+            recognized = true;
+        }
         if external.name.starts_with("@native-cname:") || external.name.starts_with("@native-ecs:")
         {
             recognized = true;
@@ -1824,6 +1846,8 @@ enum PluginKind {
     AdguardRule,
     SiSet,
     DomainMapper,
+    TagSetter,
+    Sleep,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -1841,6 +1865,9 @@ struct PluginCatalog<'a> {
     fast_marks: &'a [(String, FastMarkConfig)],
     forwards: &'a RefCell<ForwardCompiler>,
     preferences: &'a RefCell<Vec<(String, PreferenceFamily)>>,
+    /// Every sleep external (named plugin, quick callsite or preset use) and
+    /// its wait, keyed by the external's name.
+    sleeps: &'a RefCell<Vec<(String, Duration)>>,
     /// Inline `exec: cache` callsites discovered while sequences compile. Each
     /// entry owns a private cache instance keyed by its synthetic external name.
     quick_caches: &'a RefCell<Vec<QuickCacheSpec>>,
@@ -1921,6 +1948,8 @@ fn compile_definitions(
             "adguard_rule" => PluginKind::AdguardRule,
             "si_set" => PluginKind::SiSet,
             "domain_mapper" => PluginKind::DomainMapper,
+            "tag_setter" => PluginKind::TagSetter,
+            "sleep" => PluginKind::Sleep,
             other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
@@ -2034,6 +2063,8 @@ fn compile_definitions(
     let mut switches: Vec<crate::switch::SwitchDeclaration> = Vec::new();
     let mut fast_marks = Vec::new();
     let mut flow_setters = Vec::new();
+    let mut tag_setters = Vec::new();
+    let named_sleeps = RefCell::new(Vec::new());
     let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
@@ -2162,6 +2193,14 @@ fn compile_definitions(
             PluginKind::FlowSetter => {
                 let config = compile_flow_setter(plugin)?;
                 flow_setters.push((plugin.tag.clone(), config));
+            }
+            PluginKind::TagSetter => {
+                tag_setters.push((plugin.tag.clone(), compile_tag_setter(plugin)?));
+            }
+            PluginKind::Sleep => {
+                named_sleeps
+                    .borrow_mut()
+                    .push((plugin.tag.clone(), compile_sleep(plugin)?));
             }
             PluginKind::Fallback => {
                 fallback_definitions.push(compile_fallback(plugin)?);
@@ -2293,6 +2332,7 @@ fn compile_definitions(
         fast_marks: &fast_marks,
         forwards: &forward_compiler,
         preferences: &preference_invocations,
+        sleeps: &named_sleeps,
         quick_caches: &quick_caches,
     };
     let mut sequences = Vec::new();
@@ -2304,6 +2344,12 @@ fn compile_definitions(
         ));
     }
     for (tag, config) in &flow_setters {
+        fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+            plugin_fixture_name(tag),
+            config.executor(),
+        ));
+    }
+    for (tag, config) in &tag_setters {
         fixtures.push(mosdns_sequence_core::FixtureSpec::new(
             plugin_fixture_name(tag),
             config.executor(),
@@ -2391,6 +2437,7 @@ fn compile_definitions(
         }
     }
     let preference_invocations = preference_invocations.into_inner();
+    let sleep_specs = named_sleeps.into_inner();
     let quick_cache_specs = quick_caches.into_inner();
     let policies = policies.into_inner();
     let externals: Vec<ExternalSpec> = forward_compiler
@@ -2419,6 +2466,11 @@ fn compile_definitions(
         )
         .chain(
             preference_invocations
+                .iter()
+                .map(|(name, _)| ExternalSpec::new(name.clone())),
+        )
+        .chain(
+            sleep_specs
                 .iter()
                 .map(|(name, _)| ExternalSpec::new(name.clone())),
         )
@@ -2557,6 +2609,17 @@ fn compile_definitions(
         })
         .collect::<Result<Vec<_>, ConfigError>>()?;
 
+    let sleeps = sleep_specs
+        .into_iter()
+        .map(|(tag, duration)| {
+            Ok(SleepConfig {
+                executable: external_id(&program, &tag, "$.plugins.sequence.args")?,
+                tag,
+                duration,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+
     let entry_sequence = program.sequence_id(&listener.entry).ok_or_else(|| {
         ConfigError::new(
             format!("{listener_source_path}.args.entry"),
@@ -2609,6 +2672,7 @@ fn compile_definitions(
         caches: compiled_caches,
         fallbacks,
         preferences,
+        sleeps,
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
             sequence: entry_sequence,
@@ -3001,6 +3065,58 @@ fn compile_flow_setter(plugin: &RawPlugin) -> Result<FlowSetterConfig, ConfigErr
     Ok(config)
 }
 
+fn compile_tag_setter(plugin: &RawPlugin) -> Result<TagSetterConfig, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    if matches!(plugin.args, RawValue::Null) {
+        return Ok(TagSetterConfig::new(""));
+    }
+    let args = expect_map(&plugin.args, &path, "tag_setter args must be a mapping")?;
+    args.reject_unknown(&["tag"], &path)?;
+    let tag = match args.get("tag") {
+        None | Some(RawValue::Null) => String::new(),
+        Some(value) => expect_string(value, &format!("{path}.tag"))?,
+    };
+    Ok(TagSetterConfig::new(&tag))
+}
+
+fn compile_sleep(plugin: &RawPlugin) -> Result<Duration, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    if matches!(plugin.args, RawValue::Null) {
+        return Ok(Duration::ZERO);
+    }
+    let args = expect_map(&plugin.args, &path, "sleep args must be a mapping")?;
+    args.reject_unknown(&["duration"], &path)?;
+    match args.get("duration") {
+        None | Some(RawValue::Null) => Ok(Duration::ZERO),
+        Some(value) => Ok(Duration::from_millis(expect_nonnegative_integer(
+            value,
+            &format!("{path}.duration"),
+        )?)),
+    }
+}
+
+/// Registers one quick `sleep` callsite (or one use of the `_sleep_500ms`
+/// preset) as its own external and dispatches it.
+fn quick_sleep(
+    catalog: &PluginCatalog<'_>,
+    sequence_tag: &str,
+    rule_index: usize,
+    exec_index: usize,
+    duration: Duration,
+) -> ExecutableSpec {
+    let name = format!(
+        "@native-sleep:{}:{rule_index}:{exec_index}",
+        hex_identity(sequence_tag)
+    );
+    catalog.sleeps.borrow_mut().push((name.clone(), duration));
+    ExecutableSpec::External {
+        target: ExternalRef::new(name),
+    }
+}
+
+/// The preset plugin the reference product registers for `$_sleep_500ms`.
+const PRESET_SLEEP_500MS: &str = "_sleep_500ms";
+
 fn compile_fallback(plugin: &RawPlugin) -> Result<FallbackDefinition, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "fallback args must be a mapping")?;
@@ -3010,16 +3126,12 @@ fn compile_fallback(plugin: &RawPlugin) -> Result<FallbackDefinition, ConfigErro
     )?;
     let target = |key: &str| -> Result<String, ConfigError> {
         let value = expect_string(args.required(key, &path)?, &format!("{path}.{key}"))?;
-        let tag = value.strip_prefix('$').ok_or_else(|| {
-            ConfigError::new(
-                format!("{path}.{key}"),
-                "fallback targets must be exactly a `$plugin` reference",
-            )
-        })?;
+        // The reference product names the plugin bare; `$plugin` is accepted too.
+        let tag = value.strip_prefix('$').unwrap_or(&value);
         if tag.is_empty() || tag.contains(char::is_whitespace) {
             return Err(ConfigError::new(
                 format!("{path}.{key}"),
-                "fallback targets must be exactly one `$plugin` reference",
+                "fallback targets must be exactly one plugin tag",
             ));
         }
         Ok(tag.to_owned())
@@ -3088,11 +3200,13 @@ fn resolve_policy_target_name(
             | PluginKind::Fallback
             | PluginKind::Hosts
             | PluginKind::Redirect
-            | PluginKind::Ecs,
+            | PluginKind::Ecs
+            | PluginKind::Sleep,
         ) => Ok(PolicyTargetName::External(tag.to_owned())),
         Some(
             PluginKind::FastMark
             | PluginKind::FlowSetter
+            | PluginKind::TagSetter
             | PluginKind::Switch
             | PluginKind::DomainMapper,
         ) => Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag))),
@@ -3646,6 +3760,9 @@ fn compile_matcher(
         "mark" => MarkConfig::parse(args)
             .map_err(|reason| ConfigError::new(path, reason))?
             .matcher(),
+        "rcode" => RcodeConfig::parse(args)
+            .map_err(|reason| ConfigError::new(path, reason))?
+            .matcher(),
         "qname" => Box::new(compile_qname(args, path, catalog)?),
         "qtype" => {
             let mut types = Vec::new();
@@ -4028,6 +4145,40 @@ fn compile_exec_item(
                 target: mosdns_sequence_core::FixtureRef::new(fixture_name),
             })
         }
+        "tag_setter" => {
+            let fixture_name = quick_fixture_name(path);
+            fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+                fixture_name.clone(),
+                TagSetterConfig::new(args).executor(),
+            ));
+            Ok(ExecutableSpec::Fixture {
+                target: mosdns_sequence_core::FixtureRef::new(fixture_name),
+            })
+        }
+        "drop_resp" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, "drop_resp takes no arguments"));
+            }
+            let fixture_name = quick_fixture_name(path);
+            fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+                fixture_name.clone(),
+                Box::new(DropRespExecutor),
+            ));
+            Ok(ExecutableSpec::Fixture {
+                target: mosdns_sequence_core::FixtureRef::new(fixture_name),
+            })
+        }
+        "sleep" => {
+            let duration =
+                parse_sleep_millis(args).map_err(|reason| ConfigError::new(path, reason))?;
+            Ok(quick_sleep(
+                catalog,
+                sequence_tag,
+                rule_index,
+                exec_index,
+                duration,
+            ))
+        }
         "accept" | "return" | "exit" => {
             if !args.is_empty() {
                 return Err(ConfigError::new(path, format!("{name} takes no arguments")));
@@ -4088,6 +4239,15 @@ fn compile_exec_item(
                     format!("`{name}` takes no arguments"),
                 ));
             }
+            if tag == PRESET_SLEEP_500MS && catalog.kind_of(tag).is_none() {
+                return Ok(quick_sleep(
+                    catalog,
+                    sequence_tag,
+                    rule_index,
+                    exec_index,
+                    Duration::from_millis(500),
+                ));
+            }
             match catalog.kind_of(tag) {
                 Some(PluginKind::Sequence) => Ok(ExecutableSpec::Call {
                     target: SequenceRef::new(tag),
@@ -4100,13 +4260,15 @@ fn compile_exec_item(
                     | PluginKind::Fallback
                     | PluginKind::Hosts
                     | PluginKind::Ecs
-                    | PluginKind::Redirect,
+                    | PluginKind::Redirect
+                    | PluginKind::Sleep,
                 ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
                 Some(
                     PluginKind::FastMark
                     | PluginKind::FlowSetter
+                    | PluginKind::TagSetter
                     | PluginKind::Switch
                     | PluginKind::DomainMapper,
                 ) => Ok(ExecutableSpec::Fixture {
@@ -5438,5 +5600,158 @@ plugins:
             Err(error) => error,
         };
         assert_eq!(error.path, "$.plugins[0].args[0].matches[0]");
+    }
+    #[test]
+    fn request_primitives_compile_in_every_reference_form() {
+        // Quick forms, named plugins, and the `_sleep_500ms` preset.
+        let yaml = native_plugin_yaml(
+            "      - matches: rcode 0 3\n        exec: tag_setter quick label\n      - exec: drop_resp\n      - exec: sleep 25\n      - exec: $named_setter\n      - exec: $named_sleep\n      - exec: $_sleep_500ms\n      - exec: sleep -3\n      - exec: $forward\n",
+            "  - tag: named_setter\n    type: tag_setter\n    args: { tag: named }\n  - tag: named_sleep\n    type: sleep\n    args: { duration: 40 }\n",
+        );
+        let config = compile_yaml(&yaml).expect("request primitives compile");
+        let mut durations: Vec<_> = config
+            .sleeps
+            .iter()
+            .map(|sleep| sleep.duration.as_millis())
+            .collect();
+        durations.sort_unstable();
+        // `sleep -3` is accepted and does not wait, as in the reference.
+        assert_eq!(durations, [0, 25, 40, 500]);
+        assert!(config.sleeps.iter().any(|sleep| sleep.tag == "named_sleep"));
+
+        // A bare `tag_setter` and a named one without a tag are accepted.
+        let bare = native_plugin_yaml(
+            "      - exec: tag_setter\n      - exec: $empty_setter\n      - exec: $forward\n",
+            "  - tag: empty_setter\n    type: tag_setter\n    args: {}\n",
+        );
+        compile_yaml(&bare).expect("clearing tag setters compile");
+        // `rcode` without a code is accepted by the reference and never matches.
+        compile_yaml(&native_plugin_yaml(
+            "      - matches: rcode\n        exec: reject 3\n      - exec: $forward\n",
+            "",
+        ))
+        .expect("an empty rcode list compiles");
+    }
+
+    #[test]
+    fn request_primitives_reject_bad_values_with_paths() {
+        for (sequence, expected) in [
+            (
+                "      - matches: rcode 2 x\n        exec: reject 3\n",
+                "$.plugins[0].args[0].matches[0]",
+            ),
+            (
+                "      - matches: rcode 1.5\n        exec: reject 3\n",
+                "$.plugins[0].args[0].matches[0]",
+            ),
+            ("      - exec: sleep\n", "$.plugins[0].args[0].exec"),
+            ("      - exec: sleep soon\n", "$.plugins[0].args[0].exec"),
+            ("      - exec: sleep 1 2\n", "$.plugins[0].args[0].exec"),
+            ("      - exec: drop_resp now\n", "$.plugins[0].args[0].exec"),
+        ] {
+            let error = compile_yaml(&native_plugin_yaml(
+                &format!("{sequence}      - exec: $forward\n"),
+                "",
+            ))
+            .err()
+            .unwrap_or_else(|| panic!("`{sequence}` must be rejected"));
+            assert_eq!(error.path, expected, "{sequence}: {error}");
+        }
+        for (definition, expected) in [
+            (
+                "  - tag: p\n    type: sleep\n    args: { duration: -1 }\n",
+                "$.plugins[1].args.duration",
+            ),
+            (
+                "  - tag: p\n    type: sleep\n    args: { duration: soon }\n",
+                "$.plugins[1].args.duration",
+            ),
+            (
+                "  - tag: p\n    type: sleep\n    args: { millis: 5 }\n",
+                "$.plugins[1].args.millis",
+            ),
+            (
+                "  - tag: p\n    type: tag_setter\n    args: { tag: [a] }\n",
+                "$.plugins[1].args.tag",
+            ),
+            (
+                "  - tag: p\n    type: tag_setter\n    args: { label: a }\n",
+                "$.plugins[1].args.label",
+            ),
+        ] {
+            let error = compile_yaml(&native_plugin_yaml(
+                "      - exec: $p\n      - exec: $forward\n",
+                definition,
+            ))
+            .err()
+            .unwrap_or_else(|| panic!("`{definition}` must be rejected"));
+            assert_eq!(error.path, expected, "{definition}: {error}");
+        }
+        // `drop_resp` exists only as a quick form in the reference.
+        let error = compile_yaml(&native_plugin_yaml(
+            "      - exec: $forward\n",
+            "  - tag: p\n    type: drop_resp\n    args: {}\n",
+        ))
+        .err()
+        .expect("no named drop_resp");
+        assert!(error.reason.contains("unsupported plugin type"), "{error}");
+    }
+
+    #[test]
+    fn fallback_targets_accept_bare_and_dollar_tags() {
+        let yaml = r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args: [ { exec: "$fb" } ]
+  - tag: primary
+    type: sequence
+    args: [ { exec: "$forward" } ]
+  - tag: secondary
+    type: sequence
+    args: [ { exec: "$forward" } ]
+  - tag: fb
+    type: fallback
+    args: { primary: PRIMARY, secondary: SECONDARY }
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:15453" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:15353", enable_audit: false }
+"#;
+        let compile = |primary: &str, secondary: &str| {
+            compile_yaml(
+                &yaml
+                    .replace("PRIMARY", primary)
+                    .replace("SECONDARY", secondary),
+            )
+        };
+        let bare = compile("primary", "secondary").expect("bare tags");
+        let dollar = compile("$primary", "$secondary").expect("dollar tags");
+        let mixed = compile("primary", "$secondary").expect("mixed tags");
+        for config in [&bare, &dollar, &mixed] {
+            assert_eq!(config.fallbacks.len(), 1);
+            assert_eq!(config.fallbacks[0].primary, bare.fallbacks[0].primary);
+            assert_eq!(config.fallbacks[0].secondary, bare.fallbacks[0].secondary);
+        }
+        for (primary, secondary, field) in [
+            ("missing", "secondary", "primary"),
+            ("primary", "\"$\"", "secondary"),
+            ("\"two words\"", "secondary", "primary"),
+        ] {
+            let error = compile(primary, secondary).err().expect("invalid target");
+            assert!(error.path.contains(field), "{error}");
+        }
+        // A named sleep is a legal (if pointless) fallback target.
+        let sleepy = yaml
+            .replace("PRIMARY", "nap")
+            .replace("SECONDARY", "secondary")
+            .replace(
+                "  - tag: forward\n",
+                "  - tag: nap\n    type: sleep\n    args: { duration: 1 }\n  - tag: forward\n",
+            );
+        compile_yaml(&sleepy).expect("sleep as fallback target");
     }
 }
