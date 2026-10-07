@@ -26,24 +26,27 @@ package uses.
 
 ## Order
 
-1. **`check` command and ledger convergence** (separate task
-   `10-06-rust-native-config-check-ledger`). Add `mosdns check -c <config>`,
-   which reports every unsupported type or parameter instead of stopping at
-   the first error. Its output for `config_all` becomes the M1 work list, and
-   `feature-coverage.md` is updated from it.
-2. **Merge `main`** (v0.7.1 → v0.7.3) before implementing providers and
-   `aliapi`.
-3. **M1 batches.** Counts below come from a YAML text scan on 2026-10-06; the
-   `check` output takes precedence.
+1. **`check` command and ledger convergence** — done (`7c7f02a7`, task
+   `10-06-rust-native-config-check-ledger`, archived).
+2. **M1-0 config-root paths and unmanaged loading** — done (`26accd14`).
+3. **Merge `main`** (v0.7.1 → v0.7.3) — done (`a879755a`); drift recorded in
+   `docs/rust/validation-records/10-06-merge-main-v0.7.3/drift.md`.
+4. **M1 batches.** The current gap list is `docs/rust/m1-gap-list.md` (driven
+   by `check` output); the execution order and status live in
+   `docs/rust/next-stage-plan.md`. Summary:
 
 | Batch | Scope |
 | --- | --- |
-| M1-a providers | `domain_set_light` (11 instances), `sd_set_light` (4), `domain_mapper` (2), `si_set` (1), SRS/geodata formats |
-| M1-b upstream and response | standalone `aliapi` (5 instances; confirm signed-API fields separately), `rewrite`, `adguard_rule`, `webinfo`; the primitives `config_all` actually uses: `rcode`, `cname`, `mark`, `tag_setter`, `drop_resp`, `cname_remover`, `sleep` |
-| M1-c output and requery | `domain_output` (8 instances), `requery` |
+| M1-a1 providers, query side | `domain_set_light` (11), `sd_set_light` (4), `si_set` (1), `adguard_rule` (moved from M1-b: `unified_matcher1` references it), SRS decoding, `domain_mapper` (2), `mark` matcher |
+| M1-a2 provider management | shared online rule-source management (CRUD, download, auto update, socks5) for `sd_set_light`/`si_set`/`adguard_rule`; `domain_set_light` editing; hot mapper rebuild |
+| M1-b upstream and response | standalone `aliapi` (5; needs SOCKS5 upstreams), `rewrite`, `webinfo`, `rcode`, `tag_setter`, `drop_resp`, `sleep`, `fallback` bare-tag form |
+| M1-c output and requery | `domain_output` (8), `requery` |
+| M1-e special_groups v0.7.3 | managed generator schema-4 shape, group upstream references and owned upstreams |
 
-The package's upstreams use only https, tls and udp, so H3/DoQ is not on the
-M1 critical path.
+`cname` and `mark` as standalone primitives were dropped from M1-b: `config_all`
+does not use `cname`, and `mark` is covered by M1-a1. `cname_remover` is already
+accepted natively. The package's upstreams use only https, tls and udp, so H3/DoQ
+is not on the M1 critical path.
 
 ## Deferred until after the first replacement
 
