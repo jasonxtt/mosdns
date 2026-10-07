@@ -47,6 +47,7 @@
 | 2 | 合并 `main`（v0.7.1 → v0.7.3；任务 `10-06-rust-merge-main-v0.7.3`）：**已实施（merge 提交待 C2C review）** | 真实 merge 提交；UI 产物由构建生成；v0.7.3 新 UI 操作在原生下禁用+原因；契约漂移登记，原生 special_groups v0.7.2/0.7.3 对齐归入 M1-e |
 | 3 | M1-a1 规则 provider 查询侧（任务 `10-07-rust-native-m1-a1-rule-providers`，**已实施；Codex 评审 12 轮后按用户决定收尾，见任务 `research/validation.md`**；`check` gaps 64→45）→ M1-a2 规则源管理 → M1-b → M1-c | a1：`domain_set_light`/`sd_set_light`/`si_set`/`adguard_rule` 只读加载、SRS 解码、`domain_mapper`、`mark` matcher，以 Go 为差分 oracle 在生产规则上逐条一致；a2：三类规则源共享的管理（增删改、下载、自动更新、socks5）与 `domain_set_light` 编辑、热更新 mapper；`adguard_rule` 因被 `unified_matcher1` 引用而从 M1-b 移入 M1-a；每批有真实配置链路 E2E，最终 `check` 无缺口 |
 | 3.5 | M1-e special_groups v0.7.3 对齐 | 原生托管生成器输出 schema-4 结构（共享 `sequence_special`），支持专用组上游引用/私有上游/无效引用排除；排在 M1-a/b/c 之后（生产当前无专用组） |
+| 3.9 | 原生内存优化（用户 2026-10-07 批准，M1 之后、5D 之前） | 先测量内存去向（matcher/mapper 索引、SRS 展开键、每 provider 副本的堆剖面），再优化，并在同一生产快照上与 Go 重新对比；触发数据：M1-a1 仅 provider + mapper 时原生稳态约 90 MB、峰值 167 MB，Go 回收后约 48 MB、峰值 147 MB；生产机 1 vCPU / 957 MB。结果作为 5D 冻结 RSS 预算的输入 |
 | 4 | 5D 整机验收 | 单核、实际负载；先补齐 Go 基线、冻结延迟与 RSS 阈值，以 `config_all` 做正式对照、恢复、长稳 |
 | 5 | Phase 6 + 生产切换/回滚方案 | 退役脚手架，纯 Rust 构建/运行；配置包升级（C15）与回滚步骤明确；`mos-test` 验证后经用户确认替换 `mosdns` |
 | 6 | 未使用插件补齐 | 首次替换后进行，不阻塞替换 |
