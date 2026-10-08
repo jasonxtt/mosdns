@@ -2,7 +2,9 @@
 """Smoke-test a local image without registry credentials or production data."""
 
 import argparse
+import contextlib
 import json
+import os
 import re
 import socket
 import struct
@@ -76,12 +78,28 @@ def main():
     def engine(*command, check=True):
         return subprocess.run([args.engine, *command], check=check, capture_output=True, text=True)
 
+    def restore_permissions(name):
+        if args.engine == "docker":
+            # Only these test containers mount our disposable data directory.
+            engine("exec", name, "chown", "-R", f"{os.getuid()}:{os.getgid()}", "/cus/mosdns", check=False)
+
     def remove(name):
+        restore_permissions(name)
         engine("rm", "-f", name)
         created.remove(name)
 
+    def cleanup_containers():
+        for name in created[:]:
+            logs = engine("logs", name, check=False)
+            print(logs.stdout + logs.stderr)
+            restore_permissions(name)
+            engine("rm", "-f", name, check=False)
+            created.remove(name)
+
     try:
-        with tempfile.TemporaryDirectory(prefix="mosdns-container-test-") as scratch:
+        with tempfile.TemporaryDirectory(prefix="mosdns-container-test-") as scratch, contextlib.ExitStack() as cleanup:
+            # Stop containers and restore ownership before TemporaryDirectory removes files.
+            cleanup.callback(cleanup_containers)
             data = Path(scratch)
             webinfo = data / "webinfo"
             webinfo.mkdir()
@@ -219,10 +237,7 @@ else:
                 remove(name)
                 print(f"{args.platform}: {mode} DNS, WebUI, API restrictions, restart and volume reuse passed", flush=True)
     finally:
-        for name in created:
-            logs = engine("logs", name, check=False)
-            print(logs.stdout + logs.stderr)
-            engine("rm", "-f", name, check=False)
+        cleanup_containers()
 
 
 if __name__ == "__main__":
