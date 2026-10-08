@@ -44,6 +44,8 @@ pub(crate) struct Settings {
     pub(crate) dump_interval: Duration,
     pub(crate) domain_set_url: String,
     pub(crate) enable_flags: bool,
+    /// The effective generation switch (YAML, plugin and master settings).
+    pub(crate) enabled: bool,
     /// Most distinct keys held at once ([`MAX_KEYS`] unless a test lowers it).
     pub(crate) max_keys: usize,
 }
@@ -154,11 +156,12 @@ pub struct DomainOutputConfig {
 
 impl DomainOutput {
     pub(crate) fn new(tag: &str, settings: Settings, target: Option<MapperTarget>) -> Self {
+        let enabled = settings.enabled;
         Self {
             tag: tag.to_owned(),
             settings: Arc::new(settings),
             target,
-            enabled: Cell::new(true),
+            enabled: Cell::new(enabled),
             state: RefCell::new(State {
                 stats: HashMap::new(),
                 since_write: 0,
@@ -413,7 +416,8 @@ impl DomainOutput {
             );
             // What was learned before keeps its routing even when the rule
             // file is older than the statistics (a managed apply, a crash).
-            if let Some(target) = &self.target {
+            // A disabled list publishes nothing, so it injects nothing either.
+            if let Some(target) = self.target.as_ref().filter(|_| self.enabled.get()) {
                 target.layer.add(key.split('|').next().unwrap_or_default());
             }
             state.stats.insert(
@@ -735,6 +739,7 @@ mod tests {
             dump_interval: Duration::from_secs(60),
             domain_set_url: String::new(),
             enable_flags: false,
+            enabled: true,
             max_keys: MAX_KEYS,
         };
         let last = Mutex::new(0);
@@ -768,6 +773,7 @@ mod tests {
             dump_interval: Duration::from_secs(60),
             domain_set_url: String::new(),
             enable_flags: true,
+            enabled: true,
             max_keys: MAX_KEYS,
         };
         let row = |key: &str, count| Row {
@@ -820,6 +826,7 @@ mod tests {
             dump_interval: Duration::from_secs(60),
             domain_set_url: String::new(),
             enable_flags: true,
+            enabled: true,
             max_keys,
         }
     }

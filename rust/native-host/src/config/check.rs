@@ -52,6 +52,9 @@ pub struct CheckReport {
     /// Declared plugin definitions (including undecodable and managed
     /// generated ones).
     pub definitions: usize,
+    /// The effective value and source of every settable item of the
+    /// remaining (compiling) definitions.
+    pub effective: Vec<super::EffectiveItem>,
 }
 
 impl CheckReport {
@@ -92,6 +95,13 @@ impl fmt::Display for CheckReport {
                     writeln!(formatter, "GLOBAL {location}  {}", finding.message)?;
                 }
             }
+        }
+        for item in &self.effective {
+            writeln!(
+                formatter,
+                "EFFECTIVE {} {} {}={} source={}",
+                item.kind, item.object, item.field, item.value, item.source
+            )?;
         }
         writeln!(formatter, "{SKIPPED}")?;
         writeln!(formatter, "{NOTE_FIRST_ERROR}")?;
@@ -310,9 +320,17 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
 
     let total = plugins.len();
     let declared = total + undecoded;
+    let settings = match super::settings::Settings::load(root_dir) {
+        Ok(settings) => settings,
+        Err(error) => {
+            checker.global(&error);
+            return Ok(report(checker, declared));
+        }
+    };
     let sources = CompileSources {
         config_origin: None,
         include_paths: &include_paths,
+        settings: &settings,
     };
     let mut active = vec![true; total];
     let mut seen: BTreeSet<(usize, String)> = BTreeSet::new();
@@ -336,7 +354,11 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
             None,
             &sources,
         ) {
-            Ok(_) => return Ok(report(checker, declared)),
+            Ok(compiled) => {
+                let mut finished = report(checker, declared);
+                finished.effective = compiled.settings_report.clone();
+                return Ok(finished);
+            }
             Err(error) => error,
         };
         let Some(index) = locate(&plugins, &active, &error.path) else {
@@ -383,6 +405,7 @@ fn report(checker: Checker, definitions: usize) -> CheckReport {
     CheckReport {
         findings: checker.findings,
         definitions,
+        effective: Vec::new(),
     }
 }
 

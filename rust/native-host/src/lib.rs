@@ -28,6 +28,7 @@ mod rewrite;
 mod rule_download;
 mod rule_sources;
 mod runtime_snapshot;
+mod settings_api;
 mod special_groups;
 mod static_ui;
 mod switch;

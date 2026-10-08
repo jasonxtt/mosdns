@@ -339,13 +339,13 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | P20 | `resp_ip` | 已有原生接入（`config_all` 用法 `check` 通过）；`$geoip_cn` 引用随 P07 | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
 | P21 | `string_exp` | 替换后 |  |
 | P22 | `adguard_rule` | 规则加载与直接 `qname $tag` matcher（M1-a1）；列表增删改、手动/全部/自动更新、启动后补下缺失列表、热更新（M1-a2）；UI 固定路径 `/plugins/adguard/...` | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md)、[M1-a2 记录](validation-records/10-07-m1-a2-rule-management/README.md) |
-| P23 | `aliapi` | 已有原生接入（M1-b1，YAML 取值）：标准 DNS 上游、`concurrent` 1..20、插件级默认合并、tcp/tls/https 的 SOCKS5（含代理端解析主机名）；签名 AliDNS API 与 so_mark/bind_to_device/pipeline/HTTP3 加载时明确报不支持；`config_all` 的 5 个实例 `check` 通过。覆盖文件的应用与上游管理 API 暂停（M1-f） | [M1-b1 记录](validation-records/10-08-m1-b1/README.md) |
+| P23 | `aliapi` | 已有原生接入（M1-b1，YAML 取值）：标准 DNS 上游、`concurrent` 1..20、插件级默认合并、tcp/tls/https 的 SOCKS5（含代理端解析主机名）；签名 AliDNS API 与 so_mark/bind_to_device/pipeline/HTTP3 加载时明确报不支持；`config_all` 的 5 个实例 `check` 通过。类型化设置（`proxy`/`use_proxy` 引用、`settings.json` 覆盖上游列表、热生效、上游管理 API）见 M1-f1 | [M1-b1 记录](validation-records/10-08-m1-b1/README.md) |
 | P24 | `arbitrary` | 替换后 |  |
 | P25 | `black_hole` | 替换后 |  |
 | P26 | `cache` | 已有原生接入（`config_all` 用法 `check` 通过）；`dump_file` 路径基准见 §3.1 | [cache 生命周期](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) |
 | P27 | `cname_remover` | 已有原生接入（`config_all` 用法 `check` 通过）（quick） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
 | P28 | `debug_print` | 替换后 |  |
-| P29 | `domain_output` | 已有原生接入（M1-c1）：统计与文件格式与参考互通（双向实测）、定时/早写/关闭保存、进程内或 HTTP 发布、`target_mapper` 即时生效（覆盖层，不随整代重建丢失）、`/show` `/save` `/flush`；`/restartall` 返回 501；生成开关待设置层（M1-f）；`config_all` 的 8 处 `check` 通过 | [M1-c1 记录](validation-records/10-08-m1-c1/README.md)、[契约](contracts/native-domain-output.md) |
+| P29 | `domain_output` | 已有原生接入（M1-c1）：统计与文件格式与参考互通（双向实测）、定时/早写/关闭保存、进程内或 HTTP 发布、`target_mapper` 即时生效（覆盖层，不随整代重建丢失）、`/show` `/save` `/flush`；`/restartall` 返回 501；生成开关由类型化设置层提供（M1-f1，`enabled` 参数与 `/api/v1/domain-generation`）；`config_all` 的 8 处 `check` 通过 | [M1-c1 记录](validation-records/10-08-m1-c1/README.md)、[契约](contracts/native-domain-output.md) |
 | P30 | `drop_resp` | 已有原生接入（M1-b2）：仅清除当前响应（含审计里的上游来源/选中端点）；`config_all` 的 10 处 `check` 通过 | [M1-b2 记录](validation-records/10-07-m1-b2-primitives/README.md) |
 | P31 | `prefer_ipv4`, `prefer_ipv6` | 已有原生接入（`config_all` 用法 `check` 通过）（`config_all` 只用 `prefer_ipv4`） | [fallback/地址偏好](validation-records/10-01-rust-native-query-fallback-address-preference/) |
 | P32 | `ecs_handler` | 替换后（插件类型未使用；quick `ecs` 见 L03） | [client/ECS](validation-records/10-02-rust-native-client-context-ecs/) |
@@ -395,10 +395,10 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | L05 | `_sleep_500ms` | 已有原生接入（M1-b2）：`$_sleep_500ms` 作为 exec；不能作 fallback 目标 | [M1-b2 记录](validation-records/10-07-m1-b2-primitives/README.md) |
 | C01 | YAML/include/启动 | 已有原生接入；M1-0 起 `-d`/配置根目录路径基准、`log.level`（debug/info/warn/error）、`log.file`（追加）均 `check` 通过；M1 仍等待插件缺口（见 [M1 缺口清单](m1-gap-list.md)） | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
 | C02 | DNS wire/server | M1（全链路固有） | [5A routing](validation-records/09-22-rust-phase5a-native-routing/) |
-| C03 | 上游配置及策略 | M1（https/tls/udp，经 `aliapi`；M1-b1 已接入，覆盖文件部分暂停 M1-f） | [上游转发](validation-records/09-30-rust-native-upstream-forwarding/prd.md) |
+| C03 | 上游配置及策略 | M1（https/tls/udp，经 `aliapi`；M1-b1 已接入；设置层与热生效 M1-f1 后端已接入） | [上游转发](validation-records/09-30-rust-native-upstream-forwarding/prd.md) |
 | C04 | 数据格式与规则下载 | M1：SRS/manifest/adguard 加载（M1-a1）与下载、自动更新、热更新（M1-a2）已原生接入；环境变量 HTTP 代理未实现（见契约） | [M1-a2 记录](validation-records/10-07-m1-a2-rule-management/README.md) |
 | C05 | `special_groups` | M1；未托管配置下的形态见 M1 清单 §3.2 | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
-| C06 | 上游管理 | M1（随 `aliapi`；非托管下的上游/覆盖管理 API 为 M1-f，暂停） | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
+| C06 | 上游管理 | M1（随 `aliapi`；非托管下的上游/覆盖/生成开关 API 由 M1-f1 以类型化设置实现，WebUI 接线与配置包为 M1-f2） | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
 | C07 | 配置导出/更新/生成 | M1（切换门槛，执行顺序第 5 项） |  |
 | C08 | 查询审计 | M1（WebUI 使用面；`check` 不覆盖 API） | [查询诊断](validation-records/09-30-rust-native-query-diagnostics-overview/prd.md) |
 | C09 | 日志/capture | M1（维护中 Vue 调用 `/api/v1/capture/*`；`check` 不覆盖 API 面） |  |

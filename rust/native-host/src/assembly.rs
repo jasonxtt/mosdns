@@ -20,7 +20,6 @@ use tokio::task::JoinSet;
 use crate::api::{ApiServer, ApiServerError, AuditPersistenceFaults};
 use crate::config::{
     CompiledConfig, ConfigError, ForwardScheme, ForwardTargetConfig, compile_yaml,
-    compile_yaml_with_roots,
 };
 use crate::execution::{ExchangeError, ExchangeExecutor, InvocationExchange};
 use crate::observer::{
@@ -257,8 +256,8 @@ impl HostAssembly {
         after_preflight();
         // File-backed startup always has a base, including a bare basename.
         // An empty in-memory base intentionally does not mount external UI.
-        let mut config =
-            compile_yaml_with_roots(&yaml, state_root, root_dir).map_err(AssemblyError::Config)?;
+        let mut config = crate::config::compile_file_with_roots(&yaml, path, state_root, root_dir)
+            .map_err(AssemblyError::Config)?;
         match (&mut config.managed_profile, canonical_config_path) {
             (Some(profile), Some(config_path)) => profile.config_path = Some(config_path),
             (None, None) => {}

@@ -1598,7 +1598,7 @@ type BuildJob = Box<dyn FnOnce() + Send>;
 /// the same allocator arena, which bounds the memory a series of rebuilds
 /// keeps resident; a pool thread per rebuild would leave each arena at its
 /// own peak. The DNS runtime thread never runs this work.
-async fn on_build_thread<T: Send + 'static>(
+pub(crate) async fn on_build_thread<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, String> {
     static WORKER: std::sync::OnceLock<Result<std::sync::mpsc::Sender<BuildJob>, String>> =
