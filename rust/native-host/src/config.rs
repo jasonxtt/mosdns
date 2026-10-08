@@ -28,6 +28,7 @@ use crate::plugins::{
     parse_sleep_millis,
 };
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
+pub use crate::requery::{Requery, RequeryConfig};
 pub use crate::rewrite::RewriteConfig;
 use crate::rewrite::{DnsServer, Rewrite};
 use crate::webinfo::WebInfo;
@@ -384,18 +385,18 @@ pub struct LocalPlugins {
     pub rewrites: Vec<RewriteConfig>,
     pub webinfos: Vec<Rc<WebInfo>>,
     pub domain_outputs: Vec<DomainOutputConfig>,
+    pub requeries: Vec<RequeryConfig>,
 }
 
 impl LocalPlugins {
     /// Loads the `domain_output` statistics and starts their writers. Called
     /// when this view starts serving.
-    pub(crate) fn start(
-        &self,
-        sources: &Rc<crate::rule_sources::RuleSources>,
-        api: Option<SocketAddr>,
-    ) {
+    pub(crate) fn start(&self, api: &crate::local_url::LocalApi) {
         for output in &self.domain_outputs {
-            output.runtime.start(Rc::clone(sources), api);
+            output.runtime.start(api);
+        }
+        for requery in &self.requeries {
+            requery.runtime.start(api);
         }
     }
 
@@ -404,10 +405,16 @@ impl LocalPlugins {
         for output in &self.domain_outputs {
             output.runtime.fence();
         }
+        for requery in &self.requeries {
+            requery.runtime.fence();
+        }
     }
 
     /// Stops every `domain_output` writer and saves once more.
     pub(crate) async fn close(&self) {
+        for requery in &self.requeries {
+            requery.runtime.close().await;
+        }
         for output in &self.domain_outputs {
             output.runtime.close().await;
         }
@@ -1922,6 +1929,7 @@ enum PluginKind {
     Rewrite,
     WebInfo,
     DomainOutput,
+    Requery,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -2041,6 +2049,7 @@ fn compile_definitions(
             "rewrite" => PluginKind::Rewrite,
             "webinfo" => PluginKind::WebInfo,
             "domain_output" => PluginKind::DomainOutput,
+            "requery" => PluginKind::Requery,
             other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
@@ -2159,6 +2168,7 @@ fn compile_definitions(
     let mut rewrites: Vec<(String, Rc<Rewrite>)> = Vec::new();
     let mut webinfos: Vec<Rc<WebInfo>> = Vec::new();
     let mut pending_outputs: Vec<PendingOutput> = Vec::new();
+    let mut requeries: Vec<RequeryConfig> = Vec::new();
     let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
@@ -2330,6 +2340,14 @@ fn compile_definitions(
                 let (rewrite, files) = compile_rewrite(plugin)?;
                 known_artifacts.extend(files);
                 rewrites.push((plugin.tag.clone(), Rc::new(rewrite)));
+            }
+            PluginKind::Requery => {
+                let (requery, file) = compile_requery(plugin)?;
+                known_artifacts.push(file);
+                requeries.push(RequeryConfig {
+                    tag: plugin.tag.clone(),
+                    runtime: Rc::new(requery),
+                });
             }
             PluginKind::DomainOutput => {
                 let pending = compile_domain_output(plugin)?;
@@ -2890,6 +2908,7 @@ fn compile_definitions(
             rewrites,
             webinfos,
             domain_outputs,
+            requeries,
         },
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
@@ -3443,6 +3462,28 @@ fn compile_domain_output(plugin: &RawPlugin) -> Result<PendingOutput, ConfigErro
     })
 }
 
+/// `requery`: the JSON state file. A present file must parse; nothing is
+/// written while compiling.
+fn compile_requery(plugin: &RawPlugin) -> Result<(Requery, PathBuf), ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "requery args must be a mapping")?;
+    args.reject_unknown(&["file"], &path)?;
+    let file = match args.get("file") {
+        None | Some(RawValue::Null) => String::new(),
+        Some(value) => expect_string(value, &format!("{path}.file"))?,
+    };
+    if file.is_empty() {
+        return Err(ConfigError::new(
+            format!("{path}.file"),
+            "'file' for config json must be specified",
+        ));
+    }
+    let file = resolve_rule_path(&file, &plugin.root_dir);
+    let requery = Requery::load(&plugin.tag, file.clone(), plugin.root_dir.clone())
+        .map_err(|reason| ConfigError::new(format!("{path}.file"), reason))?;
+    Ok((requery, file))
+}
+
 /// `webinfo`: the JSON document file.
 fn compile_webinfo(plugin: &RawPlugin) -> Result<(WebInfo, PathBuf), ConfigError> {
     let path = format!("{}.args", plugin.source_path);
@@ -3589,7 +3630,8 @@ fn resolve_policy_target_name(
             | PluginKind::DomainSetLight
             | PluginKind::SdSetLight
             | PluginKind::AdguardRule
-            | PluginKind::WebInfo,
+            | PluginKind::WebInfo
+            | PluginKind::Requery,
         ) => Err(ConfigError::new(
             path,
             format!("`${tag}` is not executable"),
@@ -4656,7 +4698,8 @@ fn compile_exec_item(
                     | PluginKind::DomainSetLight
                     | PluginKind::SdSetLight
                     | PluginKind::AdguardRule
-                    | PluginKind::WebInfo,
+                    | PluginKind::WebInfo
+                    | PluginKind::Requery,
                 ) => Err(ConfigError::new(
                     path,
                     format!("`{name}` is not executable"),

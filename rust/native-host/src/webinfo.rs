@@ -112,7 +112,7 @@ fn encode_line(value: &Value) -> Vec<u8> {
 
 /// Go's JSON encoder escapes these characters inside strings; none of them
 /// can occur outside a string in valid JSON text.
-fn escape_html(json: &str) -> String {
+pub(crate) fn escape_html(json: &str) -> String {
     let mut out = String::with_capacity(json.len());
     for character in json.chars() {
         match character {

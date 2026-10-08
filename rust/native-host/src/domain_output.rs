@@ -10,7 +10,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -20,7 +19,8 @@ use mosdns_dns_core::QuestionInfo;
 use mosdns_upstream_core::TransportCancellation;
 
 use crate::config::providers::{HotLayer, presentation_name};
-use crate::rule_sources::{Reply, RuleSources};
+use crate::local_url::{self, LocalApi, Target};
+use crate::rule_sources::Reply;
 
 /// Distinct keys held at once. The reference grows without bound; new keys
 /// beyond this are not recorded (existing keys keep counting).
@@ -119,18 +119,10 @@ struct Row {
     date: Arc<str>,
 }
 
-/// Where the generated list goes.
-enum Push {
-    Off,
-    /// This host's own `domain_set_light` `/post`, called in-process.
-    Local(String),
-    Http(String),
-}
-
 struct Env {
-    sources: Rc<RuleSources>,
-    push: Push,
-    roots: Option<Arc<rustls::RootCertStore>>,
+    api: LocalApi,
+    /// Where the generated list goes; `None` without `domain_set_url`.
+    target: Option<Target>,
 }
 
 /// The runtime owner of one `domain_output` plugin.
@@ -254,17 +246,15 @@ impl DomainOutput {
 
     /// Loads the statistics file and starts the periodic writer. Called when
     /// the host (or a newly installed view) starts serving.
-    pub(crate) fn start(self: &Rc<Self>, sources: Rc<RuleSources>, api: Option<SocketAddr>) {
+    pub(crate) fn start(self: &Rc<Self>, api: &LocalApi) {
         if self.started.replace(true) || self.phase.get() != Phase::Running {
             return;
         }
         self.load();
-        let push = classify(&self.settings.domain_set_url, api, &sources);
-        let roots = sources.roots();
+        let url = &self.settings.domain_set_url;
         *self.env.borrow_mut() = Some(Env {
-            sources,
-            push,
-            roots,
+            api: api.clone(),
+            target: (!url.is_empty()).then(|| local_url::exact(url, api.api)),
         });
         let this = Rc::clone(self);
         self.jobs.borrow_mut().spawn_local(async move {
@@ -443,10 +433,12 @@ impl DomainOutput {
         if self.phase.get() != Phase::Running || self.env.borrow().is_none() {
             return;
         }
-        if matches!(
-            self.env.borrow().as_ref().map(|env| &env.push),
-            Some(Push::Off)
-        ) {
+        if self
+            .env
+            .borrow()
+            .as_ref()
+            .is_some_and(|env| env.target.is_none())
+        {
             return;
         }
         *self.pending_push.borrow_mut() = Some(names);
@@ -472,57 +464,34 @@ impl DomainOutput {
     async fn push(&self, names: &[String]) {
         let values: Vec<String> = names.iter().map(|name| format!("full:{name}")).collect();
         let body = serde_json::to_vec(&serde_json::json!({ "values": values })).unwrap_or_default();
-        let (sources, roots, local, http) = {
+        let (api, target) = {
             let env = self.env.borrow();
-            let Some(env) = env.as_ref() else { return };
-            let (local, http) = match &env.push {
-                Push::Off => return,
-                Push::Local(tag) => (Some(tag.clone()), None),
-                Push::Http(url) => (None, Some(url.clone())),
+            let Some(Env {
+                api,
+                target: Some(target),
+            }) = env.as_ref()
+            else {
+                return;
             };
-            (Rc::clone(&env.sources), env.roots.clone(), local, http)
+            (api.clone(), target.clone())
         };
-        // The in-process call is never dropped half way (its file write runs on
-        // the blocking pool and the provider lock is held across it); the HTTP
-        // one is bounded.
-        let outcome = if let Some(tag) = local {
-            Ok(self.publish_local(&sources, &tag, &body).await)
-        } else if let Some(url) = http {
-            tokio::time::timeout(
-                PUSH_TIMEOUT,
-                crate::rule_download::post_json(&url, &body, PUSH_TIMEOUT, roots, &self.cancel),
-            )
+        // An in-process call is never dropped half way (its file write runs on
+        // the blocking pool and the provider lock is held across it); an HTTP
+        // one is bounded by `PUSH_TIMEOUT` inside `call`.
+        match api
+            .call("POST", &target, Some(&body), PUSH_TIMEOUT, &self.cancel)
             .await
-        } else {
-            return;
-        };
-        match outcome {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
+        {
+            Ok((status, _)) if status < 400 => {}
+            Ok((status, reply)) => crate::diag::error_line!(
+                "{}: publishing the rules answered {status}: {}",
+                self.tag,
+                String::from_utf8_lossy(&reply).trim()
+            ),
+            Err(error) => {
                 crate::diag::error_line!("{}: publishing the rules failed: {error}", self.tag);
             }
-            Err(_) => crate::diag::error_line!("{}: publishing the rules timed out", self.tag),
         }
-    }
-
-    async fn publish_local(
-        &self,
-        sources: &RuleSources,
-        tag: &str,
-        body: &[u8],
-    ) -> Result<(), String> {
-        let Some(provider) = sources.provider(tag) else {
-            return Err(format!("no rule provider `{tag}` to publish to"));
-        };
-        let reply = sources.handle(&provider, "POST", "post", "", body).await;
-        if reply.status >= 400 {
-            return Err(format!(
-                "publishing to `{tag}` answered {}: {}",
-                reply.status,
-                String::from_utf8_lossy(&reply.body).trim()
-            ));
-        }
-        Ok(())
     }
 
     // ----- HTTP ----------------------------------------------------------------
@@ -655,46 +624,6 @@ fn query_flags(raw: &[u8]) -> (bool, bool) {
     raw.get(3).map_or((false, false), |flags| {
         (flags & 0x20 != 0, flags & 0x10 != 0)
     })
-}
-
-/// Where `domain_set_url` points: this host's own `/plugins/<tag>/post` is
-/// called in-process, anything else over HTTP.
-fn classify(url: &str, api: Option<SocketAddr>, sources: &RuleSources) -> Push {
-    if url.is_empty() {
-        return Push::Off;
-    }
-    if let (Ok(parsed), Some(api)) = (url::Url::parse(url), api)
-        && parsed.scheme() == "http"
-        && parsed.port_or_known_default() == Some(api.port())
-        && let Some(tag) = parsed
-            .path()
-            .strip_prefix("/plugins/")
-            .and_then(|rest| rest.strip_suffix("/post"))
-            .filter(|tag| !tag.is_empty() && !tag.contains('/'))
-    {
-        let own = match parsed.host() {
-            Some(url::Host::Domain(name)) => {
-                name.eq_ignore_ascii_case("localhost")
-                    && (api.ip().is_loopback() || api.ip().is_unspecified())
-            }
-            Some(url::Host::Ipv4(ip)) => is_own(IpAddr::V4(ip), api.ip()),
-            Some(url::Host::Ipv6(ip)) => is_own(IpAddr::V6(ip), api.ip()),
-            None => false,
-        };
-        if own
-            && let Some(tag) = crate::api::decode_plugin_tag(tag)
-            && sources.provider(&tag).is_some_and(|p| p.postable())
-        {
-            return Push::Local(tag.into_owned());
-        }
-    }
-    Push::Http(url.to_owned())
-}
-
-/// Whether `host` reaches this host's API socket: its own address, or any
-/// loopback address when the API listens on the wildcard.
-fn is_own(host: IpAddr, api: IpAddr) -> bool {
-    host == api || (api.is_unspecified() && host.is_loopback())
 }
 
 /// Sorts a snapshot and writes the three files. Returns the distinct names in

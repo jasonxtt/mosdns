@@ -36,7 +36,7 @@ GLOBAL {GAPS}:log.production  unsupported field
 GLOBAL {GAPS}:log.encoding  unsupported field
 GAP no_args domain_output {GAPS}:plugins[3].args  required field is missing
 GAP light_set sd_set sub/rules.yaml:plugins[0].type  unsupported plugin type `sd_set`
-GAP requery_x requery {GAPS}:plugins[1].type  unsupported plugin type `requery`
+GAP requery_x reverse_lookup {GAPS}:plugins[1].type  unsupported plugin type `reverse_lookup`
 GAP two_bad_params cache {GAPS}:plugins[2].args.first_unknown  unsupported field
 GAP udp_in udp_server {GAPS}:plugins[5].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
 CASCADE entry sequence {GAPS}:plugins[4].args[0].exec  references removed `requery_x`; unknown executable reference `$requery_x`

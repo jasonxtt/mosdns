@@ -94,12 +94,14 @@ M1-0 之前的读法如下：
 
 ### M1-c 输出与再查询
 
+**M1-c2 完成后**（`10-08-rust-native-m1-c2-requery`）：`SUMMARY gaps=0 cascades=0 globals=0 definitions=126`（`config_all` 与生产快照逐字节相同）。`check` 对 `config_all` 不再有缺口，可进行首次整链运行；M1-f/M1-e 等仍按各自条目推进。记录见 [validation-records/10-08-m1-c2](validation-records/10-08-m1-c2/README.md)。
+
 **M1-c1 完成后**（`10-08-rust-native-m1-c1-domain-output`）：`SUMMARY gaps=1 cascades=0 globals=0`（`config_all` 与生产快照逐字节相同），唯一剩余缺口是 `requery`（M1-c2）；`domain_output` 的 8 个缺口及其 30 个连带错误全部消失。记录见 [validation-records/10-08-m1-c1](validation-records/10-08-m1-c1/README.md)。
 
 | 缺口 | 数量 | 说明 |
 | --- | --- | --- |
 | 插件类型 `domain_output` | 8 | **M1-c1 已关闭**（统计、文件互通、发布、`target_mapper` 即时生效、API；见 [契约](contracts/native-domain-output.md)） |
-| 插件类型 `requery` | 1 | |
+| 插件类型 `requery` | 1 | **M1-c2 已关闭**（见 [契约](contracts/native-requery.md)） |
 
 ### M1-d 配置加载与 listener（新增，原 M1 表未列；**M1-0 已全部关闭**）
 

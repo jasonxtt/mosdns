@@ -49,11 +49,12 @@ not injected into the mapper again. Files written by the reference are read iden
 
 After each write except the final one the distinct names are posted as `{"values":["full:<name>",...]}` (empty after `/flush`).
 
-- A URL `http://<local host>:<api port>/plugins/<tag>/post` whose host is `localhost` (when the API listens on loopback or the wildcard), the `api.http` address (any loopback address when the API listens on the wildcard), whose port is
-  the `api.http` port, and whose `<tag>` is a postable `domain_set_light` of this configuration is performed in-process through the same
-  handler the HTTP route runs (normalisation, atomic file write, rebuild of the dependent mappers); the effect equals the HTTP call.
+- A URL whose host is `localhost` (when the API listens on loopback or the wildcard), the `api.http` address (any loopback address when the API
+  listens on the wildcard), and whose port is the `api.http` port is performed **in-process through the shared URL-action entrance**
+  (`local_url`, see [native-requery](native-requery.md)): the same plugin routes the listener serves, with the same admission check and management
+  lease (for a `domain_set_light` `/post`: normalisation, atomic file write, rebuild of the dependent mappers); the effect equals the HTTP call.
 - Any other URL gets an HTTP/HTTPS `POST` (`Content-Type: application/json`, 5 s, no redirects, no proxy); the response is ignored.
-- A local URL naming an unknown provider logs the failure and does nothing, as the reference's 404 would.
+- A local URL naming an unknown provider logs the 404, as the reference's would.
 
 One publication is in flight per plugin; a newer list replaces one still waiting. A failure is logged. The in-process call is never abandoned half way; the HTTP one is bounded by 5 s.
 

@@ -722,10 +722,11 @@ impl BoundHost {
         {
             // `domain_output` statistics load before any query is served.
             let view = control.view();
-            view.config.local.start(
-                &view.config.rule_sources,
-                view.config.api.as_ref().map(|api| api.http),
-            );
+            view.config.local.start(&crate::local_url::LocalApi {
+                control: crate::runtime_snapshot::RuntimeControlWeak::from_control(&control),
+                api: view.config.api.as_ref().map(|api| api.http),
+                roots: view.config.rule_sources.roots(),
+            });
         }
         let mut scopes = BTreeMap::new();
         let mut task_keys = std::collections::HashMap::new();

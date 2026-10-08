@@ -20,6 +20,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Native switch state](native-switch-state.md) | Configured switch1–17 state, immutable query admission, durable HTTP control, capability inventory, and truthful native Vue controls |
 
 | [Native aliapi/rewrite/webinfo](native-aliapi-rewrite-webinfo.md) | YAML-only `aliapi` with SOCKS5 for TCP-based upstreams, `rewrite` rules and API, `webinfo` document API (M1-b1); runtime overrides excluded |
+| [Native `requery`](native-requery.md) | Scheduled / triggered re-query job, reference state file, shared in-process URL actions, scheduler and API |
 | [Native `domain_output`](native-domain-output.md) | Name statistics, reference file formats, rule publication, immediate `target_mapper` injection, `/show` `/save` `/flush` API |
 | [Native WebUI hosting](native-webui-hosting.md) | Same-origin embedded/external UI, truthful health/version, capability admission and opt-in pure native build |
 

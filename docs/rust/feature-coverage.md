@@ -140,7 +140,7 @@ C08/C11 整行仍未完成；capture、别名、上游管理/指标、兼容 UI/
 | P38 | `query_summary` | [plugin/executable/query_summary](../../plugin/executable/query_summary/) | 无逐插件 native 验收证据 | 5B 查询 + 5C API/状态/观测 |
 | P39 | `rate_limiter` | [plugin/executable/rate_limiter](../../plugin/executable/rate_limiter/) | 无逐插件 native 验收证据 | 5B |
 | P40 | `redirect` | [plugin/executable/redirect](../../plugin/executable/redirect/) | 无逐插件 native 验收证据 | 5B |
-| P41 | `requery` | [plugin/executable/requery](../../plugin/executable/requery/) | 无逐插件 native 验收证据 | 5B |
+| P41 | `requery` | [plugin/executable/requery](../../plugin/executable/requery/) | M1-c2 原生接入与实测见下表；整链运行与 5D 待验收 | 5B |
 | P42 | `reverse_lookup` | [plugin/executable/reverse_lookup](../../plugin/executable/reverse_lookup/) | 无逐插件 native 验收证据 | 5B |
 | P43 | `rewrite` | [plugin/executable/rewrite](../../plugin/executable/rewrite/) | 无逐插件 native 验收证据 | 5B |
 | P44 | `sequence` | [plugin/executable/sequence](../../plugin/executable/sequence/) | sequence-core/Phase 3B，同步控制流 foundation | 5A 异步组合 -> 5B 完整 |
@@ -357,7 +357,7 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | P38 | `query_summary` | 替换后 |  |
 | P39 | `rate_limiter` | 替换后 |  |
 | P40 | `redirect` | 替换后（`config_all` 未使用；已有子项证据） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
-| P41 | `requery` | M1；`check` 报缺口（M1-c） |  |
+| P41 | `requery` | 已有原生接入（M1-c2）：参考格式状态文件互通（双向实测）、任务步骤（save→合并过滤→flush→限速重查询→save）、取消/冲突/重启恢复、调度器、`/stats/source_file_counts` 与 API、本机 URL 动作进程内（与 `domain_output` 共用入口）；两套 Vue 壳的刷新分流面板浏览器冒烟通过；`config_all` 的 `check` 无缺口 | [M1-c2 记录](validation-records/10-08-m1-c2/README.md)、[契约](contracts/native-requery.md) |
 | P42 | `reverse_lookup` | 替换后 |  |
 | P43 | `rewrite` | 已有原生接入（M1-b1）：规则文件语法、IP/域名目标、`dns:` 查询、命中即 accept、`/show`/`/post`；`config_all` 的 1 个实例 `check` 通过 | [M1-b1 记录](validation-records/10-08-m1-b1/README.md) |
 | P44 | `sequence` | 已有原生接入（`config_all` 用法 `check` 通过）（控制流与引用）；其中被剔除插件的引用为连带错误 | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
