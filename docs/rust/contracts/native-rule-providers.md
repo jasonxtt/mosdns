@@ -72,7 +72,8 @@ Quick matcher and executor over **context** marks (`mark N [N…]`, base-10 `u32
 - `domain_set` and `sd_set` are rule exporters in the reference host but are not accepted as `domain_mapper` providers here
   (reported as "does not support rule export"); `config_all` does not use them that way.
 - The order of joined source names for one `sd_set_light` is manifest order (the reference's is random).
-- Memory: building the mapper is not yet compact; see the resource note in the validation record.
+- Memory: the mapper's matcher is not yet compact (about 150 bytes per `domain:` rule; Mem-2). See the
+  resource notes in the M1-a2 and Mem-1 validation records.
 
 ## Management (M1-a2)
 
@@ -135,6 +136,10 @@ retryable input conflict. `domain_set_light` with `exps` or several files: `/sho
 every file and `/post` writes the first file, so posting the shown list back duplicates them there
 (the reference has the same result after a restart).
 
-Memory: a rebuild of a large mapper briefly holds the old generation, the rule text and the new
-generation; with the production rule set the resident size settles well above the start-up level
-after the first rebuilds (numbers in the record). Reducing this is the memory-optimization task.
+Memory: a rebuild of a large mapper briefly holds the old generation (queries may still use it), the
+rule text, the build's temporaries and the new generation. After publication the host returns the freed
+pages to the system (glibc `malloc_trim` on the build thread; a fixed glibc mmap threshold and no
+transparent huge pages for the process keep them returnable), so with the production rule set the
+resident size settles near the start-up level after any number of rule-source rebuilds (numbers in
+`docs/rust/validation-records/10-08-mem-1/`). The replaced generation is freed off the DNS thread. Not covered
+yet: a `native_management` configuration apply (not used by `config_all`) is not followed by a trim.
