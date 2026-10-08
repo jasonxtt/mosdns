@@ -488,6 +488,7 @@ struct PoolInner {
 /// have reached the peer, so retrying could double-send it.
 pub struct ReuseOwner {
     endpoint: Endpoint,
+    socks5: Option<Arc<crate::socks5::Route>>,
     lifecycle: Arc<Lifecycle>,
     cancellation: TransportCancellation,
     inner: Arc<Mutex<PoolInner>>,
@@ -527,6 +528,7 @@ impl ReuseOwner {
         }
         Ok(Self {
             endpoint,
+            socks5: None,
             lifecycle: Arc::new(Lifecycle::new()),
             cancellation: TransportCancellation::new(),
             inner: Arc::new(Mutex::new(PoolInner::default())),
@@ -538,6 +540,13 @@ impl ReuseOwner {
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Makes every connection this owner dials go through a SOCKS5 proxy.
+    #[must_use]
+    pub fn with_socks5(mut self, route: crate::socks5::Route) -> Self {
+        self.socks5 = Some(Arc::new(route));
         self
     }
 
@@ -758,7 +767,7 @@ impl ReuseOwner {
             SideEffectState::NotSent,
             control.context().deadline(),
             async {
-                TcpStream::connect(self.endpoint.address())
+                crate::socks5::dial(self.endpoint.address(), self.socks5.as_deref())
                     .await
                     .map_err(|_| UpstreamError::Connect)
             },

@@ -1272,6 +1272,55 @@ fn request_mutates_managed_state(request: &Request) -> bool {
     }
 }
 
+/// The HTTP surface of `webinfo` (`GET`/`PUT` on `/plugins/{tag}`) and
+/// `rewrite` (`GET /show`, `POST /post`); `None` when no such plugin owns the
+/// path.
+async fn local_plugin_reply(
+    config: &CompiledConfig,
+    request: &Request,
+) -> Option<crate::rule_sources::Reply> {
+    let path = request
+        .target
+        .split_once('?')
+        .map_or(request.target.as_str(), |(path, _)| path);
+    let rest = path.strip_prefix("/plugins/")?;
+    let (raw_tag, action) = rest.split_once('/').unwrap_or((rest, ""));
+    let tag = decode_plugin_tag(raw_tag)?;
+    let not_found = || crate::rule_sources::Reply {
+        status: 404,
+        content_type: Some("text/plain; charset=utf-8"),
+        body: b"404 page not found\n".to_vec(),
+    };
+    let not_allowed = || crate::rule_sources::Reply {
+        status: 405,
+        content_type: None,
+        body: Vec::new(),
+    };
+    if let Some(webinfo) = config
+        .local
+        .webinfos
+        .iter()
+        .find(|webinfo| webinfo.tag == tag.as_ref())
+    {
+        return Some(if action.is_empty() {
+            webinfo.handle(&request.method, &request.body).await
+        } else {
+            not_found()
+        });
+    }
+    let rewrite = config
+        .local
+        .rewrites
+        .iter()
+        .find(|rewrite| rewrite.tag == tag.as_ref())?;
+    Some(match (action, request.method.as_str()) {
+        ("show", "GET") => rewrite.runtime.show(),
+        ("post", "POST") => rewrite.runtime.post(&request.body).await,
+        ("show" | "post", _) => not_allowed(),
+        _ => not_found(),
+    })
+}
+
 /// `/plugins/{tag}/{rest}` split into the decoded tag and the raw rest (no
 /// query string).
 fn rule_source_path(target: &str) -> Option<(std::borrow::Cow<'_, str>, &str)> {
@@ -2379,6 +2428,13 @@ async fn dispatch(
             };
         }
     }
+    if let Some(reply) = local_plugin_reply(config, request).await {
+        return Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+        };
+    }
     match route(&request.target) {
         Route::Capabilities => {
             if request.method != "GET" {
@@ -3333,9 +3389,20 @@ fn ui_operations(
             "reason": if switch_supported { None::<&str> } else { Some("当前配置没有已接入的 switch owner") }
         }),
     );
+    let aliases = config
+        .local
+        .webinfos
+        .iter()
+        .any(|webinfo| webinfo.tag == "clientname");
+    operations.insert(
+        "client.aliases".to_owned(),
+        serde_json::json!({
+            "supported": aliases,
+            "reason": if aliases { None } else { Some("当前配置没有标签为 clientname 的 webinfo 插件") }
+        }),
+    );
     for id in [
         "capture.logs",
-        "client.aliases",
         "cache.requery",
         "lists.remembered",
         "appearance.server",
@@ -3413,10 +3480,7 @@ fn capabilities(
             "socket_marks",
             "bind_to_device",
             "positive_idle_timeout",
-            "enable_pipeline",
-            "srs_geodata",
-            "remote_download",
-            "auto_update"
+            "enable_pipeline"
         ],
         "endpoints": {
             "capabilities_get": true,

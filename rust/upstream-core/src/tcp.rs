@@ -20,7 +20,6 @@ use std::time::Instant;
 
 use mosdns_dns_core::{FrameMode, frame_response, inspect_response_header, validate_response};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::TcpStream;
 
 use crate::{
     ExchangeControl, ExchangeResponse, PreparedExchange, RequestError, ResponseCommit,
@@ -64,7 +63,7 @@ pub(crate) async fn exchange(
     // DNS payload, so it is `Connect` (`NotSent`). The connect itself races
     // owner close, caller cancellation, and the shared absolute deadline.
     let mut stream = race_io(prepared, SideEffectState::NotSent, deadline, async {
-        TcpStream::connect(endpoint)
+        crate::socks5::dial(endpoint, prepared.socks5())
             .await
             .map_err(|_| UpstreamError::Connect)
     })

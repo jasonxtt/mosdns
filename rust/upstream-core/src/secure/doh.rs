@@ -863,7 +863,7 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
     // Phase 1: numeric dial. No name resolution happens here.
     prepared.reach(DohPhase::BeforeConnect).await;
     let stream: TcpStream = race_control(&control, SideEffectState::NotSent, deadline, async {
-        TcpStream::connect(dial)
+        crate::socks5::dial(dial, prepared.endpoint.socks5())
             .await
             .map_err(|_| SecureError::from(UpstreamError::Connect))
     })
@@ -1572,7 +1572,7 @@ impl PooledDohSession {
         // Phase 1: numeric dial, so the service identity cannot select the
         // destination.
         let stream: TcpStream = race_control(control, SideEffectState::NotSent, deadline, async {
-            TcpStream::connect(dial)
+            crate::socks5::dial(dial, endpoint.socks5())
                 .await
                 .map_err(|_| SecureError::from(UpstreamError::Connect))
         })

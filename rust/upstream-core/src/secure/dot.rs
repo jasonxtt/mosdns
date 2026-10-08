@@ -593,7 +593,7 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // destination. A connect failure has sent nothing.
     prepared.reach(DotPhase::BeforeConnect).await;
     let stream: TcpStream = race_control(&control, SideEffectState::NotSent, deadline, async {
-        TcpStream::connect(dial)
+        crate::socks5::dial(dial, prepared.endpoint.socks5())
             .await
             .map_err(|_| SecureError::from(UpstreamError::Connect))
     })
@@ -758,7 +758,7 @@ impl PooledDotSession {
         // Phase 1: numeric dial. No name resolution, so the service identity
         // cannot influence the destination.
         let stream: TcpStream = race_control(control, SideEffectState::NotSent, deadline, async {
-            TcpStream::connect(dial)
+            crate::socks5::dial(dial, endpoint.socks5())
                 .await
                 .map_err(|_| SecureError::from(UpstreamError::Connect))
         })

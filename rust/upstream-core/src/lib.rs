@@ -996,6 +996,7 @@ impl<'a> ResponseCommit<'a> {
 /// outside the current slice.
 pub struct Upstream {
     endpoint: Endpoint,
+    socks5: Option<std::sync::Arc<socks5::Route>>,
     lifecycle: Lifecycle,
     cancellation: TransportCancellation,
     #[cfg(test)]
@@ -1007,11 +1008,19 @@ impl Upstream {
     pub fn new(endpoint: Endpoint) -> Self {
         Self {
             endpoint,
+            socks5: None,
             lifecycle: Lifecycle::new(),
             cancellation: TransportCancellation::new(),
             #[cfg(test)]
             commit_pause: Mutex::new(None),
         }
+    }
+
+    /// Makes a TCP exchange reach the endpoint through a SOCKS5 proxy.
+    #[must_use]
+    pub fn with_socks5(mut self, route: socks5::Route) -> Self {
+        self.socks5 = Some(std::sync::Arc::new(route));
+        self
     }
 
     /// Installs the deterministic pre-commit pause seam for in-crate tests.
@@ -1118,6 +1127,7 @@ impl Upstream {
         context.check_at(Instant::now(), SideEffectState::NotSent)?;
         Ok(PreparedExchange {
             endpoint: self.endpoint,
+            socks5: self.socks5.clone(),
             request,
             control: ExchangeControl::new(context, self.cancellation.clone()),
         })
@@ -1169,6 +1179,7 @@ impl Upstream {
 /// Validated exchange inputs held until the selected transport primitive runs.
 pub struct PreparedExchange<'q> {
     endpoint: Endpoint,
+    socks5: Option<std::sync::Arc<socks5::Route>>,
     request: ExchangeRequest<'q>,
     control: ExchangeControl,
 }
@@ -1177,6 +1188,11 @@ impl<'q> PreparedExchange<'q> {
     #[must_use]
     pub const fn endpoint(&self) -> Endpoint {
         self.endpoint
+    }
+
+    /// The SOCKS5 route of a proxied TCP exchange.
+    pub(crate) fn socks5(&self) -> Option<&socks5::Route> {
+        self.socks5.as_deref()
     }
 
     #[must_use]

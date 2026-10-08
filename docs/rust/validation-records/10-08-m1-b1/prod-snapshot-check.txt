@@ -1,0 +1,43 @@
+GAP my_sv4list domain_output sub_config/domain_output.yaml:plugins[0].type  unsupported plugin type `domain_output`
+GAP top_domains domain_output sub_config/domain_output.yaml:plugins[1].type  unsupported plugin type `domain_output`
+GAP my_realiplist domain_output sub_config/domain_output.yaml:plugins[2].type  unsupported plugin type `domain_output`
+GAP my_fakeiplist domain_output sub_config/domain_output.yaml:plugins[3].type  unsupported plugin type `domain_output`
+GAP my_nov6list domain_output sub_config/domain_output.yaml:plugins[4].type  unsupported plugin type `domain_output`
+GAP my_nov4list domain_output sub_config/domain_output.yaml:plugins[5].type  unsupported plugin type `domain_output`
+GAP my_nodenov6list domain_output sub_config/domain_output.yaml:plugins[6].type  unsupported plugin type `domain_output`
+GAP my_nodenov4list domain_output sub_config/domain_output.yaml:plugins[7].type  unsupported plugin type `domain_output`
+GAP requery requery sub_config/requery.yaml:plugins[0].type  unsupported plugin type `requery`
+CASCADE sequence_local_exit_requery sequence sub_config/forward_1.yaml:plugins[3].args[5].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_local_exit_requery sequence sub_config/forward_1.yaml:plugins[3].args[6].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_local_addlist_exit sequence sub_config/forward_1.yaml:plugins[4].args[4].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_local_addlist_exit_v6 sequence sub_config/forward_1.yaml:plugins[5].args[4].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_local_addlist_exit_v6 sequence sub_config/forward_1.yaml:plugins[5].args[5].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[4].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[7].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].exec[0]  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].exec[1]  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[9].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_addrealiplist_exit sequence sub_config/forward_1.yaml:plugins[8].args[0].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_localfake_addlist_exit sequence sub_config/forward_1.yaml:plugins[12].args[4].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[2].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[5].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].exec[0]  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].exec[1]  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[12].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[3].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[4].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_proxy_fakeip_addlist_exit sequence sub_config/forward_1.yaml:plugins[18].args[2].exec  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_proxy_realip_addlist_exit sequence sub_config/forward_1.yaml:plugins[20].args[3].exec  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[19].exec  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+CASCADE sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[21].exec[0]  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[21].exec  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+CASCADE sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[23].exec[0]  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_ipv6_cnfakeoff sequence sub_config/process_v6.yaml:plugins[0].args[18].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_ipv6_cnfakeon sequence sub_config/process_v6.yaml:plugins[1].args[20].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_ipv6_cnfakeoff_requery sequence sub_config/process_v6.yaml:plugins[2].args[18].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_ipv6_cnfakeon_requery sequence sub_config/process_v6.yaml:plugins[3].args[20].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_6666 sequence /root/b1chk/root/config_custom.yaml:plugins[0].args[18].exec  references removed `top_domains`; unknown executable reference `$top_domains`
+SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
+NOTE first-error-per-definition; rerun after fixing to see further gaps
+NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues
+SUMMARY gaps=9 cascades=30 globals=0 definitions=126
