@@ -85,6 +85,9 @@ func loadWebUIPortSettings() (webUIPortSettings, error) {
 }
 
 func ResolveWebUIPortOverride(defaultPort int) int {
+	if !webUIPortChangeSupported() {
+		return defaultPort
+	}
 	settings, err := loadWebUIPortSettings()
 	if err != nil || settings.Port == 0 {
 		return defaultPort
@@ -128,6 +131,11 @@ func applyWebUIPortOverride(cfg *Config) {
 		return
 	}
 	if settings.Port == 0 {
+		return
+	}
+	if !webUIPortChangeSupported() {
+		mlog.L().Info("webui port override ignored in container bridge mode",
+			zap.Int("stored_port", settings.Port))
 		return
 	}
 	nextAddr, err := replaceListenAddrPort(cfg.API.HTTP, settings.Port)

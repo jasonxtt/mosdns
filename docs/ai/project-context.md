@@ -117,6 +117,14 @@ Important currently-shipped examples:
 
 ## Release posture
 
+Linux and Docker use the same main-line core and WebUI. Docker initialization,
+update restrictions, and network-mode capabilities are selected by environment
+variables, with native Linux behavior as the default. Stable `vX.Y.Z` tags build
+both Linux archives and Docker images from the tagged commit; related pull
+requests build and test Docker images without publishing. The old Docker branch
+is retained for migration rollback rather than ongoing feature synchronization.
+OpenWrt and lite keep their separate development and release flows.
+
 The fork is already published and maintained as a real release branch, not just a local experiment.
 
 Do not maintain the current version number in this context file. Use Git tags and the changelogs as the source of truth for release history.

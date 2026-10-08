@@ -4,6 +4,10 @@ defineProps({
     type: Boolean,
     default: false
   },
+  applySupported: {
+    type: Boolean,
+    default: true
+  },
   showV3Callout: {
     type: Boolean,
     default: false
@@ -40,9 +44,9 @@ defineEmits(['check-update', 'apply-update', 'apply-force-update', 'apply-v3-upd
     <p class="update-banner">{{ updateBannerText }}</p>
     <div class="actions">
       <button class="btn tiny secondary" :disabled="update.loading" @click="$emit('check-update')">{{ update.loading ? '处理中...' : '检查更新' }}</button>
-      <button class="btn tiny primary" :disabled="update.loading || !hasUpdate" @click="$emit('apply-update')">立即更新</button>
-      <button class="btn tiny danger" :disabled="update.loading || !update.status?.download_url" @click="$emit('apply-force-update')">强制更新</button>
-      <button v-if="showV3Callout" class="btn tiny warning" :disabled="update.loading" @click="$emit('apply-v3-update')">切换 v3</button>
+      <button class="btn tiny primary" :disabled="update.loading || !applySupported || !hasUpdate" @click="$emit('apply-update')">立即更新</button>
+      <button class="btn tiny danger" :disabled="update.loading || !applySupported || !update.status?.download_url" @click="$emit('apply-force-update')">强制更新</button>
+      <button v-if="showV3Callout" class="btn tiny warning" :disabled="update.loading || !applySupported" @click="$emit('apply-v3-update')">切换 v3</button>
     </div>
   </section>
 </template>
