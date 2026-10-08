@@ -1,5 +1,15 @@
 # GitHub 发布前清单
 
+## Linux / Docker 共用主线的发布检查
+
+- Linux 与 Docker 在 `main` 共用核心代码和 WebUI，通用改动无需同步 `docker` 分支。
+- 发布正式 `vX.Y.Z` 标签前，构建两套 Vue 资源，再运行 `go test ./...`、`scripts/test-docker-release.sh` 和镜像运行检查。
+- 在 Actions 中配置 `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`，不要将凭据写入仓库。
+- 标签推送后分别确认 Linux Release 和 Docker 工作流成功；两条流水线独立，单个平台失败不代表全部发布成功。
+- 核对 Linux 包和容器内的程序版本相同；Docker 镜像 revision 应等于版本标签对应的提交，manifest 包含 amd64、arm64。
+- 首次迁移发布应使用旧 Docker 数据卷验证升级，并检查 `/`、`/log`、DNS、配置持久化及 host/bridge 模式行为。
+- 迁移验收前保留旧 Docker 分支、镜像和工作目录。回退时使用原镜像及对应配置备份。
+
 ## 一、仓库准备
 
 - 确认 fork 来源写清楚：`yyysuo/mosdns`

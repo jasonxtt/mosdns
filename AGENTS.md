@@ -32,6 +32,9 @@ This repository is a maintained fork of `yyysuo/mosdns` with custom routing, cus
 
 ## Operational expectations
 
+- Linux and Docker share the `main` source and WebUI. Enable Docker-specific behavior through `MOSDNS_CONTAINER_MODE`; do not ask agents to reimplement common changes on the old Docker development line.
+- Stable `vX.Y.Z` tags independently publish Linux archives and `jasonxtt/mosdns-t` multi-architecture images. Keep both frontend builds before Go compilation, and verify both publication results. OpenWrt and lite retain their existing branch workflows.
+
 - Current known deployment targets:
   - test: `10.0.0.91` (`mos-test`)
   - production: `10.0.0.3` (`mosdns`)
