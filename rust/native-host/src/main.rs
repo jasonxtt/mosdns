@@ -20,6 +20,7 @@ fn main() {
             }
         }
         Ok(mosdns_native_host::CliCommand::Start { config, dir }) => {
+            mosdns_native_host::configure_process_memory();
             mosdns_native_host::resolve_config_paths(&config, dir.as_deref())
                 .map_err(|error| error.to_string())
                 .and_then(|(config, root)| {

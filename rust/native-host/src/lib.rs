@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![allow(clippy::pedantic)]
 
 mod api;
@@ -16,6 +16,7 @@ mod execution;
 mod external_ui;
 mod managed;
 mod matchers;
+mod memory;
 mod observer;
 mod plugins;
 mod policy;
@@ -52,6 +53,7 @@ pub use config::{
 };
 pub use diag::record_fatal;
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
+pub use memory::configure_process_memory;
 pub use observer::{
     AdmissionError, AnswerDetailsStatus, AuditAnswer, AuditClock, AuditRecord, AuditSnapshot,
     AuditTestClock, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,

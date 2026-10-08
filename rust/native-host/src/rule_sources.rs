@@ -41,8 +41,9 @@ impl<T> Live<T> {
         Rc::clone(&self.0.borrow())
     }
 
-    pub(crate) fn set(&self, value: Rc<T>) {
-        *self.0.borrow_mut() = value;
+    /// Publishes `value` and returns the replaced generation.
+    pub(crate) fn replace(&self, value: Rc<T>) -> Rc<T> {
+        std::mem::replace(&mut *self.0.borrow_mut(), value)
     }
 }
 
@@ -1367,6 +1368,19 @@ async fn changed(ctx: &Ctx, provider: &Rc<Provider>) {
         }
         coalesced(&slot.build, || rebuild_mapper(ctx, &slot)).await;
     }
+    // The replaced generations are dropped by now.
+    let _ = on_build_thread(crate::memory::release_free_memory).await;
+}
+
+/// Frees a replaced generation off the DNS thread, where dropping a large
+/// matcher would stall queries for milliseconds. Not on the build thread
+/// either: there it could wait behind another queued build and keep both
+/// generations alive meanwhile. A generation a query still holds (none is
+/// held across an await) is dropped by its last holder instead.
+async fn drop_off_thread<T: Send + 'static>(replaced: Rc<T>) {
+    if let Ok(replaced) = Rc::try_unwrap(replaced) {
+        let _ = tokio::task::spawn_blocking(move || drop(replaced)).await;
+    }
 }
 
 fn gate(ctx: &Ctx) -> Option<PersistGate> {
@@ -1420,9 +1434,10 @@ async fn reload_provider(ctx: &Ctx, provider: &Rc<Provider>) {
             counts
         }
         Ok(Reloaded::Adguard(filtered, counts)) => {
-            if let Some(live) = provider.filtered.borrow().as_ref() {
+            let live = provider.filtered.borrow().clone();
+            if let Some(live) = live {
                 match filtered {
-                    Ok(filtered) => live.set(Rc::new(*filtered)),
+                    Ok(filtered) => drop_off_thread(live.replace(Rc::new(*filtered))).await,
                     Err(error) => crate::diag::error_line!(
                         "{}: rebuild failed, keeping the previous rules: {error}",
                         provider.tag
@@ -1485,8 +1500,9 @@ async fn rebuild_mapper(ctx: &Ctx, slot: &Rc<MapperSlot>) {
     .await;
     match built {
         Ok(Ok(matcher)) => {
-            slot.live.set(Rc::new(matcher));
+            let replaced = slot.live.replace(Rc::new(matcher));
             ctx.inner.builds.fetch_add(1, Ordering::SeqCst);
+            drop_off_thread(replaced).await;
         }
         Ok(Err(error)) => crate::diag::error_line!(
             "{}: rebuild failed, keeping the previous rules: {error}",
@@ -1504,6 +1520,8 @@ pub(crate) async fn supervise(
     control: crate::runtime_snapshot::RuntimeControl,
     shutdown: TransportCancellation,
 ) {
+    // What compiling the configuration freed (rule text, build temporaries).
+    let _ = on_build_thread(crate::memory::release_free_memory).await;
     let sources = Rc::clone(&control.view().config.rule_sources);
     sources.start();
     let timing = sources.timing();
