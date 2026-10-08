@@ -351,6 +351,7 @@ Vue 源码无需因后端语言变化而重写。5A 是隔离实验产物；5B/5
 
 - **首次生产替换的功能门槛是自用配置包 `config_all`**（`../file/mosdns/config/config_all`，记录实际包版本）：原生 host 无修改加载并运行该配置，其用到的插件/参数/API/持久化全部有原生证据，再经 5D、Phase 6 和用户确认。该里程碑记为 **M1**。
 - `config_all` 未使用的注册插件与参数（如 `qclass`、`ptr_ip`、`random`、`has_wanted_ans`、`black_hole`、`env`、`string_exp`、`arbitrary`、`rate_limiter`、`reverse_lookup` 等，以 `check` 实际清单为准）**延后到首次替换之后补齐，不删除**；它们不阻塞首次替换，仍保留在功能覆盖总表中。
+- **2026-10-08 修订（用户决定）**：Rust 版是新项目，配置文件允许改动、不要求兼容 Go。M1 门槛相应改为：原生 host 加载并运行**原生配置包 `config_rust`**——由 `config_all` 改写，维护在 `file` 仓库，附一份与 `config_all` 的差异说明，证明路由与上游行为等价。首个改动范围是 WebUI 可调整的运行时设置（类型化设置层，M1-f，见 `docs/rust/m1-gap-list.md`）；其它配置改动逐项提出、由用户决定。切换后回退 Go 时，Go 使用其原有配置与 webinfo 状态。
 - 本决策只改变首次替换的范围，不放宽正确性、5D 性能/稳定性、Phase 6 纯度和“本机 → `mos-test` → 用户确认 → `mosdns`”的顺序。
 - 5B 推进方式随之改为：以 `config_all` 的实际缺口为任务来源，而不是按插件家族补全全表。
 

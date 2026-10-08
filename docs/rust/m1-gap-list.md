@@ -69,7 +69,7 @@ M1-0 之前的读法如下：
 | exec `sleep` | 1 | **M1-b2 已关闭**（`for_singbox.yaml` 中的 `sleep 1000`） |
 | `fallback` 的 `primary`/`secondary` 写裸 tag | 2 | **M1-b2 已关闭**：现在同时接受裸 tag 与 `$tag`（Go 只认裸 tag） |
 
-### M1-f 运行时覆盖与设置层（新增，**暂停：等待设置层设计**）
+### M1-f 类型化设置层（新增；设计已定，用户 2026-10-08 决定）
 
 `check` 看不到、但决定生产实际行为的一块：Go 在加载配置时应用 `webinfo/` 下两份运行时覆盖文件，原生非托管模式目前**两份都不应用**。
 生产快照的实际效应：`config_overrides.json`（`socks5`、`ecs`、`replacements`）按递归字符串/键替换改写所有插件参数（`socks5` 键的值
@@ -77,6 +77,13 @@ M1-0 之前的读法如下：
 `enabled` 条目，`concurrent` 取启用条目数，`use_socks_proxy` 推断，`foreign`/`foreignecs` 回退到全局 `socks5`）。因此用 YAML
 原样启动的原生实例，`domestic`/`foreign` 等会用 YAML 里的上游，而 Go 实际用覆盖文件里的上游；上游/覆盖的管理 API（WebUI 上游页、覆盖设置页）
 同样未实现。语义取证已写入任务 `research/go-semantics.md`；待设置层方案确定后，由新的设置层通过 `AliApiArgs` 提供值。
+
+**设计决定（2026-10-08）**：Rust 版是新项目，配置文件允许改动、不要求兼容 Go。原生**不读取** Go 的
+`upstream_overrides.json`、`config_overrides.json` 与通用 `replacements`。WebUI 可调整的值改为配置中的具名类型化对象
+（如 `socks5_proxy`、`ecs_address`），由上游条目、规则源等用 `$tag` 显式引用（如 `proxy: $main_proxy`）；WebUI 通过类型化 API
+修改，只把与 YAML 默认值不同的部分写入一个带版本号的 `webinfo/settings.json`（按 tag）。生效配置 = YAML + 设置，由一个函数计算，
+`check` 与只读 API 可见并标注来源；修改经整代发布热生效，失败保留旧配置。首次替换使用由 `config_all` 改写的原生配置包
+`config_rust`（维护在 `file` 仓库，附与 `config_all` 的差异说明），见重写方案第 6 节。
 
 ### M1-g 缓存放置规则与 ECS（**M1-b1 任务已处理**；被 M1-b1 暴露，用户 2026-10-08 决定）
 
