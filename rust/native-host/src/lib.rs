@@ -20,6 +20,7 @@ mod memory;
 mod observer;
 mod plugins;
 mod policy;
+mod rewrite;
 mod rule_download;
 mod rule_sources;
 mod runtime_snapshot;
@@ -32,6 +33,7 @@ mod switch_state;
 mod tcp;
 mod transaction;
 mod udp;
+mod webinfo;
 
 pub use api::{ApiServer, ApiServerError};
 pub use assembly::{

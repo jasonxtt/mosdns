@@ -1148,7 +1148,9 @@ impl ForwardCatalog {
     }
 
     fn selected_owner_indices(len: usize, concurrent: usize, start: usize) -> Vec<usize> {
-        let limit = concurrent.min(3).min(len);
+        let limit = concurrent
+            .min(crate::config::aliapi::MAX_CONCURRENT)
+            .min(len);
         (0..limit).map(|offset| (start + offset) % len).collect()
     }
 
@@ -1451,6 +1453,7 @@ impl ForwardAdapter {
                 bootstrap_version: None,
                 query_timeout: Duration::from_secs(5),
                 insecure_skip_verify: false,
+                socks5: None,
             },
             None,
         )
@@ -1469,11 +1472,18 @@ impl ForwardAdapter {
                     .expect("validated numeric dial"),
             )
         });
+        // A proxied hostname target is resolved by the SOCKS5 proxy; the
+        // placeholder only carries the port into the endpoint.
         let owner = target
             .dial_addr
+            .or_else(|| {
+                target
+                    .proxied()
+                    .then(|| std::net::SocketAddr::from(([0, 0, 0, 0], target.port)))
+            })
             .map(|dial| build_owner(&target, dial, tls_roots.as_deref()).map(Rc::new))
             .transpose()?;
-        let resolver = if target.dial_addr.is_none() {
+        let resolver = if target.dial_addr.is_none() && !target.proxied() {
             let bootstrap = target
                 .bootstrap
                 .ok_or_else(|| "hostname forward is missing numeric bootstrap".to_owned())?;
@@ -1634,11 +1644,20 @@ impl ForwardAdapter {
     }
 }
 
+/// The SOCKS5 route of a proxied target: the proxy resolves a host name when
+/// the target has no numeric address.
+fn socks5_route(target: &ForwardTargetConfig) -> Option<mosdns_upstream_core::socks5::Route> {
+    let proxy = target.socks5.as_deref().filter(|_| target.proxied())?;
+    let domain = target.dial_addr.is_none().then_some(target.host.as_str());
+    Some(mosdns_upstream_core::socks5::Route::new(proxy, domain))
+}
+
 fn build_owner(
     target: &ForwardTargetConfig,
     dial: std::net::SocketAddr,
     tls_roots: Option<&rustls::RootCertStore>,
 ) -> Result<ForwardOwner, String> {
+    let route = socks5_route(target);
     match target.scheme {
         ForwardScheme::Udp => {
             let endpoint =
@@ -1651,14 +1670,20 @@ fn build_owner(
         ForwardScheme::Tcp => {
             let endpoint =
                 Endpoint::new(dial, Transport::Tcp).map_err(|error| error.to_string())?;
-            Ok(ForwardOwner::Tcp {
-                reuse: ReuseOwner::new(endpoint),
-                fallback: Upstream::new(endpoint),
-            })
+            let (mut reuse, mut fallback) = (ReuseOwner::new(endpoint), Upstream::new(endpoint));
+            if let Some(route) = route {
+                reuse = reuse.with_socks5(route.clone());
+                fallback = fallback.with_socks5(route);
+            }
+            Ok(ForwardOwner::Tcp { reuse, fallback })
         }
         ForwardScheme::Tls => {
             let identity = ServerIdentity::new(&target.host).map_err(|error| error.to_string())?;
-            let endpoint = DotEndpoint::new(dial, identity).map_err(|error| error.to_string())?;
+            let mut endpoint =
+                DotEndpoint::new(dial, identity).map_err(|error| error.to_string())?;
+            if let Some(route) = route {
+                endpoint = endpoint.with_socks5(route);
+            }
             let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
             let fallback = DotUpstream::new(endpoint.clone(), policy.clone())
                 .map_err(|error| error.to_string())?;
@@ -1667,8 +1692,11 @@ fn build_owner(
             Ok(ForwardOwner::Dot { reuse, fallback })
         }
         ForwardScheme::Https => {
-            let endpoint =
+            let mut endpoint =
                 DohEndpoint::new(&target.service, dial).map_err(|error| error.to_string())?;
+            if let Some(route) = route {
+                endpoint = endpoint.with_socks5(route);
+            }
             let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
             let fallback = DohUpstream::new(endpoint.clone(), policy.clone())
                 .map_err(|error| error.to_string())?;

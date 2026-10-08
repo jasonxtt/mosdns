@@ -13,8 +13,8 @@ plugins:
       upstreams:
         - addr: "udp://127.0.0.1:15453"
 
-  - tag: rewrite_x
-    type: rewrite
+  - tag: requery_x
+    type: requery
     args:
       rules: []
 
@@ -31,13 +31,13 @@ plugins:
   - tag: entry
     type: sequence
     args:
-      - exec: $rewrite_x
+      - exec: $requery_x
       - matches:
           - qname $light_set
           - qclass 1
         exec: debug_print
       - exec:
-          - $rewrite_x
+          - $requery_x
           - black_hole 192.0.2.1
           - $fwd
       - matches: qtype 1

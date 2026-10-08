@@ -26,6 +26,84 @@ fn ecs_cache_is_explicitly_opt_in_and_rejects_unsafe_placement() {
     }
 }
 
+fn config_with_ecs(enabled: bool, ecs_args: &str, rules: &str, extra: &str) -> String {
+    config(enabled, rules, extra).replace("args: {send: true}", &format!("args: {{{ecs_args}}}"))
+}
+
+#[test]
+fn a_fixed_address_ecs_may_follow_a_cache_but_a_client_derived_one_may_not() {
+    let child = "  - tag: child\n    type: sequence\n    args: [{exec: '$ecs'}]\n";
+    let fallback =
+        "  - tag: choice\n    type: fallback\n    args: {primary: '$child', secondary: '$up'}\n";
+    let extra = format!("{child}{fallback}");
+    let shapes = [
+        "      - exec: $cache\n      - exec: $ecs\n      - exec: $up",
+        "      - exec: cache\n      - exec: ecs 2408:8888::8\n      - exec: $up",
+        "      - exec: $cache\n      - exec: $child\n      - exec: $up",
+        "      - exec: $cache\n      - exec: jump $child\n      - exec: $up",
+        "      - exec: $cache\n      - exec: goto $child",
+        "      - exec: $cache\n      - exec: try $child\n      - exec: $up",
+        "      - exec: $cache\n      - exec: $choice",
+    ];
+    // Fixed address (`send` never overrides a preset) and no address at all:
+    // the same for every client.
+    for enabled in [false, true] {
+        for ecs in [
+            "preset: 192.0.2.1",
+            "preset: 2001:db8::1, mask6: 56",
+            "send: true, preset: 192.0.2.1",
+            "",
+        ] {
+            for shape in shapes {
+                let yaml = config_with_ecs(enabled, ecs, shape, &extra);
+                assert!(
+                    compile_yaml(&yaml).is_ok(),
+                    "enabled={enabled} ecs={ecs:?}\n{shape}\n{:?}",
+                    compile_yaml(&yaml).err()
+                );
+            }
+        }
+    }
+    // Anything that can follow the client stays rejected; `forward` wins over
+    // a preset whenever the client sent an ECS.
+    for enabled in [false, true] {
+        for ecs in [
+            "send: true",
+            "forward: true",
+            "forward: true, preset: 192.0.2.1",
+            "forward: true, send: true, preset: 192.0.2.1",
+        ] {
+            for shape in shapes {
+                if shape.contains("ecs 2408") {
+                    continue;
+                }
+                let error = compile_yaml(&config_with_ecs(enabled, ecs, shape, &extra))
+                    .err()
+                    .unwrap_or_else(|| panic!("{ecs}: {shape}"))
+                    .to_string();
+                assert!(
+                    error.contains("unsafe cache `cache`") && error.contains("ecs_handler"),
+                    "{ecs}: {error}"
+                );
+            }
+        }
+    }
+    // The client_ip branch is still rejected after a fixed ECS was accepted.
+    let yaml = config_with_ecs(
+        true,
+        "preset: 192.0.2.1",
+        "      - exec: $cache\n      - exec: $ecs\n      - matches: client_ip 192.0.2.0/24\n        exec: $up",
+        "",
+    );
+    assert!(
+        compile_yaml(&yaml)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("client_ip")
+    );
+}
+
 #[test]
 fn placement_covers_control_flow_and_own_boundary() {
     let child = "  - tag: child\n    type: sequence\n    args: [{exec: '$ecs'}]\n";
@@ -33,7 +111,6 @@ fn placement_covers_control_flow_and_own_boundary() {
         for cache in ["$cache", "cache"] {
             for effect in [
                 "$ecs",
-                "ecs 192.0.2.1",
                 "$child",
                 "jump $child",
                 "goto $child",

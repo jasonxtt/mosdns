@@ -103,9 +103,16 @@ Full keys also govern refresh singleflight. Stored wire still removes OPT.
 Configuration assembly builds monotone suffix summaries over the validated
 program (including synthetic exec-list scopes), naming ECS/client_ip effects
 and reachable cache owners. Every named/quick cache rejects unsafe own
-successors, regardless of enable_ecs. Call/goto/jump/try, fallback targets,
-preference successors and recursive graphs are covered. Unconditional terminal
-flow stops reachability; conditional rules remain possibly reachable. Jump's
+successors, regardless of enable_ecs. Only client-dependent ECS is an effect:
+an ecs_handler with forward=true, or with send=true and no preset (S2 order:
+forwarded, preset, peer). A fixed address (quick `ecs <ip>`, a preset even with
+send=true) or a handler with no address is identical for every client and may
+follow a cache; client_ip rules remain effects. A cache returns the answer stored
+first for a key, whichever successor path produced it; a fixed ECS, like the
+choice of upstream, is a routing difference and not an error (as in Go). The
+placement rule only prevents an answer that varies with the client from being
+shared. Call/goto/jump/try, fallback targets, preference successors and
+recursive graphs are covered. Unconditional terminal flow stops reachability; conditional rules remain possibly reachable. Jump's
 same-scope inherited continuation is included; ordinary child/inline publication
 boundaries remain separate. Fallback targets also conservatively check inherited
 successors. Invalid references already fail program validation. Diagnostics name

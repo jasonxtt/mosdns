@@ -28,6 +28,13 @@ sequence 里的 `rcode`（6）、`tag_setter`（10）、`drop_resp`（10）、`s
 `sd_set_light`/`si_set`/`adguard_rule` 的在线来源管理、下载（含 SOCKS5）、自动更新，`domain_set_light` 的
 show/save/post，以及 `domain_mapper`/`si_set`/AdGuard 直接 matcher 的热更新；两个 Vue shell 的规则页在原生下可用。
 记录见 [validation-records/10-07-m1-a2-rule-management](validation-records/10-07-m1-a2-rule-management/README.md)。
+**M1-b1 完成后**（`10-08-rust-native-m1-b1-upstreams-overrides`）：`SUMMARY gaps=9 cascades=30 globals=1`（两份输出逐字节相同；含 M1-g 后为 `globals=0`）。`aliapi` 5、`rewrite` 1、
+`webinfo` 1 个直接缺口关闭，GLOBAL `at least one forward plugin is required` 消失；剩余直接缺口只有 `domain_output` 8、`requery` 1（M1-c）。
+GLOBAL 一度被缓存放置规则 `unsafe cache … successor may execute ecs_handler` 挡住（§1 **M1-g**），该规则按固定/客户端推导 ECS 修正后 GLOBAL 归零（`gaps=9 cascades=30 globals=0`）。范围按规划会话 2026-10-08 的调整执行：**运行时覆盖文件的应用（R1
+`config_overrides.json`、R2 `upstream_overrides.json`）暂停**，等设置层重新设计后再做，见 §1 的 **M1-f**；`aliapi` 的取值只来自 YAML，并通过
+`AliApiArgs::build` 这一个入口构造上游列表与 SOCKS5 路由。记录见
+[validation-records/10-08-m1-b1](validation-records/10-08-m1-b1/README.md)，契约见
+[native-aliapi-rewrite-webinfo](contracts/native-aliapi-rewrite-webinfo.md)。
 M1-0 之前的读法如下：
 
 - **直接缺口（GAP/GLOBAL）** 是要做的事；**连带错误（CASCADE）** 只因引用了被剔除的定义，
@@ -52,15 +59,31 @@ M1-0 之前的读法如下：
 
 | 缺口 | 数量 | 说明 |
 | --- | --- | --- |
-| 插件类型 `aliapi` | 5 | `domestic`、`foreign`、`foreignecs`、`nocnfake`、`cnfake`；全部上游都经它定义，剔除后无任何 forward（探测层 2） |
-| 插件类型 `rewrite` | 1 | |
+| 插件类型 `aliapi` | 5 | **M1-b1 已关闭**：`domestic`、`foreign`、`foreignecs`、`nocnfake`、`cnfake`；标准 DNS 上游（udp/tcp/tls/https，tcp/tls/https 可走 SOCKS5），签名 AliDNS API 加载时明确报不支持 |
+| 插件类型 `rewrite` | 1 | **M1-b1 已关闭**（含 `/show`、`/post`） |
 | 插件类型 `adguard_rule` | 1 | |
-| 插件类型 `webinfo` | 1 | |
+| 插件类型 `webinfo` | 1 | **M1-b1 已关闭**（`GET`/`PUT /plugins/<tag>`；`clientname` 同时点亮 WebUI 的 `client.aliases` 能力） |
 | exec `tag_setter` | 10 | **M1-b2 已关闭** |
 | exec `drop_resp` | 10 | **M1-b2 已关闭** |
 | matcher `rcode` | 6 | **M1-b2 已关闭** |
 | exec `sleep` | 1 | **M1-b2 已关闭**（`for_singbox.yaml` 中的 `sleep 1000`） |
 | `fallback` 的 `primary`/`secondary` 写裸 tag | 2 | **M1-b2 已关闭**：现在同时接受裸 tag 与 `$tag`（Go 只认裸 tag） |
+
+### M1-f 运行时覆盖与设置层（新增，**暂停：等待设置层设计**）
+
+`check` 看不到、但决定生产实际行为的一块：Go 在加载配置时应用 `webinfo/` 下两份运行时覆盖文件，原生非托管模式目前**两份都不应用**。
+生产快照的实际效应：`config_overrides.json`（`socks5`、`ecs`、`replacements`）按递归字符串/键替换改写所有插件参数（`socks5` 键的值
+全部替换，包括 `socks5: ""`；`ecs …` 串替换为 `ecs <ecs>`）；`upstream_overrides.json` 按 `aliapi` tag **替换**该插件的上游列表（只取
+`enabled` 条目，`concurrent` 取启用条目数，`use_socks_proxy` 推断，`foreign`/`foreignecs` 回退到全局 `socks5`）。因此用 YAML
+原样启动的原生实例，`domestic`/`foreign` 等会用 YAML 里的上游，而 Go 实际用覆盖文件里的上游；上游/覆盖的管理 API（WebUI 上游页、覆盖设置页）
+同样未实现。语义取证已写入任务 `research/go-semantics.md`；待设置层方案确定后，由新的设置层通过 `AliApiArgs` 提供值。
+
+### M1-g 缓存放置规则与 ECS（**M1-b1 任务已处理**；被 M1-b1 暴露，用户 2026-10-08 决定）
+
+原先 `cache_placement.rs` 拒绝“`cache` 的后继可能执行 `ecs_handler`”，`config_all` 的 `cache_all`/`cache_node` 之后经 `fallback` 到达写死
+`ecs 2408:8888::8` 的节点而无法启动。现在只拒绝**依赖客户端**的 ECS（`forward: true`；`send: true` 且无 `preset`），固定地址与无地址 handler
+被接受，`client_ip` 分支仍拒绝；这是让判断更准，不是放宽安全（固定 ECS 对所有客户端相同，缓存答案不会因它出错）。契约见
+[native-client-ecs](contracts/native-client-ecs.md) S4。`check`（`config_all` 与生产快照）GLOBAL 归零，未暴露新缺口。
 
 ### M1-c 输出与再查询
 

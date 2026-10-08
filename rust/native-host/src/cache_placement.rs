@@ -31,7 +31,15 @@ fn external(config: &CompiledConfig, nodes: &Nodes, id: ExecutableId) -> Summary
         .iter()
         .find(|policy| policy.executable == id)
     {
-        if matches!(&policy.policy, crate::policy::ResponsePolicy::Ecs(ecs) if ecs.active) {
+        // Only an ECS that depends on the client (its ECS passed through, or
+        // its own subnet because no preset overrides `send`) can make a cached
+        // answer wrong for another client. A fixed address, or no address at
+        // all, is the same for everyone and may follow a cache.
+        if matches!(
+            &policy.policy,
+            crate::policy::ResponsePolicy::Ecs(ecs)
+                if ecs.active && (ecs.forward || (ecs.send && ecs.preset.is_none()))
+        ) {
             summary
                 .effects
                 .insert(format!("ecs_handler `{}`", policy.tag));

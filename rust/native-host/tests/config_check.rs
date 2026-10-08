@@ -36,14 +36,14 @@ GLOBAL {GAPS}:log.production  unsupported field
 GLOBAL {GAPS}:log.encoding  unsupported field
 GAP no_args domain_output {GAPS}:plugins[3].args  required field is missing
 GAP light_set sd_set sub/rules.yaml:plugins[0].type  unsupported plugin type `sd_set`
-GAP rewrite_x rewrite {GAPS}:plugins[1].type  unsupported plugin type `rewrite`
+GAP requery_x requery {GAPS}:plugins[1].type  unsupported plugin type `requery`
 GAP two_bad_params cache {GAPS}:plugins[2].args.first_unknown  unsupported field
 GAP udp_in udp_server {GAPS}:plugins[5].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
-CASCADE entry sequence {GAPS}:plugins[4].args[0].exec  references removed `rewrite_x`; unknown executable reference `$rewrite_x`
+CASCADE entry sequence {GAPS}:plugins[4].args[0].exec  references removed `requery_x`; unknown executable reference `$requery_x`
 CASCADE entry sequence {GAPS}:plugins[4].args[1].matches[0]  references removed `light_set`; unknown domain_set reference `$light_set`
 GAP entry sequence {GAPS}:plugins[4].args[1].matches[1]  unsupported matcher `qclass`
 GAP entry sequence {GAPS}:plugins[4].args[1].exec  unsupported executable `debug_print`
-CASCADE entry sequence {GAPS}:plugins[4].args[2].exec[0]  references removed `rewrite_x`; unknown executable reference `$rewrite_x`
+CASCADE entry sequence {GAPS}:plugins[4].args[2].exec[0]  references removed `requery_x`; unknown executable reference `$requery_x`
 GAP entry sequence {GAPS}:plugins[4].args[2].exec[1]  unsupported executable `black_hole`
 CASCADE entry sequence {GAPS}:plugins[4].args[4].exec  references removed `no_args`; unknown executable reference `$no_args`
 SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
@@ -67,7 +67,7 @@ fn cascade_names_the_removed_definition() {
             _ => None,
         })
         .collect();
-    assert_eq!(cascades, ["rewrite_x", "light_set", "rewrite_x", "no_args"]);
+    assert_eq!(cascades, ["requery_x", "light_set", "requery_x", "no_args"]);
 }
 
 #[test]

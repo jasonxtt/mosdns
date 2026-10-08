@@ -19,6 +19,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Native special groups](native-special-groups.md) | Opt-in managed compiler, generated routing, CNAME/audit preservation, S5 management HTTP, S6 Vue workflow, and S7 isolated whole-chain evidence; S7 and cumulative exact-source reviews passed; production cutover remains gated |
 | [Native switch state](native-switch-state.md) | Configured switch1–17 state, immutable query admission, durable HTTP control, capability inventory, and truthful native Vue controls |
 
+| [Native aliapi/rewrite/webinfo](native-aliapi-rewrite-webinfo.md) | YAML-only `aliapi` with SOCKS5 for TCP-based upstreams, `rewrite` rules and API, `webinfo` document API (M1-b1); runtime overrides excluded |
 | [Native WebUI hosting](native-webui-hosting.md) | Same-origin embedded/external UI, truthful health/version, capability admission and opt-in pure native build |
 
 ## Before development

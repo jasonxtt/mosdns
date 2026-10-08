@@ -27,7 +27,11 @@ use crate::plugins::{
     parse_sleep_millis,
 };
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
+pub use crate::rewrite::RewriteConfig;
+use crate::rewrite::{DnsServer, Rewrite};
+use crate::webinfo::WebInfo;
 
+pub(crate) mod aliapi;
 mod check;
 pub(crate) mod providers;
 pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config, check_config_in};
@@ -106,6 +110,17 @@ pub struct ForwardTargetConfig {
     pub bootstrap_version: Option<u8>,
     pub query_timeout: Duration,
     pub insecure_skip_verify: bool,
+    /// SOCKS5 proxy (`host:port`) that TCP-based schemes connect through.
+    /// Kept only for `tcp`/`tls`/`https` targets; UDP ignores a proxy.
+    pub socks5: Option<String>,
+}
+
+impl ForwardTargetConfig {
+    /// True when the connection is made through the SOCKS5 proxy.
+    #[must_use]
+    pub(crate) fn proxied(&self) -> bool {
+        self.socks5.is_some() && self.scheme != ForwardScheme::Udp
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -360,6 +375,14 @@ pub struct SleepConfig {
     pub duration: Duration,
 }
 
+/// The compiled plugins that own a state file or a lookup of their own:
+/// `rewrite` (dispatched as an external) and `webinfo` (HTTP only).
+#[derive(Default)]
+pub struct LocalPlugins {
+    pub rewrites: Vec<RewriteConfig>,
+    pub webinfos: Vec<Rc<WebInfo>>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeTarget {
     Sequence(SequenceId),
@@ -511,6 +534,8 @@ pub struct CompiledConfig {
     pub fallbacks: Vec<FallbackConfig>,
     pub preferences: Vec<PreferenceConfig>,
     pub sleeps: Vec<SleepConfig>,
+    /// `rewrite` and `webinfo` plugins.
+    pub local: LocalPlugins,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
     /// Every compiled `domain_set` with its management eligibility.
@@ -1462,6 +1487,12 @@ impl<'a> CacheDependencyClosure<'a> {
         {
             self.material
                 .insert(format!("response-policy:{}", policy.tag));
+            // A fixed-address ECS may follow a cache, so its parameters (not
+            // only its name) decide whether an old cache is still valid.
+            if let ResponsePolicy::Ecs(ecs) = &policy.policy {
+                self.material
+                    .insert(format!("ecs-policy:{}:{ecs:?}", policy.tag));
+            }
             recognized = true;
         }
         if let Some(sleep) = self
@@ -1857,6 +1888,8 @@ enum PluginKind {
     DomainMapper,
     TagSetter,
     Sleep,
+    Rewrite,
+    WebInfo,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -1958,7 +1991,7 @@ fn compile_definitions(
             "ecs_handler" => PluginKind::Ecs,
             "redirect" => PluginKind::Redirect,
             "ip_set" => PluginKind::IpSet,
-            "forward" => PluginKind::Forward,
+            "forward" | "aliapi" => PluginKind::Forward,
             "cache" => PluginKind::Cache,
             "sequence" => PluginKind::Sequence,
             "domain_set" => PluginKind::DomainSet,
@@ -1973,6 +2006,8 @@ fn compile_definitions(
             "domain_mapper" => PluginKind::DomainMapper,
             "tag_setter" => PluginKind::TagSetter,
             "sleep" => PluginKind::Sleep,
+            "rewrite" => PluginKind::Rewrite,
+            "webinfo" => PluginKind::WebInfo,
             other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
@@ -2088,6 +2123,8 @@ fn compile_definitions(
     let mut flow_setters = Vec::new();
     let mut tag_setters = Vec::new();
     let named_sleeps = RefCell::new(Vec::new());
+    let mut rewrites: Vec<(String, Rc<Rewrite>)> = Vec::new();
+    let mut webinfos: Vec<Rc<WebInfo>> = Vec::new();
     let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
@@ -2255,11 +2292,25 @@ fn compile_definitions(
                     .borrow_mut()
                     .push((plugin.tag.clone(), compile_sleep(plugin)?));
             }
+            PluginKind::Rewrite => {
+                let (rewrite, files) = compile_rewrite(plugin)?;
+                known_artifacts.extend(files);
+                rewrites.push((plugin.tag.clone(), Rc::new(rewrite)));
+            }
+            PluginKind::WebInfo => {
+                let (webinfo, file) = compile_webinfo(plugin)?;
+                known_artifacts.push(file);
+                webinfos.push(Rc::new(webinfo));
+            }
             PluginKind::Fallback => {
                 fallback_definitions.push(compile_fallback(plugin)?);
             }
             PluginKind::Forward => {
-                let forward = compile_forward(plugin)?;
+                let forward = if plugin.kind == "aliapi" {
+                    aliapi::compile(plugin)?
+                } else {
+                    compile_forward(plugin)?
+                };
                 for (entry_index, entry) in forward.entries.iter().enumerate() {
                     let location = if entry.tag.is_some() {
                         format!("{}.args.upstreams[{entry_index}].tag", plugin.source_path)
@@ -2537,6 +2588,11 @@ fn compile_definitions(
                 .iter()
                 .map(|(name, _)| ExternalSpec::new(name.clone())),
         )
+        .chain(
+            rewrites
+                .iter()
+                .map(|(tag, _)| ExternalSpec::new(tag.clone())),
+        )
         .collect();
     let program = ProgramSpec::new(sequences, fixtures)
         .with_externals(externals)
@@ -2683,6 +2739,17 @@ fn compile_definitions(
         })
         .collect::<Result<Vec<_>, ConfigError>>()?;
 
+    let rewrites = rewrites
+        .into_iter()
+        .map(|(tag, runtime)| {
+            Ok(RewriteConfig {
+                executable: external_id(&program, &tag, "$.plugins")?,
+                tag,
+                runtime,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+
     let entry_sequence = program.sequence_id(&listener.entry).ok_or_else(|| {
         ConfigError::new(
             format!("{listener_source_path}.args.entry"),
@@ -2741,6 +2808,7 @@ fn compile_definitions(
         fallbacks,
         preferences,
         sleeps,
+        local: LocalPlugins { rewrites, webinfos },
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
             sequence: entry_sequence,
@@ -3167,6 +3235,60 @@ fn compile_sleep(plugin: &RawPlugin) -> Result<Duration, ConfigError> {
     }
 }
 
+/// `rewrite`: the rule files (the first one is where `/post` writes) and the
+/// DNS server a domain target resolves through. A missing file is allowed.
+fn compile_rewrite(plugin: &RawPlugin) -> Result<(Rewrite, Vec<PathBuf>), ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "rewrite args must be a mapping")?;
+    args.reject_unknown(&["files", "dns"], &path)?;
+    let files: Vec<PathBuf> = policy_strings(args.get("files"), &format!("{path}.files"))?
+        .into_iter()
+        .map(|file| resolve_rule_path(&file, &plugin.root_dir))
+        .collect();
+    if files.is_empty() {
+        return Err(ConfigError::new(
+            format!("{path}.files"),
+            "at least one rule file must be specified in `files`",
+        ));
+    }
+    let dns_text = match args.get("dns") {
+        None | Some(RawValue::Null) => String::new(),
+        Some(value) => expect_string(value, &format!("{path}.dns"))?,
+    };
+    if dns_text.is_empty() {
+        return Err(ConfigError::new(
+            format!("{path}.dns"),
+            "upstream dns server address cannot be empty",
+        ));
+    }
+    let dns = DnsServer::parse(&dns_text)
+        .map_err(|reason| ConfigError::new(format!("{path}.dns"), reason))?;
+    let rewrite = Rewrite::load(files.clone(), dns)
+        .map_err(|reason| ConfigError::new(format!("{path}.files"), reason))?;
+    Ok((rewrite, files))
+}
+
+/// `webinfo`: the JSON document file.
+fn compile_webinfo(plugin: &RawPlugin) -> Result<(WebInfo, PathBuf), ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "webinfo args must be a mapping")?;
+    args.reject_unknown(&["file"], &path)?;
+    let file = match args.get("file") {
+        None | Some(RawValue::Null) => String::new(),
+        Some(value) => expect_string(value, &format!("{path}.file"))?,
+    };
+    if file.is_empty() {
+        return Err(ConfigError::new(
+            format!("{path}.file"),
+            "'file' must be specified",
+        ));
+    }
+    let file = resolve_rule_path(&file, &plugin.root_dir);
+    let webinfo = WebInfo::load(&plugin.tag, file.clone())
+        .map_err(|reason| ConfigError::new(format!("{path}.file"), reason))?;
+    Ok((webinfo, file))
+}
+
 /// Registers one quick `sleep` callsite (or one use of the `_sleep_500ms`
 /// preset) as its own external and dispatches it.
 fn quick_sleep(
@@ -3273,7 +3395,8 @@ fn resolve_policy_target_name(
             | PluginKind::Hosts
             | PluginKind::Redirect
             | PluginKind::Ecs
-            | PluginKind::Sleep,
+            | PluginKind::Sleep
+            | PluginKind::Rewrite,
         ) => Ok(PolicyTargetName::External(tag.to_owned())),
         Some(
             PluginKind::FastMark
@@ -3289,7 +3412,8 @@ fn resolve_policy_target_name(
             | PluginKind::SiSet
             | PluginKind::DomainSetLight
             | PluginKind::SdSetLight
-            | PluginKind::AdguardRule,
+            | PluginKind::AdguardRule
+            | PluginKind::WebInfo,
         ) => Err(ConfigError::new(
             path,
             format!("`${tag}` is not executable"),
@@ -4333,7 +4457,8 @@ fn compile_exec_item(
                     | PluginKind::Hosts
                     | PluginKind::Ecs
                     | PluginKind::Redirect
-                    | PluginKind::Sleep,
+                    | PluginKind::Sleep
+                    | PluginKind::Rewrite,
                 ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
@@ -4353,7 +4478,8 @@ fn compile_exec_item(
                     | PluginKind::SiSet
                     | PluginKind::DomainSetLight
                     | PluginKind::SdSetLight
-                    | PluginKind::AdguardRule,
+                    | PluginKind::AdguardRule
+                    | PluginKind::WebInfo,
                 ) => Err(ConfigError::new(
                     path,
                     format!("`{name}` is not executable"),
@@ -4443,11 +4569,57 @@ fn compile_listener(plugin: &RawPlugin) -> Result<ListenerConfig, ConfigError> {
     })
 }
 
+/// The per-upstream options a forward target is built from, already merged
+/// with any plugin-level defaults.
+pub(crate) struct ForwardTargetOptions {
+    /// Numeric `dial_addr` text; the port defaults to the service port.
+    pub(crate) dial_addr: Option<String>,
+    pub(crate) bootstrap: Option<SocketAddr>,
+    pub(crate) bootstrap_version: Option<u8>,
+    pub(crate) query_timeout: Duration,
+    pub(crate) insecure_skip_verify: bool,
+    pub(crate) socks5: Option<String>,
+}
+
 fn parse_forward_target(
     value: &str,
     item: &RawMap,
     global_bootstrap: Option<SocketAddr>,
     global_bootstrap_version: Option<u8>,
+    path: &str,
+) -> Result<ForwardTargetConfig, ConfigError> {
+    let options = ForwardTargetOptions {
+        dial_addr: item
+            .get("dial_addr")
+            .map(|value| expect_string(value, &format!("{path}.dial_addr")))
+            .transpose()?,
+        bootstrap: item
+            .get("bootstrap")
+            .map(|value| parse_bootstrap(value, &format!("{path}.bootstrap")))
+            .transpose()?
+            .or(global_bootstrap),
+        bootstrap_version: item
+            .get("bootstrap_version")
+            .map(|value| parse_bootstrap_version(value, &format!("{path}.bootstrap_version")))
+            .transpose()?
+            .or(global_bootstrap_version),
+        query_timeout: parse_query_timeout(item.get("upstream_query_timeout"), path)?,
+        insecure_skip_verify: item
+            .get("insecure_skip_verify")
+            .map(|value| expect_bool(value, &format!("{path}.insecure_skip_verify")))
+            .transpose()?
+            .unwrap_or(false),
+        socks5: None,
+    };
+    validate_inactive_forward_options(item, path)?;
+    build_forward_target(value, options, path)
+}
+
+/// Builds one validated target from typed options. A proxied TCP-based target
+/// may name a host without a numeric address: the proxy resolves it.
+pub(crate) fn build_forward_target(
+    value: &str,
+    options: ForwardTargetOptions,
     path: &str,
 ) -> Result<ForwardTargetConfig, ConfigError> {
     if value.is_empty() {
@@ -4457,34 +4629,31 @@ fn parse_forward_target(
         ));
     }
     let (scheme, host, port, service) = parse_service_address(value, path)?;
-    let dial_addr = item
-        .get("dial_addr")
-        .map(|value| parse_numeric_host_port(value, port, &format!("{path}.dial_addr")))
+    let dial_addr = options
+        .dial_addr
+        .as_deref()
+        .map(|text| parse_numeric_text(text, port, &format!("{path}.dial_addr")))
         .transpose()?;
     let dial_addr = dial_addr.or_else(|| {
         host.parse::<std::net::IpAddr>()
             .ok()
             .map(|ip| SocketAddr::new(ip, port))
     });
-    let bootstrap = item
-        .get("bootstrap")
-        .map(|value| parse_bootstrap(value, &format!("{path}.bootstrap")))
-        .transpose()?
-        .or(global_bootstrap);
-    let bootstrap_version = item
-        .get("bootstrap_version")
-        .map(|value| parse_bootstrap_version(value, &format!("{path}.bootstrap_version")))
-        .transpose()?
-        .or(global_bootstrap_version);
-    let query_timeout = parse_query_timeout(item.get("upstream_query_timeout"), path)?;
-    let insecure_skip_verify = item
-        .get("insecure_skip_verify")
-        .map(|value| expect_bool(value, &format!("{path}.insecure_skip_verify")))
-        .transpose()?
-        .unwrap_or(false);
-    validate_inactive_forward_options(item, path)?;
+    let ForwardTargetOptions {
+        bootstrap,
+        bootstrap_version,
+        query_timeout,
+        insecure_skip_verify,
+        socks5,
+        ..
+    } = options;
+    let socks5 = socks5.filter(|_| scheme != ForwardScheme::Udp);
 
-    if host.parse::<std::net::IpAddr>().is_err() && dial_addr.is_none() && bootstrap.is_none() {
+    if host.parse::<std::net::IpAddr>().is_err()
+        && dial_addr.is_none()
+        && bootstrap.is_none()
+        && socks5.is_none()
+    {
         return Err(ConfigError::new(
             format!("{path}.addr"),
             "hostname upstream requires numeric dial_addr or bootstrap",
@@ -4524,6 +4693,7 @@ fn parse_forward_target(
         bootstrap_version,
         query_timeout,
         insecure_skip_verify,
+        socks5,
     })
 }
 
@@ -4615,7 +4785,14 @@ fn parse_numeric_host_port(
     inherited_port: u16,
     path: &str,
 ) -> Result<SocketAddr, ConfigError> {
-    let text = expect_string(value, path)?;
+    parse_numeric_text(&expect_string(value, path)?, inherited_port, path)
+}
+
+fn parse_numeric_text(
+    text: &str,
+    inherited_port: u16,
+    path: &str,
+) -> Result<SocketAddr, ConfigError> {
     if text.is_empty() {
         return Err(ConfigError::new(path, "numeric address must not be empty"));
     }

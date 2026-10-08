@@ -172,6 +172,7 @@ fn validate_dns_name(name: &str) -> Result<(), SecureError> {
 pub struct DotEndpoint {
     dial: SocketAddr,
     identity: ServerIdentity,
+    socks5: Option<crate::socks5::Route>,
 }
 
 impl DotEndpoint {
@@ -183,7 +184,24 @@ impl DotEndpoint {
     /// Returns [`SecureError::ZeroDialPort`] when `dial` has port zero.
     pub fn new(dial: SocketAddr, identity: ServerIdentity) -> Result<Self, SecureError> {
         reject_zero_port(dial)?;
-        Ok(Self { dial, identity })
+        Ok(Self {
+            dial,
+            identity,
+            socks5: None,
+        })
+    }
+
+    /// Reaches the server through a SOCKS5 proxy instead of dialing it.
+    #[must_use]
+    pub fn with_socks5(mut self, route: crate::socks5::Route) -> Self {
+        self.socks5 = Some(route);
+        self
+    }
+
+    /// The SOCKS5 route, when the connection is proxied.
+    #[must_use]
+    pub const fn socks5(&self) -> Option<&crate::socks5::Route> {
+        self.socks5.as_ref()
     }
 
     /// The numeric destination a DoT connection is opened to.
@@ -211,6 +229,7 @@ pub struct DohEndpoint {
     service: Url,
     dial: SocketAddr,
     identity: ServerIdentity,
+    socks5: Option<crate::socks5::Route>,
 }
 
 impl DohEndpoint {
@@ -260,7 +279,21 @@ impl DohEndpoint {
             service,
             dial,
             identity,
+            socks5: None,
         })
+    }
+
+    /// Reaches the server through a SOCKS5 proxy instead of dialing it.
+    #[must_use]
+    pub fn with_socks5(mut self, route: crate::socks5::Route) -> Self {
+        self.socks5 = Some(route);
+        self
+    }
+
+    /// The SOCKS5 route, when the connection is proxied.
+    #[must_use]
+    pub const fn socks5(&self) -> Option<&crate::socks5::Route> {
+        self.socks5.as_ref()
     }
 
     /// The numeric destination a DoH connection is opened to.

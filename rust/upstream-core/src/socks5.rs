@@ -3,7 +3,7 @@
 //! It mirrors what the reference host gets from `golang.org/x/net/proxy`
 //! `SOCKS5(network, addr, nil, proxy.Direct)`: no authentication, and the
 //! target host is sent as a domain name (remote resolution) unless it is an IP
-//! literal. Rule downloads use it today; the `aliapi` upstream can reuse it.
+//! literal. Rule downloads and the `aliapi` TCP/TLS/HTTPS upstreams use it.
 //! Deadlines and cancellation belong to the caller (wrap the future).
 
 use std::fmt;
@@ -46,6 +46,57 @@ impl From<io::Error> for Socks5Error {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
+}
+
+/// How a TCP-based upstream reaches its server through a SOCKS5 proxy.
+///
+/// `domain` is the target host name sent to the proxy for remote resolution
+/// (the reference host does this when the upstream has no numeric `dial_addr`);
+/// without it the numeric dial address of the endpoint is sent.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Route {
+    proxy: std::sync::Arc<str>,
+    domain: Option<std::sync::Arc<str>>,
+}
+
+impl Route {
+    /// `proxy` is `host:port`; `domain` the optional remote-resolved target.
+    #[must_use]
+    pub fn new(proxy: &str, domain: Option<&str>) -> Self {
+        Self {
+            proxy: proxy.into(),
+            domain: domain.map(Into::into),
+        }
+    }
+
+    /// The proxy address (`host:port`).
+    #[must_use]
+    pub fn proxy(&self) -> &str {
+        &self.proxy
+    }
+
+    /// The target host name the proxy resolves, when one is configured.
+    #[must_use]
+    pub fn domain(&self) -> Option<&str> {
+        self.domain.as_deref()
+    }
+}
+
+/// Opens the TCP connection to `address`, directly or through `route`.
+pub(crate) async fn dial(
+    address: std::net::SocketAddr,
+    route: Option<&Route>,
+) -> io::Result<TcpStream> {
+    let Some(route) = route else {
+        return TcpStream::connect(address).await;
+    };
+    let host = route
+        .domain
+        .as_deref()
+        .map_or_else(|| address.ip().to_string(), str::to_owned);
+    connect(&route.proxy, &host, address.port())
+        .await
+        .map_err(io::Error::other)
 }
 
 /// Connects to `proxy` (`host:port`, resolved by the system resolver) and asks
@@ -201,6 +252,27 @@ mod tests {
             let (address, task) = proxy(vec![5, 0, 0, 1, 0, 0, 0, 0, 0, 0], 0).await;
             connect(&address, "10.0.0.1", 53).await.unwrap();
             assert_eq!(task.await.unwrap(), vec![5, 1, 0, 1, 10, 0, 0, 1, 0, 53]);
+        });
+    }
+
+    #[test]
+    fn a_route_sends_its_domain_or_the_numeric_address() {
+        runtime().block_on(async {
+            let target: std::net::SocketAddr = "192.0.2.7:853".parse().unwrap();
+            let (address, task) = proxy(vec![5, 0, 0, 1, 0, 0, 0, 0, 0, 0], 0).await;
+            let route = Route::new(&address, None);
+            dial(target, Some(&route)).await.unwrap();
+            assert_eq!(task.await.unwrap(), vec![5, 1, 0, 1, 192, 0, 2, 7, 3, 85]);
+            let (address, task) = proxy(vec![5, 0, 0, 1, 0, 0, 0, 0, 0, 0], 0).await;
+            let route = Route::new(&address, Some("dns.example"));
+            dial(target, Some(&route)).await.unwrap();
+            let mut expected = vec![5, 1, 0, 3, 11];
+            expected.extend_from_slice(b"dns.example");
+            expected.extend_from_slice(&853u16.to_be_bytes());
+            assert_eq!(task.await.unwrap(), expected);
+            // Without a route the address is dialed directly.
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            dial(listener.local_addr().unwrap(), None).await.unwrap();
         });
     }
 

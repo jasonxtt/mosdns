@@ -29,6 +29,7 @@ use crate::observer::{
     UpstreamDiagnosticBranch, UpstreamDiagnosticSelected, UpstreamDiagnostics,
     UpstreamMetricAttempt, UpstreamTransport,
 };
+use crate::rewrite::RewriteEnd;
 
 const DEFAULT_FUEL: u64 = 64;
 const SERVFAIL: u8 = 2;
@@ -1514,6 +1515,40 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     };
                     continue;
                 }
+                if let Some(rewrite) = config
+                    .local
+                    .rewrites
+                    .iter()
+                    .find(|rewrite| rewrite.executable == dispatch.executable())
+                {
+                    let outcome = match rewrite
+                        .runtime
+                        .run(
+                            machine.state_mut(),
+                            raw,
+                            request_deadline,
+                            &[&request_shutdown],
+                        )
+                        .await
+                    {
+                        RewriteEnd::NoMatch => ExecutorOutcome::Continue,
+                        RewriteEnd::Answered => {
+                            facts.set_response_source(ResponseSource::Local);
+                            ExecutorOutcome::Accept
+                        }
+                        RewriteEnd::Cancelled => return canceled_execution(facts),
+                    };
+                    step = match machine.resume(dispatch.executable(), Ok(outcome)) {
+                        Ok(step) => step,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    continue;
+                }
                 if let Some(policy) = config
                     .response_policies
                     .iter()
@@ -2210,6 +2245,47 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     };
                     continue;
                 }
+                if let Some(rewrite) = context
+                    .config
+                    .local
+                    .rewrites
+                    .iter()
+                    .find(|rewrite| rewrite.executable == dispatch.executable())
+                {
+                    let raw = context.raw();
+                    let outcome = match rewrite
+                        .runtime
+                        .run(
+                            machine.state_mut(),
+                            raw,
+                            context.deadline,
+                            &[&context.root_cancellation, &context.branch_cancellation],
+                        )
+                        .await
+                    {
+                        RewriteEnd::NoMatch => ExecutorOutcome::Continue,
+                        RewriteEnd::Answered => {
+                            source = None;
+                            if let Some(trace) = &context.trace {
+                                trace.borrow_mut().clear_selection();
+                            }
+                            ExecutorOutcome::Accept
+                        }
+                        RewriteEnd::Cancelled => {
+                            return BranchOutcome::failure(
+                                machine.state().clone(),
+                                ExecutionError::Cancelled,
+                            );
+                        }
+                    };
+                    step = match machine.resume(dispatch.executable(), Ok(outcome)) {
+                        Ok(step) => step,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                    continue;
+                }
                 if let Some(policy) = context
                     .config
                     .response_policies
@@ -2640,6 +2716,37 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                         SleepEnd::DeadlineReached => BranchOutcome::failure(
                             successor.state().clone(),
                             ExecutionError::BudgetExceeded,
+                        ),
+                    };
+                }
+                if let Some(rewrite) = context
+                    .config
+                    .local
+                    .rewrites
+                    .iter()
+                    .find(|rewrite| rewrite.executable == executable)
+                {
+                    let raw = context.raw();
+                    return match rewrite
+                        .runtime
+                        .run(
+                            successor.state_mut(),
+                            raw,
+                            context.deadline,
+                            &[&context.root_cancellation, &context.branch_cancellation],
+                        )
+                        .await
+                    {
+                        RewriteEnd::NoMatch => drive_branch(successor, context, source).await,
+                        RewriteEnd::Answered => {
+                            if let Some(trace) = &context.trace {
+                                trace.borrow_mut().clear_selection();
+                            }
+                            BranchOutcome::success(successor.state().clone(), None)
+                        }
+                        RewriteEnd::Cancelled => BranchOutcome::failure(
+                            successor.state().clone(),
+                            ExecutionError::Cancelled,
                         ),
                     };
                 }
@@ -5611,6 +5718,7 @@ plugins:
             fallbacks: Vec::new(),
             preferences: Vec::new(),
             sleeps: Vec::new(),
+            local: Default::default(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -5720,6 +5828,7 @@ plugins:
                 fallbacks: Vec::new(),
                 preferences: Vec::new(),
                 sleeps: Vec::new(),
+                local: Default::default(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -6270,6 +6379,7 @@ plugins:
             fallbacks: Vec::new(),
             preferences: Vec::new(),
             sleeps: Vec::new(),
+            local: Default::default(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -6392,6 +6502,7 @@ plugins:
                 fallbacks: Vec::new(),
                 preferences: Vec::new(),
                 sleeps: Vec::new(),
+                local: Default::default(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -6560,6 +6671,7 @@ plugins:
             fallbacks: Vec::new(),
             preferences: Vec::new(),
             sleeps: Vec::new(),
+            local: Default::default(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
