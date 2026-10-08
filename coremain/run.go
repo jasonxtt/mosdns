@@ -134,6 +134,10 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 		return nil, fmt.Errorf("recover interrupted binary update: %w", err)
 	}
 
+	if err := ensureContainerConfigInitialized(MainConfigBaseDir, sf.c); err != nil {
+		return nil, err
+	}
+
 	if MainConfigBaseDir != "" {
 		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
 			mlog.L().Warn("failed to sync special_groups config before loading main config",

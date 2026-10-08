@@ -583,7 +583,7 @@ async function saveSpecialGroup() {
   specialSaving.value = true
   resetMessage()
   try {
-    await postJSON('/api/v1/special-groups', {
+    const saved = await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
       name,
       listen_port: listenPort,
@@ -591,9 +591,10 @@ async function saveSpecialGroup() {
       upstream_sources: specialGroupSourceRows.value.map((source) => ({ ...source })),
       upstreams: specialGroupOwnedRows.value.map((item) => ({ ...item }))
     })
-    setSuccess('专属分流组已保存')
     closeSpecialGroupModal()
     await loadData()
+    const followup = String(saved?.message || '').trim()
+    setSuccess(followup ? `专属分流组已保存。${followup}` : '专属分流组已保存')
   } catch (error) {
     setError(`保存专属分流组失败: ${error.message}`)
   } finally {

@@ -1,19 +1,62 @@
-FROM golang:latest as builder
+FROM node:24-alpine AS webui-builder
+
+WORKDIR /src/webui-log
+COPY webui-log/package*.json ./
+RUN npm ci
+
+WORKDIR /src
+COPY . /src
+
+WORKDIR /src/webui-log
+ARG MOSDNS_ASSET_VERSION=""
+RUN set -eux; \
+    export MOSDNS_ASSET_VERSION; \
+    npm run build; \
+    npm run build:log1
+
+FROM golang:1.26 AS builder
 ARG CGO_ENABLED=0
 
-COPY ./ /root/src/
-WORKDIR /root/src/
+WORKDIR /src
+COPY . /src
+COPY --from=webui-builder /src/coremain/www/assets/vue-log /src/coremain/www/assets/vue-log
+COPY --from=webui-builder /src/coremain/www/assets/vue-log1 /src/coremain/www/assets/vue-log1
+COPY --from=webui-builder /src/coremain/www/log.html /src/coremain/www/log.html
+COPY --from=webui-builder /src/coremain/www/log1.html /src/coremain/www/log1.html
+
 ARG VERSION=""
 ARG BUILD_DATE=""
+ARG VCS_REF=""
 RUN set -eux; \
-    base=${VERSION:-$(git describe --tags --match 'v*' --abbrev=0 || echo dev)}; \
-    date=${BUILD_DATE:-$(date +%Y%m%d)}; \
-    sha=$(git rev-parse --short=7 HEAD || echo nogithash); \
-    v="$base-$date-$sha"; \
-    go build -ldflags "-s -w -X main.version=$v" -trimpath -o mosdns
+    v=${VERSION:-dev}; \
+    go build -ldflags "-s -w -X main.version=$v" -trimpath -o /out/mosdns
 
-FROM alpine:latest
+FROM alpine:3.22
 
-COPY --from=builder /root/src/mosdns /usr/bin/
+ARG VERSION=""
+ARG BUILD_DATE=""
+ARG VCS_REF=""
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates tzdata
+
+LABEL org.opencontainers.image.title="mosdns" \
+      org.opencontainers.image.description="mosdns container image for the maintained WebUI fork" \
+      org.opencontainers.image.source="https://github.com/jasonxtt/mosdns" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+ENV MOSDNS_CONTAINER_MODE=1 \
+    MOSDNS_CONTAINER_NETWORK_MODE=bridge \
+    MOSDNS_AUTO_INIT=1 \
+    MOSDNS_CONFIG_INIT_URL=https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip
+WORKDIR /cus/mosdns
+VOLUME ["/cus/mosdns"]
+
+COPY --from=builder /out/mosdns /usr/bin/mosdns
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 53/tcp 53/udp 9099/tcp
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["start", "-d", "/cus/mosdns", "-c", "/cus/mosdns/config_custom.yaml"]

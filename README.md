@@ -66,12 +66,14 @@ Docker Hub 镜像：[`jasonxtt/mosdns-t`](https://hub.docker.com/r/jasonxtt/mosd
 - 支持 `linux/amd64` 与 `linux/arm64`
 - 支持 bridge 网络和 Linux host 网络
 - 空配置目录首次启动时自动初始化默认配置
-- WebUI 配置包在线更新仍可使用
+- WebUI 可检查版本；手动配置包导出、远程覆盖和程序在线更新在容器内禁用
 - 程序升级通过拉取新镜像并重建容器完成，原有挂载配置不会丢失
 
 bridge 模式下，配置中的 `127.0.0.1` 指向容器自身，不是宿主机上的 sing-box / mihomo。伴生服务地址应填写容器可访问的服务名、宿主机地址或局域网地址。
 
-详细部署方式、Compose 示例和网络模式说明见：[Docker 容器化部署文档](https://github.com/jasonxtt/mosdns/blob/docker/docs/docker_deployment_zh.md)。
+Linux 与 Docker 共用 `main` 的核心代码和 WebUI。通用功能只需在主项目开发一次，正式 `vX.Y.Z` 标签分别触发 Linux 包与 Docker 多架构镜像发布，无需同步到 `docker` 分支。
+
+详细部署方式和发布配置见：[Docker 容器化部署文档](docs/docker_deployment_zh.md)。Compose 示例：[本地 bridge 构建](docker-compose.yml.example)、[Docker Hub 镜像](docker-compose.image.yml.example)、[Linux host 网络](docker-compose.host.yml.example)。
 
 ## OpenWrt / ImmortalWrt 部署
 

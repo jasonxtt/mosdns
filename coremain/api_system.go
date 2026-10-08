@@ -55,15 +55,18 @@ func handleGetWebUIPort(m *Mosdns) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("读取 WebUI 端口设置失败: %w", err))
 			return
 		}
-		if settings.Port > 0 {
+		changeSupported := webUIPortChangeSupported()
+		if changeSupported && settings.Port > 0 {
 			configuredPort = settings.Port
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"port":            configuredPort,
-			"active_port":     activePort,
-			"active_addr":     activeAddr,
-			"pending_restart": configuredPort != activePort,
+			"port":             configuredPort,
+			"active_port":      activePort,
+			"active_addr":      activeAddr,
+			"pending_restart":  configuredPort != activePort,
+			"change_supported": changeSupported,
+			"message":          webUIPortResponseMessage(changeSupported),
 		})
 	}
 }
@@ -73,6 +76,11 @@ func handleSetWebUIPort(m *Mosdns) http.HandlerFunc {
 		Port int `json:"port"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !webUIPortChangeSupported() {
+			writeError(w, http.StatusConflict, errors.New(containerWebUIPortMessage))
+			return
+		}
+
 		var body reqBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("无效请求: %w", err))
@@ -113,6 +121,13 @@ func handleSetWebUIPort(m *Mosdns) http.HandlerFunc {
 			"message":         "WebUI 端口已保存，重启后生效",
 		})
 	}
+}
+
+func webUIPortResponseMessage(changeSupported bool) string {
+	if changeSupported {
+		return ""
+	}
+	return containerWebUIPortMessage
 }
 
 func handleSelfRestart(m *Mosdns) http.HandlerFunc {
