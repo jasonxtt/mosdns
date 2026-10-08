@@ -47,8 +47,9 @@
 | 2 | 合并 `main`（v0.7.1 → v0.7.3；任务 `10-06-rust-merge-main-v0.7.3`）：**已完成（`a879755a`），已归档** | 真实 merge 提交；v0.7.3 新 UI 操作在原生下禁用+原因；契约漂移见 `validation-records/10-06-merge-main-v0.7.3/drift.md`，原生对齐归 M1-e |
 | 3 | M1-a1 规则 provider 查询侧（`3ea29ebf`）、M1-b2 请求内原语（`e75153db`）、M1-a2 规则源管理与热更新（`7a174484`）：**均已完成并归档** | `check` 直接缺口 86→16；剩余 `aliapi` 5、`domain_output` 8、`rewrite`/`webinfo`/`requery` 各 1 |
 | 3.1 | **原生内存优化（2026-10-08 提前至此）** | M1-a2 后热重建 RSS 稳定约 350 MB（启动 114 MB；Go 生产进程约 236 MB；生产机 957 MB）。先测量内存去向与分配器行为，再优化数据结构与重建峰值，在同一生产快照上与 Go 对比；结果作为 5D RSS 预算依据。拆为 Mem-1（测量 + 分配器/重建峰值）与 Mem-2（数据结构压缩，按 Mem-1 结论）。**Mem-1 已完成并提交**：glibc 保留 + `malloc_trim`、固定 mmap 阈值、进程关闭 THP、重建临时数据借用规则串、旧代在 DNS 线程外释放；同一快照启动稳态 114→37 MB、启动峰值 201→95 MB、6 次重建后 365→40 MB、重建峰值约 310–375→120–133 MB、重建 0.8→0.35 s，DNS 结果不变（Go v0.7.3：启动 121–144、重建后 170–174、空闲 300 s 后 113–117 MB）。记录 `validation-records/10-08-mem-1/`。**Mem-2 建议范围**：紧凑 domain trie（matcher 21→约 6 MiB，稳态约 −13 MB）+ 按 provider 分组的构建输入（峰值约 −30 MiB），顺带移交 provider 规则串（−7 MiB）。**用户决定（2026-10-08）：Mem-2 不立即做，挪到 5D 阶段按 RSS 预算需要再定；下一步 M1-b1。** |
-| 3.2 | M1-b1 上游与网络类（Opus） | 独立 `aliapi`（复用 M1-a2 的 SOCKS5 客户端）、`rewrite`（向 `dns:` 发查询）、`webinfo`；顺带修正能力 `unsupported_features` 中已过时的 `srs_geodata`/`remote_download`/`auto_update` |
-| 3.3 | M1-c 输出与再查询（Opus） | `domain_output`（8）、`requery`（1） |
+| 3.2 | M1-b1 上游与网络类：**已完成（`1f249571`），已归档** | `aliapi`（含 SOCKS5）、`rewrite`、`webinfo`、能力标签；缓存放置规则按固定/客户端推导 ECS 修正（M1-g）；Go 覆盖文件不应用（由 M1-f 取代）；`check` gaps 16→9、globals 0 |
+| 3.3 | M1-c1 `domain_output`（8）→ M1-c2 `requery`（1） | 拆为两个任务以控制单次规模；完成后 `check` 对 `config_all` 无缺口，可进行首次整链运行 |
+| 3.35 | M1-f 类型化设置层与原生配置包 `config_rust` | 具名类型化对象 + `$tag` 引用、`webinfo/settings.json`、类型化 API 与热生效、两套 WebUI 页面改接、`config_rust` 及与 `config_all` 的差异说明（用户 2026-10-08 决定，见 `m1-gap-list.md` M1-f） |
 | 3.4 | M1-e special_groups v0.7.3 对齐 | 原生托管生成器输出 schema-4 结构（共享 `sequence_special`），支持专用组上游引用/私有上游/无效引用排除；排在 M1-a/b/c 之后（生产当前无专用组） |
 | 4 | 5D 整机验收 | 单核、实际负载；先补齐 Go 基线、冻结延迟与 RSS 阈值，以 `config_all` 做正式对照、恢复、长稳 |
 | 5 | Phase 6 + 生产切换/回滚方案 | 退役脚手架，纯 Rust 构建/运行；配置包升级（C15）与回滚步骤明确；`mos-test` 验证后经用户确认替换 `mosdns` |
