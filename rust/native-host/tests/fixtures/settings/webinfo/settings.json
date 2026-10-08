@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "proxies": {
+    "main_proxy": {
+      "addr": "192.0.2.9:7890"
+    }
+  },
+  "upstreams": {
+    "domestic": [
+      {
+        "tag": "ali",
+        "enabled": true,
+        "protocol": "udp",
+        "addr": "223.6.6.6"
+      },
+      {
+        "tag": "off",
+        "enabled": false,
+        "protocol": "udp",
+        "addr": "114.114.114.114"
+      }
+    ]
+  },
+  "domain_generation": {
+    "plugins": {
+      "my_realiplist": {
+        "enabled": false
+      }
+    }
+  }
+}

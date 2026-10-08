@@ -36,9 +36,11 @@ use crate::webinfo::WebInfo;
 pub(crate) mod aliapi;
 mod check;
 pub(crate) mod providers;
+pub(crate) mod settings;
 pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config, check_config_in};
 pub(crate) use providers::presentation_name;
 pub use providers::{DomainMapperConfig, MapperOutcome};
+pub use settings::EffectiveItem;
 
 /// The diagnostic threshold of the `log.level` section; ordered from the most
 /// to the least verbose.
@@ -538,10 +540,29 @@ impl DomainSetConfig {
     }
 }
 
+/// The file-backed inputs of one compilation, kept so the same configuration
+/// can be compiled again with other settings.
+#[derive(Clone, Debug)]
+pub(crate) struct ReloadSource {
+    pub(crate) config_path: PathBuf,
+    pub(crate) base_dir: PathBuf,
+    pub(crate) root_dir: PathBuf,
+}
+
 /// The typed, validated graph consumed by pre-I/O host assembly.
 pub struct CompiledConfig {
     /// Captured top-level configuration base for startup-only UI mounts.
     pub(crate) ui_base: Option<PathBuf>,
+    /// The typed settings this generation was compiled with and the report of
+    /// every settable item's effective value and source.
+    pub(crate) settings: settings::Settings,
+    pub(crate) settings_report: Vec<EffectiveItem>,
+    /// The upstream list of every `aliapi` in the UI shape.
+    pub(crate) effective_upstreams: BTreeMap<String, Vec<settings::UpstreamEntry>>,
+    /// What the YAML alone gives for every settable item.
+    pub(crate) yaml_defaults: settings::YamlDefaults,
+    /// How to compile the same configuration again (hot apply of settings).
+    pub(crate) reload: Option<ReloadSource>,
     /// Runtime generation qualifies snapshot-local executable/metric IDs.
     pub(crate) generation: u64,
     /// Per-cache transitive wire-policy dependency fingerprints. `None`
@@ -606,6 +627,13 @@ pub struct ResponseIpRuleConfig {
 }
 
 impl CompiledConfig {
+    /// Every settable item with its effective value and source.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn settings_report(&self) -> &[EffectiveItem] {
+        &self.settings_report
+    }
+
     /// The rule-source management state (tests drive and observe it).
     #[doc(hidden)]
     #[must_use]
@@ -787,12 +815,63 @@ fn compile_yaml_with_base_and_origin(
     root_dir: &Path,
     origin: Option<&Path>,
 ) -> Result<CompiledConfig, ConfigError> {
+    let settings = match origin {
+        Some(_) => settings::Settings::load(root_dir)?,
+        None => settings::Settings::default(),
+    };
+    compile_with_settings(yaml, base_dir, root_dir, origin, &settings)
+}
+
+/// Compiles with explicit typed settings (hot apply passes the candidate's).
+fn compile_with_settings(
+    yaml: &str,
+    base_dir: &Path,
+    root_dir: &Path,
+    origin: Option<&Path>,
+    settings: &settings::Settings,
+) -> Result<CompiledConfig, ConfigError> {
     let raw = parse_yaml(yaml)?;
-    let mut compiled = compile_raw(&raw, base_dir, root_dir, None, None, None, origin)?;
+    let mut compiled = compile_raw(&raw, base_dir, root_dir, None, None, None, origin, settings)?;
     if !base_dir.as_os_str().is_empty() {
         compiled.ui_base = Some(absolute_base(base_dir)?);
     }
+    if let Some(origin) = origin {
+        compiled.reload = Some(ReloadSource {
+            config_path: origin.to_path_buf(),
+            base_dir: base_dir.to_path_buf(),
+            root_dir: root_dir.to_path_buf(),
+        });
+    }
     Ok(compiled)
+}
+
+/// Compiles `reload`'s configuration again with other settings.
+pub(crate) fn recompile(
+    reload: &ReloadSource,
+    settings: &settings::Settings,
+) -> Result<CompiledConfig, ConfigError> {
+    let yaml = load_yaml(&reload.config_path)?;
+    let mut compiled = compile_with_settings(
+        &yaml,
+        &reload.base_dir,
+        &reload.root_dir,
+        Some(&reload.config_path),
+        settings,
+    )?;
+    compiled.ui_base = Some(absolute_base(&reload.base_dir)?);
+    Ok(compiled)
+}
+
+/// `start`'s file-backed compile: the configuration file `path` with `base_dir`
+/// for includes and `root_dir` for plugin paths; the typed settings under
+/// `root_dir` apply.
+pub(crate) fn compile_file_with_roots(
+    yaml: &str,
+    path: &Path,
+    base_dir: &Path,
+    root_dir: &Path,
+) -> Result<CompiledConfig, ConfigError> {
+    compile_yaml_with_base_and_origin(yaml, base_dir, root_dir, Some(path))
 }
 
 fn absolute_base(base: &Path) -> Result<PathBuf, ConfigError> {
@@ -812,6 +891,7 @@ pub(crate) fn compile_candidate_yaml(
     files: &crate::special_groups::StagedFiles,
     inputs: &mut crate::special_groups::CandidateInputSet,
 ) -> Result<CompiledConfig, ConfigError> {
+    let settings = settings::Settings::load(root_dir)?;
     compile_raw(
         &parse_yaml(yaml)?,
         base_dir,
@@ -820,6 +900,7 @@ pub(crate) fn compile_candidate_yaml(
         Some(files),
         Some(inputs),
         None,
+        &settings,
     )
 }
 
@@ -853,6 +934,7 @@ fn managed_opt_in(raw: &RawValue) -> Result<bool, ConfigError> {
 
 const ROOT_FIELDS: &[&str] = &["log", "include", "plugins", "api", "native_management"];
 
+#[allow(clippy::too_many_arguments)]
 fn compile_raw(
     raw: &RawValue,
     base_dir: &Path,
@@ -861,6 +943,7 @@ fn compile_raw(
     staged: Option<&crate::special_groups::StagedFiles>,
     mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     config_origin: Option<&Path>,
+    settings: &settings::Settings,
 ) -> Result<CompiledConfig, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
     root.reject_unknown(ROOT_FIELDS, "$")?;
@@ -919,6 +1002,7 @@ fn compile_raw(
     let sources = CompileSources {
         config_origin,
         include_paths: &include_paths,
+        settings,
     };
     finish_compile(log, api, definitions, managed, staged, inputs, &sources)
 }
@@ -1019,6 +1103,8 @@ fn finish_compile(
     inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     sources: &CompileSources<'_>,
 ) -> Result<CompiledConfig, ConfigError> {
+    let mut definitions = definitions;
+    let applied = settings::apply(&mut definitions, sources.settings, managed.is_some())?;
     let dependency_definitions = definitions.clone();
     let mut compiled = compile_definitions(
         log,
@@ -1081,6 +1167,10 @@ fn finish_compile(
         compiled.managed_profile = Some(profile);
     }
     compiled.cache_dependencies = cache_dependency_fingerprints(&compiled, &dependency_definitions);
+    compiled.settings = sources.settings.clone();
+    compiled.settings_report = applied.items;
+    compiled.effective_upstreams = applied.upstreams;
+    compiled.yaml_defaults = applied.defaults;
     Ok(compiled)
 }
 
@@ -1930,6 +2020,8 @@ enum PluginKind {
     WebInfo,
     DomainOutput,
     Requery,
+    Socks5Proxy,
+    EcsAddress,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -2012,6 +2104,8 @@ struct CompileSources<'a> {
     config_origin: Option<&'a Path>,
     /// Every top-level `include` target resolved against the base.
     include_paths: &'a [PathBuf],
+    /// The typed settings to overlay on the definitions.
+    settings: &'a settings::Settings,
 }
 
 fn compile_definitions(
@@ -2050,6 +2144,8 @@ fn compile_definitions(
             "webinfo" => PluginKind::WebInfo,
             "domain_output" => PluginKind::DomainOutput,
             "requery" => PluginKind::Requery,
+            "socks5_proxy" => PluginKind::Socks5Proxy,
+            "ecs_address" => PluginKind::EcsAddress,
             other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
@@ -2341,6 +2437,8 @@ fn compile_definitions(
                 known_artifacts.extend(files);
                 rewrites.push((plugin.tag.clone(), Rc::new(rewrite)));
             }
+            // Validated and resolved by the settings overlay before compiling.
+            PluginKind::Socks5Proxy | PluginKind::EcsAddress => {}
             PluginKind::Requery => {
                 let (requery, file) = compile_requery(plugin)?;
                 known_artifacts.push(file);
@@ -2882,6 +2980,11 @@ fn compile_definitions(
     }
     let compiled = CompiledConfig {
         ui_base: None,
+        settings: settings::Settings::default(),
+        settings_report: Vec::new(),
+        effective_upstreams: BTreeMap::new(),
+        yaml_defaults: settings::YamlDefaults::default(),
+        reload: None,
         generation: 0,
         cache_dependencies: Vec::new(),
         response_identities,
@@ -3400,6 +3503,7 @@ fn compile_domain_output(plugin: &RawPlugin) -> Result<PendingOutput, ConfigErro
             "dump_interval",
             "domain_set_url",
             "enable_flags",
+            "enabled",
             "target_mapper",
             "target_mark",
             "target_tag",
@@ -3456,6 +3560,10 @@ fn compile_domain_output(plugin: &RawPlugin) -> Result<PendingOutput, ConfigErro
             dump_interval,
             domain_set_url: text("domain_set_url")?,
             enable_flags,
+            enabled: match args.get("enabled") {
+                None | Some(RawValue::Null) => true,
+                Some(value) => expect_bool(value, &format!("{path}.enabled"))?,
+            },
             max_keys: crate::domain_output::MAX_KEYS,
         },
         target,
@@ -3631,7 +3739,9 @@ fn resolve_policy_target_name(
             | PluginKind::SdSetLight
             | PluginKind::AdguardRule
             | PluginKind::WebInfo
-            | PluginKind::Requery,
+            | PluginKind::Requery
+            | PluginKind::Socks5Proxy
+            | PluginKind::EcsAddress,
         ) => Err(ConfigError::new(
             path,
             format!("`${tag}` is not executable"),
@@ -4699,7 +4809,9 @@ fn compile_exec_item(
                     | PluginKind::SdSetLight
                     | PluginKind::AdguardRule
                     | PluginKind::WebInfo
-                    | PluginKind::Requery,
+                    | PluginKind::Requery
+                    | PluginKind::Socks5Proxy
+                    | PluginKind::EcsAddress,
                 ) => Err(ConfigError::new(
                     path,
                     format!("`{name}` is not executable"),

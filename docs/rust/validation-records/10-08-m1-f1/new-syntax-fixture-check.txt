@@ -1,0 +1,9 @@
+EFFECTIVE socks5_proxy main_proxy addr=192.0.2.9:7890 source=settings
+EFFECTIVE ecs_address client_ecs addr=2001:db8:ec5::1 source=yaml
+EFFECTIVE aliapi domestic upstreams=ali=udp://223.6.6.6 source=settings
+EFFECTIVE aliapi foreign upstreams=cf=tcp://1.1.1.1, g=tls://dns.google, direct=udp://9.9.9.9 source=yaml
+EFFECTIVE domain_output my_realiplist enabled=false source=settings
+SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
+NOTE first-error-per-definition; rerun after fixing to see further gaps
+NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues
+SUMMARY gaps=0 cascades=0 globals=0 definitions=9

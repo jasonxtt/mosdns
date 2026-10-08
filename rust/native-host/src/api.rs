@@ -1332,6 +1332,14 @@ async fn plugin_response(
     None
 }
 
+/// Whether upstream edits go to the typed settings: a file-backed
+/// configuration without `native_management` that has `aliapi` groups.
+fn settings_upstreams(config: &CompiledConfig) -> bool {
+    config.managed_profile.is_none()
+        && config.reload.is_some()
+        && !config.effective_upstreams.is_empty()
+}
+
 /// The reply of [`local_plugin_request`].
 type LocalReply<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<(u16, Vec<u8>)>> + 'a>>;
@@ -2550,6 +2558,20 @@ async fn dispatch(
     if let Some(response) = plugin_response(config, cache, request).await {
         return response;
     }
+    let path = request
+        .target
+        .split_once('?')
+        .map_or(request.target.as_str(), |(path, _)| path);
+    if let Some(reply) =
+        crate::settings_api::handle(control, config, &request.method, path, &request.body).await
+    {
+        return Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+            headers: reply.headers,
+        };
+    }
     match route(&request.target) {
         Route::Capabilities => {
             if request.method != "GET" {
@@ -2970,12 +2992,26 @@ async fn dispatch(
         },
         Route::Upstream(route) => match route {
             UpstreamRoute::Tags if request.method == "GET" => {
-                let tags = config
-                    .forward_definitions
-                    .iter()
-                    .map(|definition| definition.tag.as_str())
-                    .collect::<Vec<_>>();
+                // Without `native_management` the settable groups are the `aliapi` ones.
+                let tags = if settings_upstreams(config) {
+                    config
+                        .effective_upstreams
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                } else {
+                    config
+                        .forward_definitions
+                        .iter()
+                        .map(|definition| definition.tag.as_str())
+                        .collect::<Vec<_>>()
+                };
                 Response::json(&tags)
+            }
+            UpstreamRoute::Config
+                if request.method == "GET" && config.managed_profile.is_none() =>
+            {
+                Response::json(&crate::settings_api::upstream_config(config))
             }
             UpstreamRoute::Config if request.method == "GET" => {
                 let overrides = config
@@ -2998,12 +3034,16 @@ async fn dispatch(
                 else {
                     return Response::error(404, "upstream tag not found");
                 };
-                let override_config = config
-                    .managed_profile
-                    .as_ref()
-                    .and_then(|profile| profile.overrides.get(tag.as_ref()))
-                    .cloned()
-                    .unwrap_or_default();
+                let override_config = if settings_upstreams(config) {
+                    crate::settings_api::override_config(config, tag.as_ref())
+                } else {
+                    config
+                        .managed_profile
+                        .as_ref()
+                        .and_then(|profile| profile.overrides.get(tag.as_ref()))
+                        .cloned()
+                        .unwrap_or_default()
+                };
                 let mut runtime_targets = Vec::new();
                 if let Some(snapshot) = runtime_snapshot {
                     for invocation in config
@@ -3023,6 +3063,18 @@ async fn dispatch(
                     "override_config": override_config,
                     "runtime_targets": runtime_targets,
                 }))
+            }
+            UpstreamRoute::Config if request.method == "POST" && settings_upstreams(config) => {
+                let Some(control) = control else {
+                    return Response::error(503, "runtime control is unavailable");
+                };
+                let reply = crate::settings_api::post_upstream(control, &request.body).await;
+                Response {
+                    status: reply.status,
+                    content_type: reply.content_type,
+                    body: reply.body,
+                    headers: reply.headers,
+                }
             }
             UpstreamRoute::Config if request.method == "POST" => {
                 let mutation: UpstreamConfigMutation = match serde_json::from_slice(&request.body) {
@@ -3423,6 +3475,10 @@ fn ui_operations(
 ) -> serde_json::Value {
     use crate::rule_sources::Kind;
     let managed = config.managed_profile.is_some();
+    // Without `native_management`, upstream edits go to the typed settings of
+    // the `aliapi` groups.
+    let settings_upstreams =
+        !managed && config.reload.is_some() && !config.effective_upstreams.is_empty();
     let local = config.domain_sets.iter().any(|set| set.managed.is_some())
         || config.rule_sources.has_postable_light()
         || config
@@ -3467,7 +3523,11 @@ fn ui_operations(
             false,
             "专用组引用上游与组私有上游尚未在原生运行时实现",
         ),
-        ("upstreams.manage", managed, "上游编辑需要原生托管配置"),
+        (
+            "upstreams.manage",
+            managed || settings_upstreams,
+            "上游编辑需要原生托管配置或带 aliapi 的文件配置",
+        ),
         (
             "rules.diversion",
             diversion,
@@ -3509,6 +3569,27 @@ fn ui_operations(
             "reason": if requery { None } else { Some("当前配置没有 requery 插件") }
         }),
     );
+    // The WebUI's overrides page edits the one `socks5_proxy` / `ecs_address`
+    // object; its domain-generation switches edit the `domain_output` ones.
+    let overrides = crate::settings_api::overrides_available(config);
+    let generation = crate::settings_api::generation_available(config);
+    for (id, supported, reason) in [
+        (
+            "system.global_overrides",
+            overrides,
+            "当前配置没有 socks5_proxy 或 ecs_address 对象",
+        ),
+        (
+            "system.domain_generation",
+            generation,
+            "当前配置没有 domain_output 插件",
+        ),
+    ] {
+        operations.insert(
+            id.to_owned(),
+            serde_json::json!({"supported": supported, "reason": if supported { None } else { Some(reason) }}),
+        );
+    }
     let remembered = config
         .local
         .domain_outputs
@@ -3528,8 +3609,6 @@ fn ui_operations(
         "system.webui_port",
         "system.config_management",
         "system.update",
-        "system.domain_generation",
-        "system.global_overrides",
         "metrics.process",
     ] {
         operations.insert(
@@ -3545,7 +3624,10 @@ fn capabilities(
     runtime_snapshot: Option<&crate::runtime_snapshot::RuntimeSnapshot>,
 ) -> serde_json::Value {
     let enabled = config.managed_profile.is_some();
-    let protocols = if enabled {
+    // Upstream edits are available with the managed profile or, without it,
+    // on a file-backed configuration that has `aliapi` groups.
+    let upstream_edit = enabled || settings_upstreams(config);
+    let protocols = if upstream_edit {
         vec!["udp", "tcp", "dot", "doh"]
     } else {
         Vec::new()
@@ -3603,7 +3685,7 @@ fn capabilities(
         "endpoints": {
             "capabilities_get": true,
             "special_groups": {"get": true, "post": enabled, "delete": enabled},
-            "upstream": {"tags_get": true, "config_get": true, "runtime_get": true, "config_post": enabled},
+            "upstream": {"tags_get": true, "config_get": true, "runtime_get": true, "config_post": upstream_edit},
             "diversion_sources": {"list_get": enabled, "put": enabled, "delete": enabled},
             "manual_rules": {"show_get": true, "save_get": true, "post": enabled},
             "cache_inventory_get": true,

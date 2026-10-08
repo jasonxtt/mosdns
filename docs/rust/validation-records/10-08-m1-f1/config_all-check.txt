@@ -1,0 +1,17 @@
+EFFECTIVE domain_output my_sv4list enabled=true source=yaml
+EFFECTIVE domain_output top_domains enabled=true source=yaml
+EFFECTIVE domain_output my_realiplist enabled=true source=yaml
+EFFECTIVE domain_output my_fakeiplist enabled=true source=yaml
+EFFECTIVE domain_output my_nov6list enabled=true source=yaml
+EFFECTIVE domain_output my_nov4list enabled=true source=yaml
+EFFECTIVE domain_output my_nodenov6list enabled=true source=yaml
+EFFECTIVE domain_output my_nodenov4list enabled=true source=yaml
+EFFECTIVE aliapi domestic upstreams=223.5.5.5, 223.6.6.6, 114.114.114.114 source=yaml
+EFFECTIVE aliapi foreign upstreams=https://1.1.1.1/dns-query, https://8.8.8.8/dns-query source=yaml
+EFFECTIVE aliapi foreignecs upstreams=https://8.8.8.8/dns-query source=yaml
+EFFECTIVE aliapi nocnfake upstreams=udp://127.0.0.1:7874 source=yaml
+EFFECTIVE aliapi cnfake upstreams=udp://127.0.0.1:1053 source=yaml
+SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
+NOTE first-error-per-definition; rerun after fixing to see further gaps
+NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues
+SUMMARY gaps=0 cascades=0 globals=0 definitions=126

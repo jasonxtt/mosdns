@@ -78,6 +78,10 @@ struct Control {
     store_io_gate: Arc<tokio::sync::Semaphore>,
     retirement_gate: tokio::sync::Mutex<()>,
     admitting: Cell<bool>,
+    /// Set while only management is paused (a settings apply): DNS keeps
+    /// being admitted, because the apply changes nothing a query could
+    /// observe half way (each query keeps the generation it was admitted to).
+    management_only: Cell<bool>,
     started: Cell<bool>,
     active_management: Cell<usize>,
     management_drained: Notify,
@@ -177,6 +181,83 @@ pub struct PreparedSnapshot {
     added_metric_labels: Vec<String>,
     periodic: Option<crate::cache::PreparedPeriodic>,
     retiring_bindings: Option<BTreeSet<BindingKey>>,
+}
+
+/// What a settings apply writes at its commit point: the cache dumps the new
+/// generation invalidates (emptied first, so a crash can only lose cache), then
+/// the settings file.
+pub(crate) struct FileCommit {
+    path: std::path::PathBuf,
+    /// The settings file's bytes when the candidate was built (`None`: absent).
+    expected: Option<Vec<u8>>,
+    bytes: Vec<u8>,
+    cache_dumps: Vec<std::path::PathBuf>,
+}
+
+impl FileCommit {
+    fn write(self) -> Result<(), ApplyFailure> {
+        let current = match std::fs::read(&self.path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(ApplyFailure::Failed(error.to_string())),
+        };
+        if current != self.expected {
+            return Err(ApplyFailure::Conflict(self.path));
+        }
+        if !self.cache_dumps.is_empty() {
+            let empty = crate::cache_dump::encode(&[])
+                .map_err(|error| ApplyFailure::Failed(error.to_string()))?;
+            for dump in &self.cache_dumps {
+                write_durably(dump, &empty).map_err(|error| {
+                    ApplyFailure::Failed(format!("{}: {error}", dump.display()))
+                })?;
+            }
+        }
+        write_durably(&self.path, &self.bytes)
+            .map_err(|error| ApplyFailure::Failed(format!("{}: {error}", self.path.display())))
+    }
+}
+
+/// Replaces `path` so that after a crash it holds either the old or the new
+/// bytes. The renamed file is the commit point: everything that can fail
+/// happens before it (the temporary file is flushed, a directory created for
+/// the first save is made durable in its parent), and flushing the directory
+/// entry afterwards is best effort, because a failure there cannot be undone
+/// and the running generation must agree with the file that now holds the
+/// new bytes.
+fn write_durably(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    if !parent.exists() {
+        std::fs::create_dir_all(parent)?;
+        if let Some(grandparent) = parent
+            .parent()
+            .filter(|grandparent| !grandparent.as_os_str().is_empty())
+        {
+            std::fs::File::open(grandparent)?.sync_all()?;
+        }
+    }
+    let mut name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("path has no file name"))?
+        .to_os_string();
+    name.push(format!(".tmp-{}", std::process::id()));
+    let temporary = parent.join(name);
+    let written = (|| {
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+        return written;
+    }
+    let _ = std::fs::File::open(parent).and_then(|directory| directory.sync_all());
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -298,6 +379,7 @@ impl RuntimeControl {
             store_io_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             retirement_gate: tokio::sync::Mutex::new(()),
             admitting: Cell::new(true),
+            management_only: Cell::new(false),
             started: Cell::new(false),
             active_management: Cell::new(0),
             management_drained: Notify::new(),
@@ -428,8 +510,17 @@ impl RuntimeControl {
         Ok(())
     }
 
+    /// Closes management admission only; queries keep being admitted. Used by
+    /// the apply of a settings change (no durable transaction around queries).
+    pub(crate) fn pause_management(&self) -> Result<(), AssemblyError> {
+        self.pause_admission()?;
+        self.0.management_only.set(true);
+        Ok(())
+    }
+
     /// Reopens admission after an ordinary rollback.
     pub(crate) fn resume_admission(&self) {
+        self.0.management_only.set(false);
         if !self.0.closed.get()
             && !self.0.recovery_required.get()
             && !self
@@ -523,6 +614,8 @@ impl RuntimeControl {
         let current = self.0.current.borrow().clone();
         match (&current.config.managed_profile, &config.managed_profile) {
             (Some(previous), Some(next)) if previous.base_dir == next.base_dir => {}
+            // Without `native_management` the opt-in must stay absent (a settings apply).
+            (None, None) => {}
             _ => {
                 return Err(AssemblyError::Runtime(
                     "managed opt-in and canonical root must remain frozen".into(),
@@ -825,7 +918,15 @@ impl RuntimeControl {
         original: ApplyFailure,
         prepared: PreparedSnapshot,
         cache_gate: crate::cache::PolicyTransactionGate,
+        managed: bool,
     ) -> ApplyFailure {
+        if !managed {
+            // Nothing durable was staged: only admission needs to resume.
+            drop(prepared);
+            drop(cache_gate);
+            self.resume_admission();
+            return original;
+        }
         let recovery = self.with_managed_store(|store| store.recover()).await;
         drop(prepared);
         drop(cache_gate);
@@ -863,12 +964,67 @@ impl RuntimeControl {
         &self,
         candidate: crate::transaction::CompiledCandidate,
     ) -> Result<u64, ApplyFailure> {
-        let (config, mut persistence) = candidate.into_parts();
+        let (config, persistence) = candidate.into_parts();
+        self.apply_config(config, Some(persistence), None).await
+    }
+
+    /// Recompiles the running configuration with `settings` and publishes it as
+    /// the next generation; the settings file is written at the commit point
+    /// (see `docs/rust/contracts/native-settings.md`). Nothing changes on failure.
+    pub(crate) async fn apply_settings(
+        &self,
+        settings: crate::config::settings::Settings,
+    ) -> Result<u64, ApplyFailure> {
+        let (reload, managed) = {
+            let current = self.0.current.borrow();
+            (
+                current.config.reload.clone(),
+                current.config.managed_profile.is_some(),
+            )
+        };
+        if managed {
+            return Err(ApplyFailure::Invalid(
+                "settings cannot be changed through the API in native_management mode".into(),
+            ));
+        }
+        let Some(reload) = reload else {
+            return Err(ApplyFailure::Invalid(
+                "this configuration was not loaded from a file".into(),
+            ));
+        };
+        let config = crate::config::recompile(&reload, &settings)
+            .map_err(|error| ApplyFailure::Invalid(error.to_string()))?;
+        let path = crate::config::settings::Settings::path(&reload.root_dir);
+        // The bytes the candidate was built against; the commit re-checks them.
+        let expected = std::fs::read(&path).ok();
+        let commit = FileCommit {
+            path,
+            expected,
+            bytes: settings.to_bytes(),
+            cache_dumps: Vec::new(),
+        };
+        self.apply_config(config, None, Some(commit)).await
+    }
+
+    /// The shared whole-generation publication path. Exactly one of `managed`
+    /// (journaled managed-store commit) and `files` (plain files written at the
+    /// commit point) is given.
+    async fn apply_config(
+        &self,
+        config: crate::config::CompiledConfig,
+        mut managed: Option<crate::transaction::CandidatePersistence>,
+        mut files: Option<FileCommit>,
+    ) -> Result<u64, ApplyFailure> {
         let cache_dump_replacements = {
             let current = self.0.current.borrow();
             CacheCatalog::invalidated_dump_paths(&current.config, &config)
         };
-        persistence.replace_cache_dumps(cache_dump_replacements);
+        if let Some(persistence) = &mut managed {
+            persistence.replace_cache_dumps(cache_dump_replacements);
+        } else if let Some(commit) = &mut files {
+            commit.cache_dumps = cache_dump_replacements;
+        }
+        let is_managed = managed.is_some();
         let old_generation = self.generation();
         let new_generation = old_generation
             .checked_add(1)
@@ -883,7 +1039,12 @@ impl RuntimeControl {
         self.validate_install(&prepared)
             .map_err(|error| ApplyFailure::Busy(error.to_string()))?;
 
-        if let Err(error) = self.pause_admission() {
+        let paused = if is_managed {
+            self.pause_admission()
+        } else {
+            self.pause_management()
+        };
+        if let Err(error) = paused {
             drop(prepared);
             return Err(ApplyFailure::Busy(error.to_string()));
         }
@@ -909,6 +1070,8 @@ impl RuntimeControl {
             .expect("prepared graph")
             .switches
             .rebase_carried_values(&previous.switches);
+        // The old generation must be freed by retirement, not by the end of this function.
+        drop(previous);
         // Pending switch owners are admitted only now, after every accepted
         // mutation of the previous view drained, so a late old-owner write
         // cannot be overwritten by a stale preparation-time read.
@@ -946,38 +1109,58 @@ impl RuntimeControl {
             self.resume_admission();
             return Err(ApplyFailure::Shutdown);
         }
-        let stage = self
-            .with_managed_store(move |store| {
-                store.prepare_candidate(old_generation, new_generation, &persistence)
-            })
-            .await;
-        if let Err(error) = stage {
-            return Err(self
-                .abort_precommit(Self::map_transaction_error(error), prepared, cache_gate)
-                .await);
+        drop(old_cache);
+        if let Some(persistence) = managed.take() {
+            let stage = self
+                .with_managed_store(move |store| {
+                    store.prepare_candidate(old_generation, new_generation, &persistence)
+                })
+                .await;
+            if let Err(error) = stage {
+                return Err(self
+                    .abort_precommit(
+                        Self::map_transaction_error(error),
+                        prepared,
+                        cache_gate,
+                        true,
+                    )
+                    .await);
+            }
         }
         if self.shutdown_requested() {
             return Err(self
-                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate)
+                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate, is_managed)
                 .await);
         }
 
-        let replacement = self
-            .with_managed_store(|store| store.replace_prepared())
-            .await;
-        if let Err(error) = replacement {
-            return Err(self
-                .abort_precommit(Self::map_transaction_error(error), prepared, cache_gate)
-                .await);
+        if is_managed {
+            let replacement = self
+                .with_managed_store(|store| store.replace_prepared())
+                .await;
+            if let Err(error) = replacement {
+                return Err(self
+                    .abort_precommit(
+                        Self::map_transaction_error(error),
+                        prepared,
+                        cache_gate,
+                        true,
+                    )
+                    .await);
+            }
         }
         if self.shutdown_requested() {
             return Err(self
-                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate)
+                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate, is_managed)
                 .await);
         }
         if let Err(error) = self.validate_install(&prepared) {
             return Err(self
-                .abort_precommit(ApplyFailure::Busy(error.to_string()), prepared, cache_gate)
+                .abort_precommit(
+                    ApplyFailure::Busy(error.to_string()),
+                    prepared,
+                    cache_gate,
+                    is_managed,
+                )
                 .await);
         }
 
@@ -990,25 +1173,41 @@ impl RuntimeControl {
         }
         if self.shutdown_requested() {
             return Err(self
-                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate)
+                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate, is_managed)
                 .await);
         }
 
-        let marker = self
-            .with_managed_store(|store| store.mark_committed())
-            .await;
-        if let Err(error) = marker {
-            let failure = Self::map_transaction_error(error);
-            if let ApplyFailure::RecoveryRequired(reason) = failure {
-                self.enter_recovery_required();
-                self.stop_host();
-                drop(cache_gate);
-                drop(prepared);
-                return Err(ApplyFailure::RecoveryRequired(format!(
-                    "commit marker outcome is ambiguous: {reason}"
-                )));
+        if is_managed {
+            let marker = self
+                .with_managed_store(|store| store.mark_committed())
+                .await;
+            if let Err(error) = marker {
+                let failure = Self::map_transaction_error(error);
+                if let ApplyFailure::RecoveryRequired(reason) = failure {
+                    self.enter_recovery_required();
+                    self.stop_host();
+                    drop(cache_gate);
+                    drop(prepared);
+                    return Err(ApplyFailure::RecoveryRequired(format!(
+                        "commit marker outcome is ambiguous: {reason}"
+                    )));
+                }
+                return Err(self
+                    .abort_precommit(failure, prepared, cache_gate, true)
+                    .await);
             }
-            return Err(self.abort_precommit(failure, prepared, cache_gate).await);
+        } else if let Some(commit) = files.take() {
+            // The commit point of a settings apply: the invalidated cache dumps,
+            // then the settings file. A failure here publishes nothing.
+            let outcome = tokio::task::spawn_blocking(move || commit.write())
+                .await
+                .map_err(|error| ApplyFailure::Failed(error.to_string()))
+                .and_then(|outcome| outcome);
+            if let Err(failure) = outcome {
+                return Err(self
+                    .abort_precommit(failure, prepared, cache_gate, false)
+                    .await);
+            }
         }
 
         #[cfg(test)]
@@ -1058,20 +1257,36 @@ impl RuntimeControl {
                 reason: error.to_string(),
             });
         }
+        // The retired generation is freed once the last query admitted to it has
+        // finished; hand its pages back right away and again after those queries
+        // are certainly done (Mem-1).
+        let _ = crate::rule_sources::on_build_thread(crate::memory::release_free_memory).await;
+        let shutdown = self.shutdown_token();
+        tokio::task::spawn_local(async move {
+            tokio::select! {
+                biased;
+                () = wait_for_shutdown(shutdown) => {}
+                () = tokio::time::sleep(std::time::Duration::from_secs(8)) => {
+                    let _ = crate::rule_sources::on_build_thread(crate::memory::release_free_memory).await;
+                }
+            }
+        });
 
         #[cfg(test)]
         coordinator_crash_boundary("retirement");
 
-        if let Err(error) = self
-            .with_managed_store(|store| store.finish_retirement())
-            .await
-        {
-            self.enter_recovery_required();
-            self.stop_host();
-            return Err(ApplyFailure::CommittedCleanup {
-                generation,
-                reason: error.to_string(),
-            });
+        if is_managed {
+            if let Err(error) = self
+                .with_managed_store(|store| store.finish_retirement())
+                .await
+            {
+                self.enter_recovery_required();
+                self.stop_host();
+                return Err(ApplyFailure::CommittedCleanup {
+                    generation,
+                    reason: error.to_string(),
+                });
+            }
         }
 
         #[cfg(test)]
@@ -1125,7 +1340,10 @@ impl RuntimeControl {
         kind: ListenerKind,
         address: std::net::SocketAddr,
     ) -> Option<AdmittedSnapshot> {
-        if !self.admission_open() {
+        let dns_open = (self.0.admitting.get() || self.0.management_only.get())
+            && !self.0.closed.get()
+            && !self.0.recovery_required.get();
+        if !dns_open {
             return None;
         }
         let snapshot = self.0.current.borrow().clone();
@@ -2657,5 +2875,49 @@ plugins:
             }
         });
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod file_commit_tests {
+    use super::{ApplyFailure, FileCommit};
+
+    fn commit(dir: &std::path::Path, expected: Option<&[u8]>) -> FileCommit {
+        FileCommit {
+            path: dir.join("webinfo/settings.json"),
+            expected: expected.map(<[u8]>::to_vec),
+            bytes: b"new".to_vec(),
+            cache_dumps: vec![dir.join("cache/a.gz")],
+        }
+    }
+
+    #[test]
+    fn the_commit_writes_dumps_and_settings_only_when_the_file_is_unchanged() {
+        let dir = std::env::temp_dir().join(format!("file-commit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Absent as expected: the dumps are emptied, then the file appears.
+        commit(&dir, None).write().unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("webinfo/settings.json")).unwrap(),
+            b"new"
+        );
+        assert!(dir.join("cache/a.gz").exists());
+        // The file changed after the candidate was built: nothing is written.
+        std::fs::write(dir.join("webinfo/settings.json"), b"edited").unwrap();
+        std::fs::remove_file(dir.join("cache/a.gz")).unwrap();
+        let outcome = commit(&dir, Some(b"new")).write();
+        assert!(matches!(outcome, Err(ApplyFailure::Conflict(_))));
+        assert_eq!(
+            std::fs::read(dir.join("webinfo/settings.json")).unwrap(),
+            b"edited"
+        );
+        assert!(!dir.join("cache/a.gz").exists());
+        // Matching bytes: written.
+        commit(&dir, Some(b"edited")).write().unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("webinfo/settings.json")).unwrap(),
+            b"new"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

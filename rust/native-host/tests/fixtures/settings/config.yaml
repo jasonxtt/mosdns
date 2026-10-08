@@ -1,0 +1,43 @@
+# A configuration in the typed-settings syntax: named objects and $tag references.
+log: {level: error}
+api: {http: "127.0.0.1:19899"}
+plugins:
+  - tag: main_proxy
+    type: socks5_proxy
+    args: {addr: "192.0.2.1:7890"}
+  - tag: client_ecs
+    type: ecs_address
+    args: {addr: "2001:db8:ec5::1"}
+  - tag: domestic
+    type: aliapi
+    args:
+      upstreams:
+        - {tag: ali, addr: "udp://223.5.5.5"}
+  - tag: foreign
+    type: aliapi
+    args:
+      proxy: $main_proxy
+      concurrent: 2
+      upstreams:
+        - {tag: cf, addr: "tcp://1.1.1.1", use_proxy: true}
+        - {tag: g, addr: "tls://dns.google", dial_addr: "8.8.8.8", use_proxy: true}
+        - {tag: direct, addr: "udp://9.9.9.9"}
+  - tag: geosite
+    type: sd_set_light
+    args: {proxy: $main_proxy, local_config: srs/geosite.json}
+  - tag: my_realiplist
+    type: domain_output
+    args: {file_stat: gen/realiplist.txt, file_rule: gen/realiprule.txt, dump_interval: 3600}
+  - tag: cache_all
+    type: cache
+    args: {}
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $my_realiplist
+      - exec: $cache_all
+      - exec: ecs $client_ecs
+      - exec: $foreign
+  - tag: listener
+    type: udp_server
+    args: {entry: entry, listen: "127.0.0.1:19853"}

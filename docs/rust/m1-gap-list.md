@@ -85,6 +85,11 @@ M1-0 之前的读法如下：
 `check` 与只读 API 可见并标注来源；修改经整代发布热生效，失败保留旧配置。范围另含 `domain_output` 的生成开关（取代 Go 的 `domain_generation_settings.json`，M1-c1 留有钩子）。首次替换使用由 `config_all` 改写的原生配置包
 `config_rust`（维护在 `file` 仓库，附与 `config_all` 的差异说明），见重写方案第 6 节。
 
+**M1-f1 已完成后端（`10-08-rust-native-m1-f1-typed-settings`）**：`socks5_proxy`/`ecs_address` 对象与 `$tag` 引用、`aliapi` 的 `proxy`/`use_proxy`、规则源 `proxy`、quick `ecs $ref`、
+`domain_output` 的 `enabled`；`webinfo/settings.json`（版本 1，只存差异）；生效配置函数、`check` 的 `EFFECTIVE` 输出与 `GET /api/v1/settings/effective`；设置变更经整代发布热生效（失败保留旧配置）；
+`/api/v1/upstream/{tags,config,runtime}`、`/api/v1/overrides`、`/api/v1/domain-generation` 在非托管模式下由设置层提供。契约见 [native-settings](contracts/native-settings.md)，记录见
+[validation-records/10-08-m1-f1](validation-records/10-08-m1-f1/README.md)。**仍待 M1-f2**：`config_rust` 配置包、WebUI 页面接线（重启提示等）、首次整链运行；托管模式下的上游覆盖留给 M1-e。
+
 ### M1-g 缓存放置规则与 ECS（**M1-b1 任务已处理**；被 M1-b1 暴露，用户 2026-10-08 决定）
 
 原先 `cache_placement.rs` 拒绝“`cache` 的后继可能执行 `ecs_handler`”，`config_all` 的 `cache_all`/`cache_node` 之后经 `fallback` 到达写死
