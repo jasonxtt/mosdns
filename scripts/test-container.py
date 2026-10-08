@@ -131,6 +131,19 @@ plugins:
                 server_command += ["--rosetta"]
             created.append(server)
             engine(*server_command, "python:3.13-alpine", "-m", "http.server", "8000", "--directory", "/fixtures")
+            # Docker returns from a detached run before Python has opened its listening socket.
+            engine("exec", server, "python", "-c", """
+import time, urllib.request
+for attempt in range(60):
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:8000/config_all.zip', timeout=1):
+            pass
+        break
+    except OSError:
+        time.sleep(0.5)
+else:
+    raise SystemExit('Fixture config server did not become ready')
+""")
             server_ip = engine("exec", server, "hostname", "-i").stdout.strip().split()[0]
             empty_data = data / "auto-init"
             empty_data.mkdir()
