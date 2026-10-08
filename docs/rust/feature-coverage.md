@@ -128,7 +128,7 @@ C08/C11 整行仍未完成；capture、别名、上游管理/指标、兼容 UI/
 | P26 | `cache` | [plugin/executable/cache](../../plugin/executable/cache/) | cache-core/Phase 1；5A bounded W2 native-host/cache adapter；dump/ABI 局部契约 | 5A 子集 -> 5B；5C API/持久化 |
 | P27 | `cname_remover` | [plugin/executable/cname_remover](../../plugin/executable/cname_remover/) | 无逐插件 native 验收证据 | 5B |
 | P28 | `debug_print` | [plugin/executable/debug_print](../../plugin/executable/debug_print/) | 无逐插件 native 验收证据 | 5B |
-| P29 | `domain_output` | [plugin/executable/domain_output](../../plugin/executable/domain_output/) | 无逐插件 native 验收证据 | 5B |
+| P29 | `domain_output` | [plugin/executable/domain_output](../../plugin/executable/domain_output/) | M1-c1 原生接入与实测见下表；整链运行与 5D 待验收 | 5B |
 | P30 | `drop_resp` | [plugin/executable/drop_resp](../../plugin/executable/drop_resp/) | 无逐插件 native 验收证据 | 5B |
 | P31 | `prefer_ipv4`, `prefer_ipv6` | [plugin/executable/dual_selector](../../plugin/executable/dual_selector/) | 无逐插件 native 验收证据 | 5B |
 | P32 | `ecs_handler` | [plugin/executable/ecs_handler](../../plugin/executable/ecs_handler/) | 无逐插件 native 验收证据 | 5B |
@@ -317,7 +317,7 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 
 | ID | 条目 | M1 标注 | 已归档证据 |
 | --- | --- | --- | --- |
-| P01 | `domain_mapper` | 查询侧已有原生接入（M1-a1）：`config_all` 的 2 个实例 `check` 通过，生产规则集 157 万条差分与参考一致（`full:` 大小写为已批准偏差）；provider 变化后热重建（M1-a2：blocking 侧构建、整代发布、失败保留旧代）；`QuickAdd`/`domain_output` 复用归 M1-c | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md)、[M1-a2 记录](validation-records/10-07-m1-a2-rule-management/README.md)、[契约](contracts/native-rule-providers.md) |
+| P01 | `domain_mapper` | 查询侧已有原生接入（M1-a1）：`config_all` 的 2 个实例 `check` 通过，生产规则集 157 万条差分与参考一致（`full:` 大小写为已批准偏差）；provider 变化后热重建（M1-a2：blocking 侧构建、整代发布、失败保留旧代）；`QuickAdd` 由 `domain_output`（M1-c1）经覆盖层使用，不触发整代重建 | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md)、[M1-a2 记录](validation-records/10-07-m1-a2-rule-management/README.md)、[契约](contracts/native-rule-providers.md) |
 | P02 | `domain_set` | 已有原生接入；M1-0 起 `config_all` 的 2 个实例（`gen/*.txt`）按配置根目录解析，`check` 通过 | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md)、[domain_set 管理](validation-records/09-28-rust-native-domain-set-management/prd.md) |
 | P03 | `domain_set_light` | 加载侧（M1-a1）与 show/save/post、mapper 热更新（M1-a2）已原生接入；两个 Vue shell 本地规则页浏览器冒烟通过 | [M1-a1 记录](validation-records/10-07-m1-a1-rule-providers/README.md)、[M1-a2 记录](validation-records/10-07-m1-a2-rule-management/README.md) |
 | P04 | `ip_set` | 已有原生接入（`config_all` 用法 `check` 通过）；文件路径基准见 §3.1 | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
@@ -345,7 +345,7 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | P26 | `cache` | 已有原生接入（`config_all` 用法 `check` 通过）；`dump_file` 路径基准见 §3.1 | [cache 生命周期](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) |
 | P27 | `cname_remover` | 已有原生接入（`config_all` 用法 `check` 通过）（quick） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
 | P28 | `debug_print` | 替换后 |  |
-| P29 | `domain_output` | M1；`check` 报缺口（M1-c，8 个） |  |
+| P29 | `domain_output` | 已有原生接入（M1-c1）：统计与文件格式与参考互通（双向实测）、定时/早写/关闭保存、进程内或 HTTP 发布、`target_mapper` 即时生效（覆盖层，不随整代重建丢失）、`/show` `/save` `/flush`；`/restartall` 返回 501；生成开关待设置层（M1-f）；`config_all` 的 8 处 `check` 通过 | [M1-c1 记录](validation-records/10-08-m1-c1/README.md)、[契约](contracts/native-domain-output.md) |
 | P30 | `drop_resp` | 已有原生接入（M1-b2）：仅清除当前响应（含审计里的上游来源/选中端点）；`config_all` 的 10 处 `check` 通过 | [M1-b2 记录](validation-records/10-07-m1-b2-primitives/README.md) |
 | P31 | `prefer_ipv4`, `prefer_ipv6` | 已有原生接入（`config_all` 用法 `check` 通过）（`config_all` 只用 `prefer_ipv4`） | [fallback/地址偏好](validation-records/10-01-rust-native-query-fallback-address-preference/) |
 | P32 | `ecs_handler` | 替换后（插件类型未使用；quick `ecs` 见 L03） | [client/ECS](validation-records/10-02-rust-native-client-context-ecs/) |

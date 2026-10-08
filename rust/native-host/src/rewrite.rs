@@ -381,6 +381,7 @@ impl Rewrite {
             status: 200,
             content_type: Some(TEXT),
             body: self.current().lines.join("\n").into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -417,6 +418,7 @@ impl Rewrite {
                 status: 200,
                 content_type: Some(TEXT),
                 body: format!("rewrite rules replaced with {count} entries").into_bytes(),
+                headers: Vec::new(),
             },
             Ok(Err(reason)) | Err(reason) => error(
                 500,
@@ -437,6 +439,7 @@ fn error(status: u16, message: &str) -> Reply {
         status,
         content_type: Some(TEXT),
         body: format!("{message}\n").into_bytes(),
+        headers: Vec::new(),
     }
 }
 

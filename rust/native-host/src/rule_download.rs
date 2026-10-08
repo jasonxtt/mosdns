@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use http_body_util::{BodyExt, Empty, Limited};
+use http_body_util::{BodyExt, Empty, Full, Limited};
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
 use mosdns_upstream_core::TransportCancellation;
@@ -188,6 +188,103 @@ async fn tls(
         .connect(name, tcp)
         .await
         .map_err(|error| format!("tls handshake with {host}: {error}"))
+}
+
+/// POSTs `body` as JSON to `url` (HTTP or HTTPS, no redirects, no proxy). The
+/// reply is read and dropped; only a transport failure is an error, as with
+/// the reference publisher, which ignores the response status.
+///
+/// # Errors
+///
+/// A message for the log: bad URL, connect/TLS failure, the deadline, or shutdown.
+pub(crate) async fn post_json(
+    url: &str,
+    body: &[u8],
+    timeout: Duration,
+    roots: Option<Arc<rustls::RootCertStore>>,
+    cancel: &TransportCancellation,
+) -> Result<(), String> {
+    tokio::select! {
+        biased;
+        () = cancel.cancelled() => Err("canceled by shutdown".to_owned()),
+        result = tokio::time::timeout(timeout, post_once(url, body, roots)) => match result {
+            Ok(result) => result,
+            Err(_) => Err(format!("timed out after {}s", timeout.as_secs())),
+        },
+    }
+}
+
+async fn post_once(
+    url: &str,
+    body: &[u8],
+    roots: Option<Arc<rustls::RootCertStore>>,
+) -> Result<(), String> {
+    let url = url::Url::parse(url).map_err(|error| format!("invalid url: {error}"))?;
+    let https = match url.scheme() {
+        "http" => false,
+        "https" => true,
+        other => return Err(format!("unsupported url scheme `{other}`")),
+    };
+    let host = url
+        .host_str()
+        .ok_or_else(|| "url has no host".to_owned())?
+        .trim_matches(['[', ']'])
+        .to_owned();
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "url has no port".to_owned())?;
+    let tcp = TcpStream::connect((host.as_str(), port))
+        .await
+        .map_err(|error| format!("connect {host}:{port}: {error}"))?;
+    let io: Box<dyn Io> = if https {
+        Box::new(tls(tcp, &host, roots).await?)
+    } else {
+        Box::new(tcp)
+    };
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(io))
+        .await
+        .map_err(|error| format!("http handshake: {error}"))?;
+    let target = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_owned(),
+    };
+    let authority = match url.port() {
+        Some(port) => format!("{}:{port}", url.host_str().unwrap_or_default()),
+        None => url.host_str().unwrap_or_default().to_owned(),
+    };
+    let request = hyper::Request::builder()
+        .method(hyper::Method::POST)
+        .uri(target)
+        .header(hyper::header::HOST, authority)
+        .header(hyper::header::USER_AGENT, "Go-http-client/1.1")
+        .header(hyper::header::CONTENT_TYPE, "application/json")
+        .body(Full::new(Bytes::copy_from_slice(body)))
+        .map_err(|error| format!("build request: {error}"))?;
+    let exchange = async {
+        let response = sender
+            .send_request(request)
+            .await
+            .map_err(|error| format!("http request: {error}"))?;
+        // Drained and dropped; a body over the limit only ends the read.
+        let _ = Limited::new(response.into_body(), 1024 * 1024)
+            .collect()
+            .await;
+        Ok(())
+    };
+    tokio::pin!(exchange);
+    tokio::pin!(connection);
+    let mut connection_done = false;
+    loop {
+        tokio::select! {
+            result = &mut exchange => return result,
+            outcome = &mut connection, if !connection_done => {
+                connection_done = true;
+                if let Err(error) = outcome {
+                    return Err(format!("http connection: {error}"));
+                }
+            }
+        }
+    }
 }
 
 /// The system trust store, loaded once per process.

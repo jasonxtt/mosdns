@@ -446,6 +446,7 @@ struct Response {
     status: u16,
     content_type: Option<&'static str>,
     body: Vec<u8>,
+    headers: Vec<(&'static str, String)>,
 }
 
 struct FallibleJsonWriter {
@@ -472,6 +473,7 @@ impl Response {
             status,
             content_type: None,
             body: Vec::new(),
+            headers: Vec::new(),
         }
     }
 
@@ -481,6 +483,7 @@ impl Response {
             status,
             content_type: Some("text/plain; charset=utf-8"),
             body: format!("{message}\n").into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -489,6 +492,7 @@ impl Response {
             status: 200,
             content_type: Some("text/plain; charset=utf-8"),
             body: body.into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -497,6 +501,7 @@ impl Response {
             status: 200,
             content_type: None,
             body: body.as_bytes().to_vec(),
+            headers: Vec::new(),
         }
     }
 
@@ -507,6 +512,7 @@ impl Response {
             status: 200,
             content_type: Some("application/json"),
             body,
+            headers: Vec::new(),
         }
     }
 
@@ -521,6 +527,7 @@ impl Response {
             status: 200,
             content_type: Some("application/json"),
             body: serde_json::to_vec(value).expect("small API response serializes"),
+            headers: Vec::new(),
         }
     }
 
@@ -531,6 +538,7 @@ impl Response {
             status: 200,
             content_type: Some("application/json"),
             body: writer.body,
+            headers: Vec::new(),
         })
     }
 
@@ -925,6 +933,9 @@ async fn write_response<W: AsyncWrite + Unpin>(
     if let Some(content_type) = response.content_type {
         head.push_str(&format!("Content-Type: {content_type}\r\n"));
     }
+    for (name, value) in &response.headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
     head.push_str(&format!(
         "Content-Length: {}\r\nConnection: close\r\n\r\n",
         response.body.len()
@@ -1272,8 +1283,9 @@ fn request_mutates_managed_state(request: &Request) -> bool {
     }
 }
 
-/// The HTTP surface of `webinfo` (`GET`/`PUT` on `/plugins/{tag}`) and
-/// `rewrite` (`GET /show`, `POST /post`); `None` when no such plugin owns the
+/// The HTTP surface of `webinfo` (`GET`/`PUT` on `/plugins/{tag}`),
+/// `rewrite` (`GET /show`, `POST /post`) and `domain_output` (`GET /show`,
+/// `/save`, `/flush`, `/restartall`); `None` when no such plugin owns the
 /// path.
 async fn local_plugin_reply(
     config: &CompiledConfig,
@@ -1290,12 +1302,26 @@ async fn local_plugin_reply(
         status: 404,
         content_type: Some("text/plain; charset=utf-8"),
         body: b"404 page not found\n".to_vec(),
+        headers: Vec::new(),
     };
     let not_allowed = || crate::rule_sources::Reply {
         status: 405,
         content_type: None,
         body: Vec::new(),
+        headers: Vec::new(),
     };
+    if let Some(output) = config
+        .local
+        .domain_outputs
+        .iter()
+        .find(|output| output.tag == tag.as_ref())
+    {
+        let query = request
+            .target
+            .split_once('?')
+            .map_or("", |(_, query)| query);
+        return Some(output.runtime.handle(&request.method, action, query).await);
+    }
     if let Some(webinfo) = config
         .local
         .webinfos
@@ -2425,6 +2451,7 @@ async fn dispatch(
                 status: reply.status,
                 content_type: reply.content_type,
                 body: reply.body,
+                headers: reply.headers,
             };
         }
     }
@@ -2433,6 +2460,7 @@ async fn dispatch(
             status: reply.status,
             content_type: reply.content_type,
             body: reply.body,
+            headers: reply.headers,
         };
     }
     match route(&request.target) {
@@ -2492,6 +2520,7 @@ async fn dispatch(
                 status: 200,
                 content_type: Some("text/plain; version=0.0.4; charset=utf-8"),
                 body: text.into_bytes(),
+                headers: Vec::new(),
             }
         }
         Route::Plugin { tag, action }
@@ -3401,10 +3430,21 @@ fn ui_operations(
             "reason": if aliases { None } else { Some("当前配置没有标签为 clientname 的 webinfo 插件") }
         }),
     );
+    let remembered = config
+        .local
+        .domain_outputs
+        .iter()
+        .any(|output| output.tag.starts_with("my_") || output.tag == "top_domains");
+    operations.insert(
+        "lists.remembered".to_owned(),
+        serde_json::json!({
+            "supported": remembered,
+            "reason": if remembered { None } else { Some("当前配置没有 my_* 或 top_domains 的 domain_output 插件") }
+        }),
+    );
     for id in [
         "capture.logs",
         "cache.requery",
-        "lists.remembered",
         "appearance.server",
         "system.restart",
         "system.webui_port",
@@ -3543,6 +3583,7 @@ async fn dispatch_cache(store: &NativeCacheAdapter, action: &str, request: &Requ
                 status: 200,
                 content_type: Some("application/octet-stream"),
                 body,
+                headers: Vec::new(),
             },
             Err(error) => Response::error(500, &error.to_string()),
         },

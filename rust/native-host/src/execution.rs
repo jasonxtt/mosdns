@@ -1515,6 +1515,26 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     };
                     continue;
                 }
+                if let Some(output) = config
+                    .local
+                    .domain_outputs
+                    .iter()
+                    .find(|output| output.executable == dispatch.executable())
+                {
+                    output.runtime.record(raw, &machine.state().query.question);
+                    step = match machine
+                        .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                    {
+                        Ok(step) => step,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    continue;
+                }
                 if let Some(rewrite) = config
                     .local
                     .rewrites
@@ -2245,6 +2265,26 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     };
                     continue;
                 }
+                if let Some(output) = context
+                    .config
+                    .local
+                    .domain_outputs
+                    .iter()
+                    .find(|output| output.executable == dispatch.executable())
+                {
+                    output
+                        .runtime
+                        .record(context.raw(), &machine.state().query.question);
+                    step = match machine
+                        .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                    {
+                        Ok(step) => step,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                    continue;
+                }
                 if let Some(rewrite) = context
                     .config
                     .local
@@ -2718,6 +2758,18 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                             ExecutionError::BudgetExceeded,
                         ),
                     };
+                }
+                if let Some(output) = context
+                    .config
+                    .local
+                    .domain_outputs
+                    .iter()
+                    .find(|output| output.executable == executable)
+                {
+                    output
+                        .runtime
+                        .record(context.raw(), &successor.state().query.question);
+                    return drive_branch(successor, context, source).await;
                 }
                 if let Some(rewrite) = context
                     .config

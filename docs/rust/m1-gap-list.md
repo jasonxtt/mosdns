@@ -82,7 +82,7 @@ M1-0 之前的读法如下：
 `upstream_overrides.json`、`config_overrides.json` 与通用 `replacements`。WebUI 可调整的值改为配置中的具名类型化对象
 （如 `socks5_proxy`、`ecs_address`），由上游条目、规则源等用 `$tag` 显式引用（如 `proxy: $main_proxy`）；WebUI 通过类型化 API
 修改，只把与 YAML 默认值不同的部分写入一个带版本号的 `webinfo/settings.json`（按 tag）。生效配置 = YAML + 设置，由一个函数计算，
-`check` 与只读 API 可见并标注来源；修改经整代发布热生效，失败保留旧配置。首次替换使用由 `config_all` 改写的原生配置包
+`check` 与只读 API 可见并标注来源；修改经整代发布热生效，失败保留旧配置。范围另含 `domain_output` 的生成开关（取代 Go 的 `domain_generation_settings.json`，M1-c1 留有钩子）。首次替换使用由 `config_all` 改写的原生配置包
 `config_rust`（维护在 `file` 仓库，附与 `config_all` 的差异说明），见重写方案第 6 节。
 
 ### M1-g 缓存放置规则与 ECS（**M1-b1 任务已处理**；被 M1-b1 暴露，用户 2026-10-08 决定）
@@ -94,9 +94,11 @@ M1-0 之前的读法如下：
 
 ### M1-c 输出与再查询
 
+**M1-c1 完成后**（`10-08-rust-native-m1-c1-domain-output`）：`SUMMARY gaps=1 cascades=0 globals=0`（`config_all` 与生产快照逐字节相同），唯一剩余缺口是 `requery`（M1-c2）；`domain_output` 的 8 个缺口及其 30 个连带错误全部消失。记录见 [validation-records/10-08-m1-c1](validation-records/10-08-m1-c1/README.md)。
+
 | 缺口 | 数量 | 说明 |
 | --- | --- | --- |
-| 插件类型 `domain_output` | 8 | |
+| 插件类型 `domain_output` | 8 | **M1-c1 已关闭**（统计、文件互通、发布、`target_mapper` 即时生效、API；见 [契约](contracts/native-domain-output.md)） |
 | 插件类型 `requery` | 1 | |
 
 ### M1-d 配置加载与 listener（新增，原 M1 表未列；**M1-0 已全部关闭**）

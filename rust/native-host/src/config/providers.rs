@@ -1010,9 +1010,99 @@ fn adguard_line(raw: &str) -> Option<(bool, String)> {
 pub struct DomainMapperConfig {
     pub tag: String,
     pub(crate) matcher: Rc<crate::rule_sources::Live<ValuedDomainMatcher>>,
+    /// Names injected by `domain_output` (`target_mapper`). It is not part of
+    /// a matcher generation: a rebuild neither clears nor reads it.
+    pub(crate) hot: Rc<HotOverlay>,
     default_mark: u8,
     default_ctx_mark: u32,
     default_tag: String,
+}
+
+/// Exact-name additions to a `domain_mapper`, visible to the next query
+/// without rebuilding the matcher (the reference `QuickAdd`). Each
+/// `domain_output` owns one layer (its mark and tag are fixed), so it can drop
+/// what it added; a name found in several layers gets all their marks and
+/// tags, merged with whatever the matcher says about it, hot values first.
+#[derive(Default)]
+pub(crate) struct HotOverlay {
+    layers: std::cell::RefCell<Vec<Rc<HotLayer>>>,
+}
+
+/// The names one `domain_output` injected with its fixed mark and tag.
+pub(crate) struct HotLayer {
+    /// Fast-flag bit `mark` (none for mark 0), as in [`MapperOutcome::fast_flags`].
+    flags: u64,
+    tag: String,
+    names: std::cell::RefCell<std::collections::HashSet<Box<str>>>,
+}
+
+impl HotOverlay {
+    /// A new layer that adds fast mark `mark` (0 adds none) and `tag`.
+    pub(crate) fn layer(&self, mark: u8, tag: &str) -> Rc<HotLayer> {
+        let layer = Rc::new(HotLayer {
+            flags: if (1..64).contains(&mark) {
+                1 << mark
+            } else {
+                0
+            },
+            tag: tag.to_owned(),
+            names: std::cell::RefCell::default(),
+        });
+        self.layers.borrow_mut().push(Rc::clone(&layer));
+        layer
+    }
+
+    /// The flags and tags of a presentation-form name (compared in ASCII lower case).
+    pub(crate) fn lookup(&self, name: &str) -> Option<(u64, String)> {
+        let layers = self.layers.borrow();
+        if layers.iter().all(|layer| layer.names.borrow().is_empty()) {
+            return None;
+        }
+        let lower = name.to_ascii_lowercase();
+        let (mut flags, mut tags, mut hit) = (0, String::new(), false);
+        for layer in layers.iter() {
+            if layer.names.borrow().contains(lower.as_str()) {
+                hit = true;
+                flags |= layer.flags;
+                tags = append_joined(&tags, &layer.tag);
+            }
+        }
+        hit.then_some((flags, tags))
+    }
+}
+
+impl HotLayer {
+    /// Adds `name`, a lower-case presentation name with or without its
+    /// trailing dot.
+    pub(crate) fn add(&self, name: &str) {
+        let key = name.strip_suffix('.').unwrap_or(name);
+        let mut full = String::with_capacity(key.len() + 1);
+        full.push_str(key);
+        full.push('.');
+        self.names.borrow_mut().insert(full.into_boxed_str());
+    }
+
+    /// Forgets every name (and returns the memory).
+    pub(crate) fn clear(&self) {
+        *self.names.borrow_mut() = std::collections::HashSet::new();
+    }
+}
+
+/// The reference `appendJoinedValue`: the `|`-separated parts of `value` that
+/// `joined` does not have yet, in order.
+pub(crate) fn append_joined(joined: &str, value: &str) -> String {
+    let mut out = joined.to_owned();
+    for part in value.split('|') {
+        let part = part.trim();
+        if part.is_empty() || out.split('|').any(|have| have.trim() == part) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('|');
+        }
+        out.push_str(part);
+    }
+    out
 }
 
 /// The query name in DNS presentation form, which is what the reference host
@@ -1085,15 +1175,31 @@ impl DomainMapperConfig {
     #[must_use]
     pub fn evaluate(&self, name: Option<&str>) -> MapperOutcome {
         let matcher = self.matcher.get();
+        let hot = name.and_then(|name| self.hot.lookup(name));
         if let Some(result) = name.and_then(|name| matcher.r#match(name)) {
             // Rule mark `m` is stored as bit `m - 1` of the result mask and
             // set as fast flag `m`.
-            return MapperOutcome {
+            let mut outcome = MapperOutcome {
                 fast_flags: result.fast_marks << 1,
                 ctx_marks: result.ctx_marks,
                 domain_set: (!result.joined_tags.is_empty()).then_some(result.joined_tags),
                 matched_rule_source: (!result.joined_sources.is_empty())
                     .then_some(result.joined_sources),
+                matched: true,
+            };
+            if let Some((flags, tags)) = hot {
+                outcome.fast_flags |= flags;
+                let merged = append_joined(&tags, outcome.domain_set.as_deref().unwrap_or(""));
+                outcome.domain_set = (!merged.is_empty()).then_some(merged);
+            }
+            return outcome;
+        }
+        if let Some((flags, tags)) = hot {
+            return MapperOutcome {
+                fast_flags: flags,
+                ctx_marks: Vec::new(),
+                domain_set: (!tags.is_empty()).then_some(tags),
+                matched_rule_source: None,
                 matched: true,
             };
         }
@@ -1310,6 +1416,7 @@ impl MapperSpec {
         DomainMapperConfig {
             tag: self.tag.clone(),
             matcher: Rc::new(crate::rule_sources::Live::new(matcher)),
+            hot: Rc::new(HotOverlay::default()),
             default_mark: self.default_mark,
             default_ctx_mark: self.default_ctx_mark,
             default_tag: self.default_tag.clone(),

@@ -53,12 +53,14 @@ impl WebInfo {
                 status: 200,
                 content_type: Some(JSON_UTF8),
                 body: encode_line(&self.data.borrow()),
+                headers: Vec::new(),
             },
             "PUT" => self.put(body).await,
             _ => Reply {
                 status: 405,
                 content_type: None,
                 body: Vec::new(),
+                headers: Vec::new(),
             },
         }
     }
@@ -85,6 +87,7 @@ impl WebInfo {
             status: 200,
             content_type: Some(JSON_UTF8),
             body: encode_line(&data),
+            headers: Vec::new(),
         };
         *self.data.borrow_mut() = data;
         reply
@@ -96,6 +99,7 @@ fn json_error(status: u16, message: &str) -> Reply {
         status,
         content_type: Some(JSON_UTF8),
         body: encode_line(&serde_json::json!({ "error": message })),
+        headers: Vec::new(),
     }
 }
 
