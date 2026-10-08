@@ -10,6 +10,7 @@ pub mod quic_reuse;
 pub mod resolver;
 mod reuse;
 pub mod secure;
+pub mod socks5;
 mod tcp;
 mod udp;
 

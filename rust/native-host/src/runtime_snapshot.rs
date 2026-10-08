@@ -533,6 +533,10 @@ impl RuntimeControl {
             .generation
             .checked_add(1)
             .ok_or_else(|| AssemblyError::Runtime("snapshot generation exhausted".into()))?;
+        config.rule_sources.configure(
+            current.options.tls_roots.clone(),
+            current.options.rule_timing.clone(),
+        );
         let config = Rc::new(config);
         let forwards = Rc::new(
             ForwardCatalog::from_compiled_reusing(
@@ -736,6 +740,10 @@ impl RuntimeControl {
         let previous = self.0.current.replace(next);
         let live = self.0.current.borrow().clone();
         previous.cache.fence_exclusive_to(&live.cache);
+        // The retired view stops writing rule sources before the new view
+        // admits anything; both share each file's write lock.
+        previous.config.rule_sources.fence();
+        live.config.rule_sources.start();
         assert!(
             self.0.retired.borrow_mut().replace(previous).is_none(),
             "only one retired snapshot"
@@ -1080,6 +1088,9 @@ impl RuntimeControl {
                 notified.await;
             }
             let live = self.0.current.borrow().clone();
+            // The retired view's rule-source jobs stop before it is dropped;
+            // the committed view re-read the manifests when it compiled.
+            old.config.rule_sources.close().await;
             let failure = old.cache.retire_exclusive_to(&live.cache).await.err();
             old.forwards.close_exclusive_to(&live.forwards).await;
             self.0.observer.retire_generation(old.config.generation);
@@ -1164,6 +1175,8 @@ impl RuntimeControl {
         if let Err(error) = current.cache.finish_persistence().await {
             failure.get_or_insert(AssemblyError::Cache(error));
         }
+        // Rule-source jobs: downloads stop at once, a running build is awaited.
+        current.config.rule_sources.close().await;
         current.forwards.close_all().await;
         // Accepted switch mutations complete their durable write and
         // publication even during shutdown.

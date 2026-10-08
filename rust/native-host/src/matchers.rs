@@ -3,12 +3,15 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::rc::Rc;
 
 use mosdns_dns_core::observe_answer_addresses;
-use mosdns_matcher_core::{IpPrefixList, MixMatcher};
+#[cfg(test)]
+use mosdns_matcher_core::IpPrefixList;
+use mosdns_matcher_core::MixMatcher;
 use mosdns_sequence_core::{
     ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState, StateMutation,
 };
 
 use crate::managed::DomainSetHandle;
+use crate::policy::IpListHandle;
 
 /// One qname matcher plus every domain set it consults. A match is true when
 /// any consulted set matches, preserving the configured reference order. A
@@ -126,10 +129,10 @@ impl Matcher for HasResponseMatcher {
 
 /// Read-only peer matcher, independent of ECS and audit capture.
 pub(crate) struct ClientIpMatcher {
-    prefixes: Vec<Rc<IpPrefixList>>,
+    prefixes: Vec<Rc<IpListHandle>>,
 }
 impl ClientIpMatcher {
-    pub(crate) fn new(prefixes: Vec<Rc<IpPrefixList>>) -> Self {
+    pub(crate) fn new(prefixes: Vec<Rc<IpListHandle>>) -> Self {
         Self { prefixes }
     }
 }
@@ -149,11 +152,11 @@ impl Matcher for ClientIpMatcher {
 /// Answer-only response-IP matcher over immutable startup prefix snapshots.
 #[allow(dead_code)]
 pub(crate) struct ResponseIpMatcher {
-    prefixes: Vec<Rc<IpPrefixList>>,
+    prefixes: Vec<Rc<IpListHandle>>,
 }
 
 impl ResponseIpMatcher {
-    pub(crate) fn new(prefixes: Vec<Rc<IpPrefixList>>) -> Self {
+    pub(crate) fn new(prefixes: Vec<Rc<IpListHandle>>) -> Self {
         Self { prefixes }
     }
     #[cfg(test)]
@@ -162,7 +165,7 @@ impl ResponseIpMatcher {
         prefixes.append(IpAddr::V4(address), 32);
         prefixes.rebuild();
         Self {
-            prefixes: vec![Rc::new(prefixes)],
+            prefixes: vec![Rc::new(IpListHandle::new(Rc::new(prefixes)))],
         }
     }
 }

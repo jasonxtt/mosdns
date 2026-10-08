@@ -135,6 +135,21 @@ export async function loadLegacyDiversionCatalogs(entries, getJSON) {
   return { catalogs, failures }
 }
 
+// Native peers expose the reference online-source API only for the built-in
+// providers they configure. A 404 means "not configured here" and is not an
+// error; any other failure is reported like the legacy loader does.
+export async function loadNativeOnlineCatalogs(entries, getJSON) {
+  const result = await loadLegacyDiversionCatalogs(
+    entries.map(([type, tag]) => [type, encodeURIComponent(tag)]),
+    getJSON
+  )
+  const decode = (item) => ({ ...item, tag: decodeURIComponent(item.tag) })
+  return {
+    catalogs: result.catalogs.map(decode),
+    failures: result.failures.filter((failure) => failure.status !== 404).map(decode)
+  }
+}
+
 // Existing standard local-rule names remain available on unmanaged native
 // configurations only after their real canonical show route accepts them.
 export async function loadNativeLocalProfiles(profiles, read) {

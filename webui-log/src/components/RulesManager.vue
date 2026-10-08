@@ -8,6 +8,7 @@ import {
   buildNativeDiversionPayload,
   classifyDiversionSource,
   loadLegacyDiversionCatalogs,
+  loadNativeOnlineCatalogs,
   validateDiversionCatalogChange
 } from '../api/nativeManagement'
 import { openConfirm } from '../utils/confirm'
@@ -43,6 +44,8 @@ const loading = reactive({
 const specialGroups = ref([])
 const adguardRules = ref([])
 const diversionRules = ref([])
+// Built-in online-source plugin tags the native peer actually configures.
+const nativeOnlineTags = ref(new Set())
 const runtimeCapabilities = ref(null)
 const capabilityError = ref('')
 
@@ -63,21 +66,27 @@ const builtInDiversionTypes = [
   { value: 'cusnocn', label: 'cn@!cn', pluginTag: 'cusnocn' }
 ]
 
+// Native peers serve the reference online-source API for the built-in
+// providers they configure; everything else on native is a local-text catalog.
+function isLocalTextTag(tag) {
+  return isNative.value && !nativeOnlineTags.value.has(tag)
+}
+
+const availableBuiltInTypes = computed(() => (isNative.value
+  ? builtInDiversionTypes.filter((item) => nativeOnlineTags.value.has(item.pluginTag))
+  : builtInDiversionTypes))
+
 const diversionTypeOptions = computed(() => {
-  const base = isNative.value
-    ? []
-    : builtInDiversionTypes.map((item) => ({ value: item.value, label: item.label }))
+  const base = availableBuiltInTypes.value.map((item) => ({ value: item.value, label: item.label }))
   const special = specialGroups.value.map((group) => ({ value: group.key, label: group.name }))
   return [...base, ...special]
 })
 
 const diversionPluginMap = computed(() => {
   const map = {}
-  if (!isNative.value) {
-    builtInDiversionTypes.forEach((item) => {
-      map[item.value] = item.pluginTag
-    })
-  }
+  availableBuiltInTypes.value.forEach((item) => {
+    map[item.value] = item.pluginTag
+  })
   specialGroups.value.forEach((group) => {
     map[group.key] = group.diversion_plugin_tag
   })
@@ -125,6 +134,7 @@ const diversionEditor = reactive({
   update_interval_hours: 24
 })
 const diversionRaw = ref(null)
+const editorLocalText = computed(() => isLocalTextTag(diversionPluginMap.value[diversionEditor.type]))
 const diversionAutofill = reactive({
   isApplying: false,
   nameDirty: false,
@@ -170,6 +180,7 @@ function sanitizeRulePayload(rule) {
   delete copy.__type
   delete copy.__pluginTag
   delete copy.__typeLabel
+  delete copy.__localText
   return copy
 }
 
@@ -200,10 +211,6 @@ async function loadSpecialGroups() {
 
 async function loadAdguardRules() {
   if (!supportsOperation('rules.adguard')) return
-  if (isNative.value) {
-    adguardRules.value = []
-    return
-  }
   loading.adguard = true
   try {
     const data = await getJSON('/plugins/adguard/rules')
@@ -224,20 +231,27 @@ async function loadDiversionRules() {
   }
   loading.diversion = true
   try {
-    if (isNative.value && !nativeGroupsEnabled.value) {
-      diversionRules.value = []
-      return
-    }
-    const entries = isNative.value
-      ? specialGroups.value.map((group) => [group.key, group.diversion_plugin_tag])
-      : Object.entries(diversionPluginMap.value)
     let catalogs
     if (isNative.value) {
-      catalogs = await Promise.all(entries.map(async ([type, tag]) => {
+      const online = await loadNativeOnlineCatalogs(
+        builtInDiversionTypes.map((item) => [item.value, item.pluginTag]),
+        getJSON
+      )
+      nativeOnlineTags.value = new Set(online.catalogs.map((catalog) => catalog.tag))
+      if (online.failures.length > 0) {
+        const failedTags = online.failures.map(({ tag, error }) => `${tag}: ${error}`).join('；')
+        setError(`部分分流规则加载失败: ${failedTags}`)
+      }
+      const entries = nativeGroupsEnabled.value
+        ? specialGroups.value.map((group) => [group.key, group.diversion_plugin_tag])
+        : []
+      const local = await Promise.all(entries.map(async ([type, tag]) => {
         const data = await getJSON(`/plugins/${tag}/config`)
         return { type, tag, rules: Array.isArray(data) ? data : [] }
       }))
+      catalogs = [...online.catalogs, ...local]
     } else {
+      const entries = Object.entries(diversionPluginMap.value)
       const result = await loadLegacyDiversionCatalogs(entries, getJSON)
       catalogs = result.catalogs
       if (result.failures.length > 0) {
@@ -248,13 +262,15 @@ async function loadDiversionRules() {
     const merged = []
     catalogs.forEach(({ type, tag, rules }) => {
       rules.forEach((rule) => {
-        const nativeStatus = isNative.value
+        const localText = isLocalTextTag(tag)
+        const nativeStatus = localText
           ? classifyDiversionSource(rule, type, rule?.name)
           : { readOnly: false, reason: '' }
         merged.push({
           ...rule,
           type: rule.type || type,
           __pluginTag: tag,
+          __localText: localText,
           __type: type,
           __typeLabel: typeLabelMap.value[rule.type || type] || (rule.type || type),
           __readOnly: nativeStatus.readOnly,
@@ -293,11 +309,7 @@ async function reloadCurrentView() {
   }
   if (mode.value === 'all') {
     await loadSpecialGroups()
-    if (isNative.value) {
-      await loadDiversionRules()
-    } else {
-      await Promise.all([loadAdguardRules(), loadDiversionRules()])
-    }
+    await Promise.all([loadAdguardRules(), loadDiversionRules()])
     return
   }
   if (mode.value === 'special') {
@@ -536,7 +548,7 @@ function openCreateDiversion() {
     setError('尚未完成运行时能力发现')
     return
   }
-  if (isNative.value && !nativeGroupsEnabled.value) {
+  if (isNative.value && !nativeGroupsEnabled.value && nativeOnlineTags.value.size === 0) {
     setError('当前原生运行时未启用本地分流规则管理')
     return
   }
@@ -550,7 +562,7 @@ function openCreateDiversion() {
   diversionEditor.files = ''
   diversionEditor.url = ''
   diversionEditor.enabled = true
-  diversionEditor.auto_update = !isNative.value
+  diversionEditor.auto_update = !isLocalTextTag(diversionPluginMap.value[diversionEditor.type])
   diversionEditor.enable_regexp = false
   diversionEditor.update_interval_hours = 24
   diversionAutofill.isApplying = false
@@ -690,7 +702,7 @@ function diversionPayload() {
   if (!type) {
     throw new Error('规则类型不能为空')
   }
-  if (isNative.value) {
+  if (isLocalTextTag(diversionPluginMap.value[type])) {
     return buildNativeDiversionPayload({
       name,
       type,
@@ -761,7 +773,7 @@ async function saveDiversion() {
       if (!oldPluginTag) {
         throw new Error('无法定位旧规则插件')
       }
-      if (isNative.value) {
+      if (isLocalTextTag(oldPluginTag) || isLocalTextTag(newPluginTag)) {
         validateDiversionCatalogChange(oldPluginTag, newPluginTag)
         const nativePayload = buildNativeDiversionPayload(payload)
         await putJSON(
@@ -783,7 +795,7 @@ async function saveDiversion() {
       await putJSON(`/plugins/${newPluginTag}/config/${endpointName}`, merged)
       setSuccess('分流规则已更新')
     } else {
-      if (isNative.value) {
+      if (isLocalTextTag(newPluginTag)) {
         const nativePayload = buildNativeDiversionPayload(payload)
         await putJSON(
           `/plugins/${encodeURIComponent(newPluginTag)}/config/${encodeURIComponent(payload.name)}`,
@@ -834,7 +846,7 @@ async function toggleDiversion(rule) {
     return
   }
   try {
-    const payload = isNative.value
+    const payload = isLocalTextTag(pluginTag)
       ? buildNativeDiversionPayload({
           name: rule.name,
           type: rule.type,
@@ -882,13 +894,13 @@ async function deleteDiversion(rule) {
 }
 
 async function updateDiversion(rule) {
-  if (isNative.value) {
-    setError('原生运行时不支持在线下载或更新规则')
-    return
-  }
   const pluginTag = diversionPluginMap.value[rule.type] || rule.__pluginTag
   if (!pluginTag) {
     setError('无法定位分流规则插件')
+    return
+  }
+  if (isLocalTextTag(pluginTag)) {
+    setError('原生运行时不支持在线下载或更新本地文本规则')
     return
   }
   try {
@@ -903,14 +915,10 @@ async function updateDiversion(rule) {
 }
 
 async function updateDiversionAll() {
-  if (isNative.value) {
-    setError('原生运行时不支持在线下载或更新规则')
-    return
-  }
   const targetsMap = new Map()
   diversionRules.value.forEach((rule) => {
     const pluginTag = diversionPluginMap.value[rule.type] || rule.__pluginTag
-    if (!pluginTag || !rule?.name) {
+    if (!pluginTag || !rule?.name || isLocalTextTag(pluginTag)) {
       return
     }
     const key = `${pluginTag}:${rule.name}`
@@ -1010,7 +1018,7 @@ onBeforeUnmount(() => {
       :loading="loading.diversion"
       :diversion-rules="diversionRules"
       :format-time="formatTime"
-      :native-local-text="isNative"
+      :native-local-text="isNative && nativeOnlineTags.size === 0"
       :can-mutate="canManageDiversion"
       @create="openCreateDiversion"
       @update-all="updateDiversionAll"
@@ -1039,7 +1047,7 @@ onBeforeUnmount(() => {
       :editor="diversionEditor"
       :diversion-type-options="diversionTypeOptions"
       :is-editing="Boolean(diversionEditor.oldName)"
-      :native-local-text="isNative"
+      :native-local-text="editorLocalText"
       @close="closeDiversionEditor"
       @save="saveDiversion"
       @apply-autofill="applyDiversionAutofill"

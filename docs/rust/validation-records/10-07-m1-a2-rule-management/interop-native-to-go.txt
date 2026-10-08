@@ -1,0 +1,16 @@
+== native-adguard.json
+[{"id":"79ce1025-c41f-482c-a507-8479b380d6bd","name":"rt","url":"http://127.0.0.1:1/rt.txt","enabled":false,"auto_update":true,"update_interval_hours":12,"rule_count":0}]
+== native-cuscn.json
+[{"name":"cuscn","type":"cuscn","files":"srs/cuscn.srs","url":"http://127.0.0.1:18090/domains.srs","enabled":false,"auto_update":false,"update_interval_hours":24,"rule_count":5,"last_updated":"2026-10-07T18:21:53.477212968Z"}]
+== native-geoip_cn.json
+[{"name":"ip2","type":"geoipcn","files":"srs/ip2.srs","url":"http://127.0.0.1:1/ip2.srs","enabled":false,"auto_update":true,"update_interval_hours":6,"rule_count":0,"last_updated":"0001-01-01T00:00:00Z"}]
+== native-geosite_cn.json
+[{"name":"geosite_cn","type":"geositecn","files":"srs/geosite-cn.srs","url":"http://127.0.0.1:18090/domains.srs","enabled":true,"auto_update":false,"update_interval_hours":24,"rule_count":5,"last_updated":"2026-10-07T18:21:53.479028547Z"}]
+== go-adguard.json
+[{"id":"79ce1025-c41f-482c-a507-8479b380d6bd","name":"rt","url":"http://127.0.0.1:1/rt.txt","enabled":false,"auto_update":true,"update_interval_hours":12,"rule_count":0}]
+== go-cuscn.json
+[{"name":"cuscn","type":"cuscn","files":"srs/cuscn.srs","url":"http://127.0.0.1:18090/domains.srs","enabled":false,"auto_update":false,"update_interval_hours":24,"rule_count":5,"last_updated":"2026-10-07T18:21:53.477212968Z"}]
+== go-geoip_cn.json
+[{"name":"ip2","type":"geoipcn","files":"srs/ip2.srs","url":"http://127.0.0.1:1/ip2.srs","enabled":false,"auto_update":true,"update_interval_hours":6,"rule_count":0,"last_updated":"0001-01-01T00:00:00Z"}]
+== go-geosite_cn.json
+[{"name":"geosite_cn","type":"geositecn","files":"srs/geosite-cn.srs","url":"http://127.0.0.1:18090/domains.srs","enabled":true,"auto_update":false,"update_interval_hours":24,"rule_count":5,"last_updated":"2026-10-07T18:21:53.479028547Z"}]

@@ -86,6 +86,11 @@ fn timestamp() -> String {
         .unwrap_or_default()
 }
 
+macro_rules! info_line {
+    ($($argument:tt)*) => {
+        $crate::diag::emit($crate::config::LogLevel::Info, format_args!($($argument)*))
+    };
+}
 macro_rules! warn_line {
     ($($argument:tt)*) => {
         $crate::diag::emit($crate::config::LogLevel::Warn, format_args!($($argument)*))
@@ -96,7 +101,7 @@ macro_rules! error_line {
         $crate::diag::emit($crate::config::LogLevel::Error, format_args!($($argument)*))
     };
 }
-pub(crate) use {error_line, warn_line};
+pub(crate) use {error_line, info_line, warn_line};
 
 #[cfg(test)]
 mod tests {

@@ -29,7 +29,7 @@ use crate::plugins::{
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
 
 mod check;
-mod providers;
+pub(crate) mod providers;
 pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config, check_config_in};
 pub(crate) use providers::presentation_name;
 pub use providers::{DomainMapperConfig, MapperOutcome};
@@ -521,6 +521,8 @@ pub struct CompiledConfig {
     /// The scoped management HTTP listener, when one is configured.
     pub api: Option<ApiConfig>,
     pub program: ValidatedProgram,
+    /// Management state of the rule providers and their `domain_mapper`s.
+    pub(crate) rule_sources: Rc<crate::rule_sources::RuleSources>,
 }
 
 /// The native router's canonical named calls. All IDs belong to this program.
@@ -537,10 +539,17 @@ pub struct ManagedRouterGroup {
 
 pub struct ResponseIpRuleConfig {
     pub source_path: String,
-    pub prefixes: Vec<Rc<mosdns_matcher_core::IpPrefixList>>,
+    pub prefixes: Vec<Rc<crate::policy::IpListHandle>>,
 }
 
 impl CompiledConfig {
+    /// The rule-source management state (tests drive and observe it).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn rule_sources(&self) -> &crate::rule_sources::RuleSources {
+        &self.rule_sources
+    }
+
     /// Looks up one compiled `domain_set` by tag.
     #[must_use]
     pub fn domain_set(&self, tag: &str) -> Option<&DomainSetConfig> {
@@ -1862,6 +1871,10 @@ struct PluginCatalog<'a> {
     domain_sets: &'a [(String, DomainSetHandle)],
     /// `adguard_rule` definitions, which `qname $tag` may reference directly.
     adguard_rules: &'a BTreeMap<String, providers::AdguardRules>,
+    /// The direct matcher of each referenced `adguard_rule`, built once and
+    /// shared by every reference (a hot reload republishes it).
+    adguard_direct:
+        &'a RefCell<BTreeMap<String, Rc<crate::rule_sources::Live<providers::Filtered>>>>,
     fast_marks: &'a [(String, FastMarkConfig)],
     forwards: &'a RefCell<ForwardCompiler>,
     preferences: &'a RefCell<Vec<(String, PreferenceFamily)>>,
@@ -1898,7 +1911,17 @@ impl PluginCatalog<'_> {
 
     /// The direct matcher of an `adguard_rule` definition.
     fn adguard_matcher(&self, tag: &str) -> Option<Result<DomainSetHandle, String>> {
-        self.adguard_rules.get(tag).map(|rules| rules.matcher(tag))
+        let rules = self.adguard_rules.get(tag)?;
+        if let Some(live) = self.adguard_direct.borrow().get(tag) {
+            return Some(Ok(DomainSetHandle::Filtered(Rc::clone(live))));
+        }
+        Some(rules.filtered(tag).map(|filtered| {
+            let live = Rc::new(crate::rule_sources::Live::new(filtered));
+            self.adguard_direct
+                .borrow_mut()
+                .insert(tag.to_owned(), Rc::clone(&live));
+            DomainSetHandle::Filtered(live)
+        }))
     }
 
     fn fast_mark(&self, tag: &str) -> Option<FastMarkConfig> {
@@ -2071,6 +2094,7 @@ fn compile_definitions(
     let mut listeners = Vec::new();
     let mut provider_rules: BTreeMap<String, providers::ProviderRules> = BTreeMap::new();
     let mut adguard_rules: BTreeMap<String, providers::AdguardRules> = BTreeMap::new();
+    let mut rule_providers: Vec<Rc<crate::rule_sources::Provider>> = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
             PluginKind::Ecs => {
@@ -2145,18 +2169,37 @@ fn compile_definitions(
             }
             PluginKind::DomainSet | PluginKind::Sequence => {}
             PluginKind::DomainSetLight | PluginKind::SdSetLight | PluginKind::AdguardRule => {
+                use crate::rule_sources::Provider;
                 let mut inputs = candidate_inputs.borrow_mut();
                 let entries = match kinds[index].1 {
                     PluginKind::DomainSetLight => {
-                        Rc::new(providers::load_domain_set_light(plugin, inputs.as_mut())?)
+                        let spec = providers::light_spec(plugin)?;
+                        let rules = providers::load_light(&spec, inputs.as_mut())?;
+                        rule_providers.push(Rc::new(Provider::light(spec)));
+                        Rc::new(rules)
                     }
                     PluginKind::SdSetLight => {
-                        Rc::new(providers::load_sd_set_light(plugin, inputs.as_mut())?)
+                        let spec = providers::manifest_spec(plugin, providers::Schema::Sd)?;
+                        let manifest = providers::read_manifest(&spec, inputs.as_mut())?;
+                        let (rules, counts) =
+                            providers::load_sd(&spec, &manifest.entries, inputs.as_mut());
+                        rule_providers
+                            .push(Rc::new(Provider::manifest(spec, manifest, counts, None)));
+                        Rc::new(rules)
                     }
                     _ => {
-                        let rules = providers::load_adguard_rule(plugin, inputs.as_mut())?;
+                        let spec = providers::manifest_spec(plugin, providers::Schema::Adguard)?;
+                        let manifest = providers::read_manifest(&spec, inputs.as_mut())?;
+                        let (rules, counts) = providers::load_adguard(
+                            &spec,
+                            &manifest.entries,
+                            false,
+                            inputs.as_mut(),
+                        );
                         let deny = Rc::clone(&rules.deny);
                         adguard_rules.insert(plugin.tag.clone(), rules);
+                        rule_providers
+                            .push(Rc::new(Provider::manifest(spec, manifest, counts, None)));
                         deny
                     }
                 };
@@ -2164,10 +2207,20 @@ fn compile_definitions(
             }
             PluginKind::SiSet => {
                 let mut inputs = candidate_inputs.borrow_mut();
+                let spec = providers::manifest_spec(plugin, providers::Schema::Si)?;
+                let manifest = providers::read_manifest(&spec, inputs.as_mut())?;
+                let (list, counts) = providers::load_si(&spec, &manifest.entries, inputs.as_mut());
+                let handle = Rc::new(crate::policy::IpListHandle::new(Rc::new(list)));
                 ip_sets.push(IpSetConfig {
                     tag: plugin.tag.clone(),
-                    prefixes: providers::load_si_set(plugin, inputs.as_mut())?,
+                    prefixes: Rc::clone(&handle),
                 });
+                rule_providers.push(Rc::new(crate::rule_sources::Provider::manifest(
+                    spec,
+                    manifest,
+                    counts,
+                    Some(handle),
+                )));
             }
             PluginKind::DomainMapper => {}
             PluginKind::Switch => {
@@ -2291,6 +2344,7 @@ fn compile_definitions(
     // Mappers compile after every provider is loaded, so a rule may name a
     // provider declared later without changing the result.
     let mut domain_mappers: Vec<DomainMapperConfig> = Vec::new();
+    let mut mapper_slots: Vec<Rc<crate::rule_sources::MapperSlot>> = Vec::new();
     {
         let provider_kinds: Vec<(String, String)> = definitions
             .iter()
@@ -2304,11 +2358,18 @@ fn compile_definitions(
         };
         for (index, plugin) in definitions.iter().enumerate() {
             if kinds[index].1 == PluginKind::DomainMapper {
-                domain_mappers.push(providers::compile_domain_mapper(
-                    plugin,
-                    &kind_name,
-                    &provider_rules,
-                )?);
+                let spec = providers::mapper_spec(plugin, &kind_name, &|tag| {
+                    provider_rules.contains_key(tag)
+                })?;
+                let matcher = providers::build_mapper_matcher(&spec, &|tag| {
+                    provider_rules.get(tag).map(|rules| rules.as_slice())
+                })?;
+                let mapper = spec.config(matcher);
+                mapper_slots.push(Rc::new(crate::rule_sources::MapperSlot::new(
+                    spec,
+                    Rc::clone(&mapper.matcher),
+                )));
+                domain_mappers.push(mapper);
             }
         }
     }
@@ -2320,6 +2381,7 @@ fn compile_definitions(
     });
     let preference_invocations = RefCell::new(Vec::new());
     let quick_caches = RefCell::new(Vec::new());
+    let adguard_direct = RefCell::new(BTreeMap::new());
     let catalog = PluginCatalog {
         policies: &policies,
         ip_sets: &ip_sets,
@@ -2329,6 +2391,7 @@ fn compile_definitions(
         kinds: &kinds,
         domain_sets: &domain_sets,
         adguard_rules: &adguard_rules,
+        adguard_direct: &adguard_direct,
         fast_marks: &fast_marks,
         forwards: &forward_compiler,
         preferences: &preference_invocations,
@@ -2649,6 +2712,11 @@ fn compile_definitions(
             );
         }
     }
+    for (tag, live) in adguard_direct.borrow().iter() {
+        if let Some(provider) = rule_providers.iter().find(|p| p.tag == *tag) {
+            provider.attach_filtered(Rc::clone(live));
+        }
+    }
     let compiled = CompiledConfig {
         ui_base: None,
         generation: 0,
@@ -2683,6 +2751,10 @@ fn compile_definitions(
         switches,
         api,
         program,
+        rule_sources: Rc::new(crate::rule_sources::RuleSources::new(
+            rule_providers,
+            mapper_slots,
+        )),
     };
     let mut client_rules = BTreeSet::new();
     for plugin in &definitions {
@@ -4962,7 +5034,7 @@ fn compile_response_ip(
     path: &str,
     catalog: &PluginCatalog<'_>,
     base: &Path,
-) -> Result<Vec<Rc<mosdns_matcher_core::IpPrefixList>>, ConfigError> {
+) -> Result<Vec<Rc<crate::policy::IpListHandle>>, ConfigError> {
     if args.is_empty() {
         return Err(ConfigError::new(
             path,
@@ -5014,7 +5086,7 @@ fn compile_response_ip(
         },
     )?;
     prefixes.rebuild();
-    lists.push(Rc::new(prefixes));
+    lists.push(Rc::new(crate::policy::IpListHandle::new(Rc::new(prefixes))));
     Ok(lists)
 }
 

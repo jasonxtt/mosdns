@@ -151,7 +151,38 @@ pub struct ResponsePolicyConfig {
 }
 pub struct IpSetConfig {
     pub tag: String,
-    pub prefixes: Rc<IpPrefixList>,
+    pub prefixes: Rc<IpListHandle>,
+}
+
+/// A prefix list read whole at every lookup. Fixed lists are never replaced;
+/// an `si_set` publishes a new list on a hot update, and a lookup that already
+/// took the old one finishes on it.
+pub struct IpListHandle(std::cell::RefCell<Rc<IpPrefixList>>);
+
+impl IpListHandle {
+    pub(crate) fn new(list: Rc<IpPrefixList>) -> Self {
+        Self(std::cell::RefCell::new(list))
+    }
+
+    /// True when the current list covers `address`.
+    #[must_use]
+    pub fn contains(&self, address: IpAddr) -> bool {
+        self.current().contains(address)
+    }
+
+    /// True when the current list is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.current().is_empty()
+    }
+
+    pub(crate) fn current(&self) -> Rc<IpPrefixList> {
+        Rc::clone(&self.0.borrow())
+    }
+
+    pub(crate) fn publish(&self, list: Rc<IpPrefixList>) {
+        *self.0.borrow_mut() = list;
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TtlPolicy {
@@ -445,7 +476,7 @@ pub(crate) fn ip_list(
     inline: &[String],
     files: &[PathBuf],
     path: &str,
-) -> Result<Rc<IpPrefixList>, ConfigError> {
+) -> Result<Rc<IpListHandle>, ConfigError> {
     ip_list_with_inputs(inline, files, path, None)
 }
 pub(crate) fn ip_list_with_inputs(
@@ -453,7 +484,7 @@ pub(crate) fn ip_list_with_inputs(
     files: &[PathBuf],
     path: &str,
     inputs: Option<&mut crate::special_groups::CandidateInputSet>,
-) -> Result<Rc<IpPrefixList>, ConfigError> {
+) -> Result<Rc<IpListHandle>, ConfigError> {
     for (index, entry) in inline.iter().enumerate() {
         ip_prefix(entry, &format!("{path}.ips[{index}]"))?;
     }
@@ -471,7 +502,7 @@ pub(crate) fn ip_list_with_inputs(
         },
     )?;
     prefixes.rebuild();
-    Ok(Rc::new(prefixes))
+    Ok(Rc::new(IpListHandle::new(Rc::new(prefixes))))
 }
 /// Applies one non-scoped policy atomically. True means hosts replaced the
 /// response; TTL transforms preserve the existing supplier identity.
