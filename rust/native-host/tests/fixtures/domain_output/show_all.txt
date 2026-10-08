@@ -1,0 +1,8 @@
+200
+X-Total-Count: 6
+0000000003 2026-10-08 alpha.example
+0000000002 2026-10-08 delta.example
+0000000002 2026-10-08 beta.example
+0000000001 2026-10-08 gamma.example
+0000000001 2026-10-08 epsilon.example|AD|CD
+0000000001 2026-10-08 beta.example|AD|CD

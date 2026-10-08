@@ -17,6 +17,7 @@ use mosdns_upstream_core::{Endpoint, ServerIdentity, Transport};
 use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
 use url::Url;
 
+pub use crate::domain_output::{DomainOutput, DomainOutputConfig};
 use crate::managed::{DomainSetHandle, ManagedDomainSet};
 use crate::matchers::{
     ClientIpMatcher, DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher,
@@ -376,11 +377,41 @@ pub struct SleepConfig {
 }
 
 /// The compiled plugins that own a state file or a lookup of their own:
-/// `rewrite` (dispatched as an external) and `webinfo` (HTTP only).
+/// `rewrite` and `domain_output` (dispatched as externals) and `webinfo`
+/// (HTTP only).
 #[derive(Default)]
 pub struct LocalPlugins {
     pub rewrites: Vec<RewriteConfig>,
     pub webinfos: Vec<Rc<WebInfo>>,
+    pub domain_outputs: Vec<DomainOutputConfig>,
+}
+
+impl LocalPlugins {
+    /// Loads the `domain_output` statistics and starts their writers. Called
+    /// when this view starts serving.
+    pub(crate) fn start(
+        &self,
+        sources: &Rc<crate::rule_sources::RuleSources>,
+        api: Option<SocketAddr>,
+    ) {
+        for output in &self.domain_outputs {
+            output.runtime.start(Rc::clone(sources), api);
+        }
+    }
+
+    /// A newer view takes over: every `domain_output` saves and stops writing.
+    pub(crate) fn fence(&self) {
+        for output in &self.domain_outputs {
+            output.runtime.fence();
+        }
+    }
+
+    /// Stops every `domain_output` writer and saves once more.
+    pub(crate) async fn close(&self) {
+        for output in &self.domain_outputs {
+            output.runtime.close().await;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1890,6 +1921,7 @@ enum PluginKind {
     Sleep,
     Rewrite,
     WebInfo,
+    DomainOutput,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -2008,6 +2040,7 @@ fn compile_definitions(
             "sleep" => PluginKind::Sleep,
             "rewrite" => PluginKind::Rewrite,
             "webinfo" => PluginKind::WebInfo,
+            "domain_output" => PluginKind::DomainOutput,
             other if crate::switch::switch_type_number(other).is_some() => PluginKind::Switch,
             other => {
                 return Err(ConfigError::new(
@@ -2125,6 +2158,7 @@ fn compile_definitions(
     let named_sleeps = RefCell::new(Vec::new());
     let mut rewrites: Vec<(String, Rc<Rewrite>)> = Vec::new();
     let mut webinfos: Vec<Rc<WebInfo>> = Vec::new();
+    let mut pending_outputs: Vec<PendingOutput> = Vec::new();
     let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
@@ -2297,6 +2331,11 @@ fn compile_definitions(
                 known_artifacts.extend(files);
                 rewrites.push((plugin.tag.clone(), Rc::new(rewrite)));
             }
+            PluginKind::DomainOutput => {
+                let pending = compile_domain_output(plugin)?;
+                known_artifacts.extend(pending.settings.files());
+                pending_outputs.push(pending);
+            }
             PluginKind::WebInfo => {
                 let (webinfo, file) = compile_webinfo(plugin)?;
                 known_artifacts.push(file);
@@ -2425,6 +2464,29 @@ fn compile_definitions(
         }
     }
     drop(provider_rules);
+    let mut domain_outputs: Vec<(String, Rc<DomainOutput>)> = Vec::new();
+    for pending in pending_outputs {
+        let target = match pending.target {
+            None => None,
+            Some((mapper, mark, tag)) => {
+                let layer = domain_mappers
+                    .iter()
+                    .find(|candidate| candidate.tag == mapper)
+                    .map(|candidate| candidate.hot.layer(mark, &tag))
+                    .ok_or_else(|| {
+                        ConfigError::new(
+                            format!("{}.args.target_mapper", pending.path),
+                            format!("`{mapper}` is not a domain_mapper"),
+                        )
+                    })?;
+                Some(crate::domain_output::MapperTarget { layer })
+            }
+        };
+        domain_outputs.push((
+            pending.tag.clone(),
+            Rc::new(DomainOutput::new(&pending.tag, pending.settings, target)),
+        ));
+    }
 
     let forward_compiler = RefCell::new(ForwardCompiler {
         definitions: forwards,
@@ -2593,6 +2655,11 @@ fn compile_definitions(
                 .iter()
                 .map(|(tag, _)| ExternalSpec::new(tag.clone())),
         )
+        .chain(
+            domain_outputs
+                .iter()
+                .map(|(tag, _)| ExternalSpec::new(tag.clone())),
+        )
         .collect();
     let program = ProgramSpec::new(sequences, fixtures)
         .with_externals(externals)
@@ -2750,6 +2817,17 @@ fn compile_definitions(
         })
         .collect::<Result<Vec<_>, ConfigError>>()?;
 
+    let domain_outputs = domain_outputs
+        .into_iter()
+        .map(|(tag, runtime)| {
+            Ok(DomainOutputConfig {
+                executable: external_id(&program, &tag, "$.plugins")?,
+                tag,
+                runtime,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+
     let entry_sequence = program.sequence_id(&listener.entry).ok_or_else(|| {
         ConfigError::new(
             format!("{listener_source_path}.args.entry"),
@@ -2808,7 +2886,11 @@ fn compile_definitions(
         fallbacks,
         preferences,
         sleeps,
-        local: LocalPlugins { rewrites, webinfos },
+        local: LocalPlugins {
+            rewrites,
+            webinfos,
+            domain_outputs,
+        },
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
             sequence: entry_sequence,
@@ -3268,6 +3350,99 @@ fn compile_rewrite(plugin: &RawPlugin) -> Result<(Rewrite, Vec<PathBuf>), Config
     Ok((rewrite, files))
 }
 
+/// A validated `domain_output` waiting for its `target_mapper` to compile.
+struct PendingOutput {
+    tag: String,
+    path: String,
+    settings: crate::domain_output::Settings,
+    /// `target_mapper`, `target_mark`, `target_tag`.
+    target: Option<(String, u8, String)>,
+}
+
+/// `domain_output`: counters, generated files, rule publication and mapper
+/// injection. Every argument is optional, as in the reference.
+fn compile_domain_output(plugin: &RawPlugin) -> Result<PendingOutput, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let empty = RawMap {
+        entries: Vec::new(),
+    };
+    let args = match &plugin.args {
+        RawValue::Null => &empty,
+        other => expect_map(other, &path, "domain_output args must be a mapping")?,
+    };
+    args.reject_unknown(
+        &[
+            "file_stat",
+            "file_rule",
+            "gen_rule",
+            "pattern",
+            "appended_string",
+            "max_entries",
+            "dump_interval",
+            "domain_set_url",
+            "enable_flags",
+            "target_mapper",
+            "target_mark",
+            "target_tag",
+        ],
+        &path,
+    )?;
+    let text = |key: &str| -> Result<String, ConfigError> {
+        match args.get(key) {
+            None | Some(RawValue::Null) => Ok(String::new()),
+            Some(value) => expect_string(value, &format!("{path}.{key}")),
+        }
+    };
+    let file = |key: &str| -> Result<Option<PathBuf>, ConfigError> {
+        let name = text(key)?;
+        Ok((!name.is_empty()).then(|| resolve_rule_path(&name, &plugin.root_dir)))
+    };
+    let integer = |key: &str| -> Result<i64, ConfigError> {
+        match args.get(key) {
+            None | Some(RawValue::Null) => Ok(0),
+            Some(value) => expect_integer(value, &format!("{path}.{key}")),
+        }
+    };
+    let dump_interval = match integer("dump_interval")? {
+        seconds if seconds > 0 => Duration::from_secs(seconds.unsigned_abs()),
+        _ => Duration::from_secs(60),
+    };
+    let enable_flags = match args.get("enable_flags") {
+        None | Some(RawValue::Null) => false,
+        Some(value) => expect_bool(value, &format!("{path}.enable_flags"))?,
+    };
+    let mapper = text("target_mapper")?;
+    let mark = integer("target_mark")?;
+    let mark = u8::try_from(mark)
+        .ok()
+        .filter(|mark| *mark < 64)
+        .ok_or_else(|| {
+            ConfigError::new(
+                format!("{path}.target_mark"),
+                "target_mark must be between 0 and 63",
+            )
+        })?;
+    let target_tag = text("target_tag")?;
+    let target = (!mapper.is_empty()).then_some((mapper, mark, target_tag));
+    Ok(PendingOutput {
+        tag: plugin.tag.clone(),
+        path: plugin.source_path.clone(),
+        settings: crate::domain_output::Settings {
+            file_stat: file("file_stat")?,
+            file_rule: file("file_rule")?,
+            gen_rule: file("gen_rule")?,
+            pattern: text("pattern")?,
+            appended_string: text("appended_string")?,
+            max_entries: integer("max_entries")?,
+            dump_interval,
+            domain_set_url: text("domain_set_url")?,
+            enable_flags,
+            max_keys: crate::domain_output::MAX_KEYS,
+        },
+        target,
+    })
+}
+
 /// `webinfo`: the JSON document file.
 fn compile_webinfo(plugin: &RawPlugin) -> Result<(WebInfo, PathBuf), ConfigError> {
     let path = format!("{}.args", plugin.source_path);
@@ -3396,7 +3571,8 @@ fn resolve_policy_target_name(
             | PluginKind::Redirect
             | PluginKind::Ecs
             | PluginKind::Sleep
-            | PluginKind::Rewrite,
+            | PluginKind::Rewrite
+            | PluginKind::DomainOutput,
         ) => Ok(PolicyTargetName::External(tag.to_owned())),
         Some(
             PluginKind::FastMark
@@ -4458,7 +4634,8 @@ fn compile_exec_item(
                     | PluginKind::Ecs
                     | PluginKind::Redirect
                     | PluginKind::Sleep
-                    | PluginKind::Rewrite,
+                    | PluginKind::Rewrite
+                    | PluginKind::DomainOutput,
                 ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),

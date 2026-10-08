@@ -1,0 +1,1 @@
+{"outputs": false, "names": 20000, "qps": 200.0, "start": {"VmHWM": 95208, "VmRSS": 37084, "RssAnon": 27836}, "recording": {"queries": 20000, "seconds": 0.54, "qps": 36706}, "after_recording": {"VmHWM": 95208, "VmRSS": 37156, "RssAnon": 27844}, "final": {"VmHWM": 95208, "VmRSS": 37156, "RssAnon": 27844}}

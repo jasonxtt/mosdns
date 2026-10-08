@@ -719,6 +719,14 @@ impl BoundHost {
             api_addr: _,
         } = self;
         let mut updates = control.start(&shutdown);
+        {
+            // `domain_output` statistics load before any query is served.
+            let view = control.view();
+            view.config.local.start(
+                &view.config.rule_sources,
+                view.config.api.as_ref().map(|api| api.http),
+            );
+        }
         let mut scopes = BTreeMap::new();
         let mut task_keys = std::collections::HashMap::new();
         let mut tasks: JoinSet<(

@@ -744,6 +744,12 @@ impl RuntimeControl {
         // admits anything; both share each file's write lock.
         previous.config.rule_sources.fence();
         live.config.rule_sources.start();
+        // The retired view saves its statistics before the new view loads them.
+        previous.config.local.fence();
+        live.config.local.start(
+            &live.config.rule_sources,
+            live.config.api.as_ref().map(|api| api.http),
+        );
         assert!(
             self.0.retired.borrow_mut().replace(previous).is_none(),
             "only one retired snapshot"
@@ -1090,6 +1096,7 @@ impl RuntimeControl {
             let live = self.0.current.borrow().clone();
             // The retired view's rule-source jobs stop before it is dropped;
             // the committed view re-read the manifests when it compiled.
+            old.config.local.close().await;
             old.config.rule_sources.close().await;
             let failure = old.cache.retire_exclusive_to(&live.cache).await.err();
             old.forwards.close_exclusive_to(&live.forwards).await;
@@ -1176,6 +1183,7 @@ impl RuntimeControl {
             failure.get_or_insert(AssemblyError::Cache(error));
         }
         // Rule-source jobs: downloads stop at once, a running build is awaited.
+        current.config.local.close().await;
         current.config.rule_sources.close().await;
         current.forwards.close_all().await;
         // Accepted switch mutations complete their durable write and

@@ -300,6 +300,8 @@ pub(crate) struct Reply {
     pub(crate) status: u16,
     pub(crate) content_type: Option<&'static str>,
     pub(crate) body: Vec<u8>,
+    /// Headers beyond `Content-Type` and `Content-Length`.
+    pub(crate) headers: Vec<(&'static str, String)>,
 }
 
 const JSON_UTF8: &str = "application/json; charset=utf-8";
@@ -313,6 +315,7 @@ impl Reply {
             status,
             content_type: Some(content_type),
             body,
+            headers: Vec::new(),
         }
     }
 
@@ -325,6 +328,7 @@ impl Reply {
             status,
             content_type: Some(TEXT),
             body: body.into_bytes(),
+            headers: Vec::new(),
         }
     }
 
@@ -338,6 +342,7 @@ impl Reply {
             status,
             content_type: None,
             body: Vec::new(),
+            headers: Vec::new(),
         }
     }
 
@@ -369,6 +374,10 @@ impl RuleSources {
 
     pub(crate) fn timing(&self) -> RuleTiming {
         self.env.borrow().timing.clone()
+    }
+
+    pub(crate) fn roots(&self) -> Option<Arc<rustls::RootCertStore>> {
+        self.env.borrow().roots.clone()
     }
 
     pub(crate) fn provider(&self, tag: &str) -> Option<Rc<Provider>> {

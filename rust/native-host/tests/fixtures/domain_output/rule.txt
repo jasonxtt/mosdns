@@ -1,0 +1,5 @@
+full:alpha.example
+full:beta.example
+full:delta.example
+full:gamma.example
+full:epsilon.example
