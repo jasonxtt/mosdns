@@ -1,0 +1,25 @@
+[
+  {
+    "name": "custom",
+    "type": "cuscn",
+    "files": "srs/custom.srs",
+    "url": "http://127.0.0.1:1/custom.srs",
+    "enabled": false,
+    "enable_regexp": true,
+    "auto_update": true,
+    "update_interval_hours": 12,
+    "rule_count": 0,
+    "last_updated": "0001-01-01T00:00:00Z"
+  },
+  {
+    "name": "geosite_cn",
+    "type": "geositecn",
+    "files": "srs/geosite-cn.srs",
+    "url": "https://github.com/MetaCubeX/meta-rules-dat/raw/sing/geo/geosite/cn.srs",
+    "enabled": true,
+    "auto_update": false,
+    "update_interval_hours": 24,
+    "rule_count": 117508,
+    "last_updated": "2025-12-19T16:33:02.653447951+08:00"
+  }
+]

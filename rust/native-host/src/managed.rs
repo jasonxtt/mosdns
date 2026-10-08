@@ -317,11 +317,9 @@ impl std::error::Error for ManagedSetError {}
 pub(crate) enum DomainSetHandle {
     Fixed(Rc<MixMatcher<()>>),
     Managed(Rc<ManagedDomainSet>),
-    /// `adguard_rule`: matches when no allow rule matches and a block rule does.
-    Filtered {
-        allow: Rc<MixMatcher<()>>,
-        deny: Rc<MixMatcher<()>>,
-    },
+    /// `adguard_rule`: matches when no allow rule matches and a block rule
+    /// does. A hot reload publishes a new generation.
+    Filtered(Rc<crate::rule_sources::Live<crate::config::providers::Filtered>>),
 }
 
 impl DomainSetHandle {
@@ -329,22 +327,26 @@ impl DomainSetHandle {
         match self {
             Self::Fixed(matcher) => matcher.r#match(domain).is_some(),
             Self::Managed(provider) => provider.matches(domain),
-            Self::Filtered { allow, deny } => {
-                allow.r#match(domain).is_none() && deny.r#match(domain).is_some()
+            Self::Filtered(live) => {
+                let set = live.get();
+                set.allow.r#match(domain).is_none() && set.deny.r#match(domain).is_some()
             }
         }
     }
 
     /// True for the sets that match the reference's presentation-form name.
     pub(crate) fn uses_presentation_name(&self) -> bool {
-        matches!(self, Self::Filtered { .. })
+        matches!(self, Self::Filtered(_))
     }
 
     pub(crate) fn rule_count(&self) -> usize {
         match self {
             Self::Fixed(matcher) => matcher.len(),
             Self::Managed(provider) => provider.rule_count(),
-            Self::Filtered { allow, deny } => allow.len() + deny.len(),
+            Self::Filtered(live) => {
+                let set = live.get();
+                set.allow.len() + set.deny.len()
+            }
         }
     }
 }

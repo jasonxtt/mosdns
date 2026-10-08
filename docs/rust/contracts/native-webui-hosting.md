@@ -75,8 +75,13 @@ failed refresh keeps the actual mutation ACK factual and existing drafts visible
 Initial reads, all modes/tabs, refresh paths and handlers use the same operation
 admission. Unsupported operations remain visibly disabled with family reasons.
 Actual `/plugins/switch*/show|post` uses switches.manage, and follow-up requery is
-independently gated. Capture, AdGuard, remembered lists, aliases, server appearance,
+independently gated. Capture, remembered lists, aliases, server appearance,
 Go process metrics and Go-only system/config/update functions stay suppressed.
+`rules.adguard` is supported when an `adguard_rule` tagged `adguard` exists, and
+`rules.diversion` also when any `sd_set_light`/`si_set` exists; the diversion tab then
+probes the built-in provider tags (`/plugins/{tag}/config`, 404 = not configured) and
+uses the reference online-source workflow for the found ones, while `special_route_N`
+catalogs keep the native local-text workflow (see native-rule-providers.md).
 Local theme/color storage works. Native identity displays Rust/product version,
 without fabricated zero Go metrics. Audit/details, named-cache catalog/list/flush,
 eligible local rules and native managed group/upstream workflows remain available.

@@ -5580,6 +5580,7 @@ plugins:
             ip_sets: Vec::new(),
             domain_mappers: Vec::new(),
             response_ip_rules: Vec::new(),
+            rule_sources: Default::default(),
             log_level: LogLevel::Error,
             forward: Some(ForwardConfig {
                 tag: forward,
@@ -5691,6 +5692,7 @@ plugins:
                 ip_sets: Vec::new(),
                 domain_mappers: Vec::new(),
                 response_ip_rules: Vec::new(),
+                rule_sources: Default::default(),
                 log_level: LogLevel::Error,
                 forward: Some(ForwardConfig {
                     tag: a,
@@ -6237,6 +6239,7 @@ plugins:
             ip_sets: Vec::new(),
             domain_mappers: Vec::new(),
             response_ip_rules: Vec::new(),
+            rule_sources: Default::default(),
             log_level: LogLevel::Error,
             forward: Some(ForwardConfig {
                 tag: forward.clone(),
@@ -6350,6 +6353,7 @@ plugins:
                 ip_sets: Vec::new(),
                 domain_mappers: Vec::new(),
                 response_ip_rules: Vec::new(),
+                rule_sources: Default::default(),
                 log_level: LogLevel::Error,
                 forward: Some(ForwardConfig {
                     tag: child_forward.clone(),
@@ -6540,6 +6544,7 @@ plugins:
             ip_sets: Vec::new(),
             domain_mappers: Vec::new(),
             response_ip_rules: Vec::new(),
+            rule_sources: Default::default(),
             log_level: LogLevel::Error,
             forward: Some(forward_config(&forward_b, forward_b_id)),
             forwards: vec![

@@ -938,6 +938,7 @@ const fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
         201 => "Created",
+        202 => "Accepted",
         204 => "No Content",
         400 => "Bad Request",
         404 => "Not Found",
@@ -1010,7 +1011,7 @@ enum AuditV2Route {
     RankSlowest,
 }
 
-fn decode_plugin_tag(tag: &str) -> Option<std::borrow::Cow<'_, str>> {
+pub(crate) fn decode_plugin_tag(tag: &str) -> Option<std::borrow::Cow<'_, str>> {
     if !tag.contains('%') {
         return Some(std::borrow::Cow::Borrowed(tag));
     }
@@ -1260,8 +1261,26 @@ fn request_mutates_managed_state(request: &Request) -> bool {
         // The special-groups mutation is a transaction owner in its own
         // right; it closes admission from inside the coordinator.
         Route::SpecialGroups { .. } => false,
+        // Rule-source changes of `sd_set_light`/`si_set`/`adguard_rule`.
+        Route::Unknown => {
+            matches!(request.method.as_str(), "PUT" | "POST" | "DELETE")
+                && rule_source_path(&request.target).is_some_and(|(_, rest)| {
+                    matches!(rest.split('/').next(), Some("config" | "rules" | "update"))
+                })
+        }
         _ => false,
     }
+}
+
+/// `/plugins/{tag}/{rest}` split into the decoded tag and the raw rest (no
+/// query string).
+fn rule_source_path(target: &str) -> Option<(std::borrow::Cow<'_, str>, &str)> {
+    let path = target.split_once('?').map_or(target, |(path, _)| path);
+    let (raw_tag, rest) = path.strip_prefix("/plugins/")?.split_once('/')?;
+    if raw_tag.is_empty() {
+        return None;
+    }
+    Some((decode_plugin_tag(raw_tag)?, rest))
 }
 
 #[derive(Serialize)]
@@ -2343,6 +2362,23 @@ async fn dispatch(
             }
         }
     }
+    if let Some((tag, rest)) = rule_source_path(&request.target) {
+        if let Some(provider) = config.rule_sources.provider(tag.as_ref()) {
+            let query = request
+                .target
+                .split_once('?')
+                .map_or("", |(_, query)| query);
+            let reply = config
+                .rule_sources
+                .handle(&provider, &request.method, rest, query, &request.body)
+                .await;
+            return Response {
+                status: reply.status,
+                content_type: reply.content_type,
+                body: reply.body,
+            };
+        }
+    }
     match route(&request.target) {
         Route::Capabilities => {
             if request.method != "GET" {
@@ -3229,12 +3265,20 @@ fn ui_operations(
     config: &CompiledConfig,
     switches: Option<&crate::switch_state::SwitchRegistry>,
 ) -> serde_json::Value {
+    use crate::rule_sources::Kind;
     let managed = config.managed_profile.is_some();
     let local = config.domain_sets.iter().any(|set| set.managed.is_some())
+        || config.rule_sources.has_postable_light()
         || config
             .managed_profile
             .as_ref()
             .is_some_and(|profile| !profile.groups.is_empty());
+    let diversion = managed || config.rule_sources.has_kind(&[Kind::Sd, Kind::Si]);
+    // The UI addresses AdGuard through the fixed `/plugins/adguard/...` path.
+    let adguard = config
+        .rule_sources
+        .provider("adguard")
+        .is_some_and(|provider| provider.kind == Kind::Adguard);
     let mut operations = serde_json::Map::new();
     for id in [
         "system.health",
@@ -3270,8 +3314,13 @@ fn ui_operations(
         ("upstreams.manage", managed, "上游编辑需要原生托管配置"),
         (
             "rules.diversion",
-            managed,
-            "本地文本分流源管理需要原生托管配置",
+            diversion,
+            "当前配置没有在线分流规则 provider，且未启用原生托管配置",
+        ),
+        (
+            "rules.adguard",
+            adguard,
+            "当前配置没有标签为 adguard 的 adguard_rule",
         ),
     ] {
         operations.insert(id.to_owned(), serde_json::json!({"supported": supported, "reason": if supported { None } else { Some(reason) }}));
@@ -3285,7 +3334,6 @@ fn ui_operations(
         }),
     );
     for id in [
-        "rules.adguard",
         "capture.logs",
         "client.aliases",
         "cache.requery",

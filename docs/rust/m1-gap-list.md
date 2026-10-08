@@ -23,6 +23,11 @@ sequence 里的 `rcode`（6）、`tag_setter`（10）、`drop_resp`（10）、`s
 [validation-records/10-07-m1-b2-primitives](validation-records/10-07-m1-b2-primitives/README.md)。
 剩余直接缺口：`domain_output` 8、`aliapi` 5、`rewrite`/`webinfo`/`requery` 各 1；连带数不变（66）是因为
 `sbnodefallback` 的连带消失、`prefer_foreign_nocache`（其 `primary: foreign` 已能解析）由直接缺口变成连带。
+**M1-a2 完成后**（`10-07-rust-native-m1-a2-rule-management`）：`check` 结果不变（`SUMMARY gaps=16 cascades=66 globals=1`，
+两份输出逐字节相同，运行前后目录不变）——本批不关闭 `check` 缺口，而是补齐 `check` 看不到的管理面：
+`sd_set_light`/`si_set`/`adguard_rule` 的在线来源管理、下载（含 SOCKS5）、自动更新，`domain_set_light` 的
+show/save/post，以及 `domain_mapper`/`si_set`/AdGuard 直接 matcher 的热更新；两个 Vue shell 的规则页在原生下可用。
+记录见 [validation-records/10-07-m1-a2-rule-management](validation-records/10-07-m1-a2-rule-management/README.md)。
 M1-0 之前的读法如下：
 
 - **直接缺口（GAP/GLOBAL）** 是要做的事；**连带错误（CASCADE）** 只因引用了被剔除的定义，
@@ -34,7 +39,7 @@ M1-0 之前的读法如下：
 
 ## 1. 直接缺口（按批次）
 
-### M1-a 规则 provider 与数据格式（**查询侧已由 M1-a1 关闭**；管理侧归 M1-a2）
+### M1-a 规则 provider 与数据格式（**查询侧由 M1-a1、管理侧由 M1-a2 关闭**）
 
 | 缺口 | 数量 | 说明 |
 | --- | --- | --- |

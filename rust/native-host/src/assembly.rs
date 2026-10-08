@@ -45,6 +45,7 @@ pub struct HostOptions {
     pub(crate) admission_deadline: Option<std::time::Instant>,
     pub(crate) audit_capacity: usize,
     pub(crate) tls_roots: Option<Arc<rustls::RootCertStore>>,
+    pub(crate) rule_timing: crate::rule_sources::RuleTiming,
 }
 
 impl Default for HostOptions {
@@ -59,6 +60,7 @@ impl Default for HostOptions {
             admission_deadline: None,
             audit_capacity: DEFAULT_AUDIT_CAPACITY,
             tls_roots: None,
+            rule_timing: crate::rule_sources::RuleTiming::default(),
         }
     }
 }
@@ -78,6 +80,7 @@ impl HostOptions {
             admission_deadline: None,
             audit_capacity: DEFAULT_AUDIT_CAPACITY,
             tls_roots: None,
+            rule_timing: crate::rule_sources::RuleTiming::default(),
         }
     }
 
@@ -115,6 +118,14 @@ impl HostOptions {
     #[must_use]
     pub fn with_tls_roots(mut self, roots: rustls::RootCertStore) -> Self {
         self.tls_roots = Some(Arc::new(roots));
+        self
+    }
+
+    /// Replaces the rule-source download and auto-update timings (tests).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_rule_timing(mut self, timing: crate::rule_sources::RuleTiming) -> Self {
+        self.rule_timing = timing;
         self
     }
 }
@@ -298,6 +309,9 @@ impl HostAssembly {
         mut options: HostOptions,
         state_root: Option<PathBuf>,
     ) -> Result<Self, AssemblyError> {
+        config
+            .rule_sources
+            .configure(options.tls_roots.clone(), options.rule_timing.clone());
         let config = Rc::new(config);
         let forwards = Rc::new(
             ForwardCatalog::from_compiled_config(&config, options.tls_roots.clone())
@@ -723,6 +737,16 @@ impl BoundHost {
             let scope = shutdown.child_token();
             let task = tasks.spawn_local(async move {
                 (None, api.serve(scope).await.map_err(HostRunError::Api))
+            });
+            task_keys.insert(task.id(), None);
+        }
+        {
+            // Rule-source auto-update; its jobs are joined by `control.close()`.
+            let scope = shutdown.child_token();
+            let control = control.clone();
+            let task = tasks.spawn_local(async move {
+                crate::rule_sources::supervise(control, scope).await;
+                (None, Ok(()))
             });
             task_keys.insert(task.id(), None);
         }

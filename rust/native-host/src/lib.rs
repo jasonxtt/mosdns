@@ -19,6 +19,8 @@ mod matchers;
 mod observer;
 mod plugins;
 mod policy;
+mod rule_download;
+mod rule_sources;
 mod runtime_snapshot;
 mod special_groups;
 mod static_ui;
@@ -107,10 +109,11 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 pub use policy::{
-    DomainPayload, HostAddresses, IpSetConfig, POLICY_BYTES_LIMIT, POLICY_LINE_LIMIT,
+    DomainPayload, HostAddresses, IpListHandle, IpSetConfig, POLICY_BYTES_LIMIT, POLICY_LINE_LIMIT,
     POLICY_RULE_LIMIT, ResponsePolicy, ResponsePolicyConfig, TtlPolicy,
 };
 
+pub use rule_sources::{RuleSources, RuleTiming};
 pub use runtime_snapshot::{PreparedSnapshot, RuntimeControl};
 
 pub use transaction::{CandidatePersistence, CompiledCandidate, ManagedStore, TransactionError};

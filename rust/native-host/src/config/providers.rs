@@ -1,17 +1,17 @@
 //! Read-only rule providers (`domain_set_light`, `sd_set_light`,
 //! `adguard_rule`, `si_set`) and the `domain_mapper` that merges them.
 //!
-//! Providers are loaded once at compile time from the existing on-disk state
-//! (rule files, `local_config` source manifests, `adguard/` directory) and are
-//! immutable afterwards. Management, downloads, auto-update and hot reload are
-//! outside this module. A missing or unusable source degrades the same way the
-//! reference providers do (skipped with a diagnostic), because that is how a
-//! production configuration with a stale manifest keeps starting.
+//! Each provider is split into "arguments → spec" (compile time only) and
+//! "spec → rules" (compile time and hot rebuilds on the blocking pool, see
+//! `crate::rule_sources`). A missing or unusable source degrades the same way
+//! the reference providers do (skipped with a diagnostic), because that is how
+//! a production configuration with a stale manifest keeps starting. Nothing in
+//! this module writes.
 
-use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mosdns_matcher_core::{
     IpPrefixList, RegexBuildError, ValuedBuildError, ValuedDomainMatcher, ValuedRule,
@@ -33,13 +33,13 @@ const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
 /// One rule string and the source name that contributed it.
-pub(super) struct RuleEntry {
-    pub(super) rule: String,
+pub(crate) struct RuleEntry {
+    pub(crate) rule: String,
     /// `None` means "the provider tag" (providers without per-source detail).
-    pub(super) source: Option<Rc<str>>,
+    pub(crate) source: Option<Arc<str>>,
 }
 
-pub(super) type ProviderRules = Rc<Vec<RuleEntry>>;
+pub(crate) type ProviderRules = Rc<Vec<RuleEntry>>;
 
 type Inputs<'a> = Option<&'a mut CandidateInputSet>;
 
@@ -89,28 +89,68 @@ fn args_map<'a>(
     Ok((path, args))
 }
 
-/// `domain_set_light`: `exps` first, then each file (SRS or text). Rules are
-/// kept as text; matching belongs to the `domain_mapper` that consumes them.
-pub(super) fn load_domain_set_light(
-    plugin: &RawPlugin,
-    mut inputs: Inputs<'_>,
-) -> Result<Vec<RuleEntry>, ConfigError> {
+/// The arguments of one `domain_set_light`, with paths already resolved.
+#[derive(Clone, Debug)]
+pub(crate) struct LightSpec {
+    pub(crate) tag: String,
+    /// `$.plugins[i].args`, for error locations.
+    path: String,
+    exps: Vec<String>,
+    /// `(index in files, resolved path)`; empty entries are left out.
+    pub(crate) files: Vec<(usize, PathBuf)>,
+}
+
+impl LightSpec {
+    /// The file `/save` and `/post` write: the first configured file, when it
+    /// is a `.txt` file (the reference only posts to `.txt`).
+    pub(crate) fn writable_file(&self) -> Option<&Path> {
+        let (index, file) = self.files.first()?;
+        (*index == 0
+            && file
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt")))
+        .then_some(file.as_path())
+    }
+}
+
+/// `domain_set_light` arguments: `exps`, `files`, `sets` (accepted, ignored:
+/// this provider never matches itself).
+pub(super) fn light_spec(plugin: &RawPlugin) -> Result<LightSpec, ConfigError> {
     let (path, args) = args_map(plugin, &["exps", "sets", "files"])?;
-    let mut out: Vec<RuleEntry> = policy_strings(args.get("exps"), &format!("{path}.exps"))?
-        .into_iter()
-        .map(|rule| RuleEntry { rule, source: None })
-        .collect();
-    // `sets` is accepted and ignored: this provider never matches itself.
+    let exps = policy_strings(args.get("exps"), &format!("{path}.exps"))?;
     policy_strings(args.get("sets"), &format!("{path}.sets"))?;
-    for (index, file) in policy_strings(args.get("files"), &format!("{path}.files"))?
+    let files = policy_strings(args.get("files"), &format!("{path}.files"))?
         .iter()
         .enumerate()
-    {
-        if file.is_empty() {
-            continue;
-        }
-        let resolved = resolve_relative(file, &plugin.root_dir);
-        let bytes = match read_file(&resolved, &mut inputs) {
+        .filter(|(_, file)| !file.is_empty())
+        .map(|(index, file)| (index, resolve_relative(file, &plugin.root_dir)))
+        .collect();
+    Ok(LightSpec {
+        tag: plugin.tag.clone(),
+        path,
+        exps,
+        files,
+    })
+}
+
+/// `domain_set_light`: `exps` first, then each file (SRS or text). Rules are
+/// kept as text; matching belongs to the `domain_mapper` that consumes them.
+pub(crate) fn load_light(
+    spec: &LightSpec,
+    mut inputs: Inputs<'_>,
+) -> Result<Vec<RuleEntry>, ConfigError> {
+    let path = &spec.path;
+    let mut out: Vec<RuleEntry> = spec
+        .exps
+        .iter()
+        .map(|rule| RuleEntry {
+            rule: rule.clone(),
+            source: None,
+        })
+        .collect();
+    for (index, resolved) in &spec.files {
+        let bytes = match read_file(resolved, &mut inputs) {
             Ok(Some(bytes)) => bytes,
             // A missing file is an empty source, not an error.
             Ok(None) => continue,
@@ -156,23 +196,28 @@ pub(super) fn load_domain_set_light(
     Ok(out)
 }
 
-/// One entry of a `local_config` / `config.json` source manifest. Only the
-/// fields the read side uses are kept; the rest of the reference schema is
-/// management state that is type-checked (as the reference decoder does) and
-/// otherwise ignored.
-#[derive(Default, Debug)]
-struct SourceEntry {
-    id: String,
-    name: String,
-    files: String,
-    enabled: bool,
-    enable_regexp: bool,
+/// One entry of a `local_config` / `config.json` source manifest, with every
+/// field of the reference struct (management writes them back).
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub(crate) struct SourceEntry {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) files: String,
+    pub(crate) url: String,
+    pub(crate) enabled: bool,
+    pub(crate) enable_regexp: bool,
+    pub(crate) auto_update: bool,
+    pub(crate) update_interval_hours: i64,
+    pub(crate) rule_count: i64,
+    /// The RFC 3339 text exactly as read (or written); `None` is the zero time.
+    pub(crate) last_updated: Option<String>,
 }
 
 /// Which reference struct decodes the manifest; each knows different fields,
 /// and Go only type-checks the fields its own struct has.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum Schema {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Schema {
     /// `sd_set_light`: name,type,files,url,enabled,enable_regexp,…
     Sd,
     /// `si_set`: as `Sd` without `enable_regexp`.
@@ -350,8 +395,16 @@ impl<'de> serde::de::DeserializeSeed<'de> for EntrySeed {
                         // Go parses the raw literal as int64 (`-0` is fine, `1.0` is not).
                         let raw = map.next_value::<Box<serde_json::value::RawValue>>()?;
                         let token = raw.get();
-                        if token != "null" && token.parse::<i64>().is_err() {
-                            return Err(A::Error::custom(format!("field {field} is not an int64")));
+                        if token == "null" {
+                            continue;
+                        }
+                        let value = token.parse::<i64>().map_err(|_| {
+                            A::Error::custom(format!("field {field} is not an int64"))
+                        })?;
+                        if field == "rule_count" {
+                            entry.rule_count = value;
+                        } else {
+                            entry.update_interval_hours = value;
                         }
                         continue;
                     }
@@ -368,6 +421,9 @@ impl<'de> serde::de::DeserializeSeed<'de> for EntrySeed {
                         if !valid {
                             return Err(A::Error::custom("field last_updated is not a time"));
                         }
+                        if token != "null" {
+                            entry.last_updated = Some(token[1..token.len() - 1].to_owned());
+                        }
                         continue;
                     }
                     let value = map.next_value::<Value>()?;
@@ -379,10 +435,11 @@ impl<'de> serde::de::DeserializeSeed<'de> for EntrySeed {
                         ("id", Value::String(text)) => entry.id = text,
                         ("name", Value::String(text)) => entry.name = text,
                         ("files", Value::String(text)) => entry.files = text,
-                        ("type" | "url", Value::String(_)) => {}
+                        ("type", Value::String(text)) => entry.kind = text,
+                        ("url", Value::String(text)) => entry.url = text,
                         ("enabled", Value::Bool(flag)) => entry.enabled = flag,
                         ("enable_regexp", Value::Bool(flag)) => entry.enable_regexp = flag,
-                        ("auto_update", Value::Bool(_)) => {}
+                        ("auto_update", Value::Bool(flag)) => entry.auto_update = flag,
                         _ => return Err(wrong()),
                     }
                 }
@@ -445,107 +502,211 @@ fn has_repairable_string(bytes: &[u8]) -> bool {
     false
 }
 
+/// Decodes one source object the way the reference API handlers decode a
+/// request body (`json.NewDecoder(body).Decode(&source)`): the first JSON value
+/// only, the same per-field rules as the manifest. `null` is the zero source.
+pub(crate) fn parse_source_object(bytes: &[u8], schema: Schema) -> Result<SourceEntry, String> {
+    use serde::de::DeserializeSeed;
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let text = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+    if text.trim_start().starts_with("null") {
+        return Ok(SourceEntry::default());
+    }
+    EntrySeed(schema)
+        .deserialize(&mut deserializer)
+        .map_err(|e| e.to_string())
+}
+
+/// Where one manifest-backed provider keeps its state.
+#[derive(Clone, Debug)]
+pub(crate) struct ManifestSpec {
+    pub(crate) tag: String,
+    pub(crate) schema: Schema,
+    /// `local_config`, or `<dir>/config.json` for `adguard_rule`.
+    pub(crate) manifest: PathBuf,
+    /// The `adguard_rule` list directory (unused by the other kinds).
+    pub(crate) dir: PathBuf,
+    /// The configuration root that relative `files` resolve against.
+    pub(crate) root_dir: PathBuf,
+    /// `socks5` proxy address for downloads; empty means direct.
+    pub(crate) socks5: String,
+}
+
+impl ManifestSpec {
+    /// The local rule file of one source.
+    pub(crate) fn source_file(&self, entry: &SourceEntry) -> PathBuf {
+        match self.schema {
+            Schema::Adguard => self.dir.join(format!("{}.rules", entry.id)),
+            Schema::Sd | Schema::Si => resolve_relative(&entry.files, &self.root_dir),
+        }
+    }
+}
+
+/// A manifest as loaded at compile time.
+pub(crate) struct Manifest {
+    pub(crate) entries: Vec<SourceEntry>,
+    /// The file exists but could not be parsed: the reference starts empty and
+    /// would overwrite it on the next change; this host refuses changes.
+    pub(crate) unreadable: bool,
+}
+
 /// Reads a JSON array manifest. A missing, empty or unparsable manifest is an
-/// empty source list (the reference host logs it and starts empty).
-fn read_manifest(
-    path: &Path,
-    plugin_tag: &str,
-    schema: Schema,
-    inputs: &mut Inputs<'_>,
-) -> Result<Vec<SourceEntry>, ConfigError> {
-    let bytes = match read_file(path, inputs) {
+/// empty source list (the reference host logs it and starts empty). Entries
+/// are deduplicated like the reference map: by `name` (sd/si, nameless entries
+/// dropped) or by `id` (adguard); a later duplicate replaces the earlier one.
+pub(crate) fn read_manifest(
+    spec: &ManifestSpec,
+    mut inputs: Inputs<'_>,
+) -> Result<Manifest, ConfigError> {
+    let (path, plugin_tag, schema) = (&spec.manifest, spec.tag.as_str(), spec.schema);
+    let bytes = match read_file(path, &mut inputs) {
         Ok(Some(bytes)) => bytes,
-        Ok(None) => return Ok(Vec::new()),
+        Ok(None) => {
+            return Ok(Manifest {
+                entries: Vec::new(),
+                unreadable: false,
+            });
+        }
         Err(error) => {
             crate::diag::warn_line!(
                 "{plugin_tag}: cannot read source manifest {}: {error}; starting empty",
                 path.display()
             );
-            return Ok(Vec::new());
+            return Ok(Manifest {
+                entries: Vec::new(),
+                unreadable: true,
+            });
         }
     };
     if bytes.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Manifest {
+            entries: Vec::new(),
+            unreadable: false,
+        });
     }
-    match parse_manifest(&bytes, schema) {
-        Ok(entries) => Ok(entries),
+    let entries = match parse_manifest(&bytes, schema) {
+        Ok(entries) => entries,
         // Go replaces lone surrogates and invalid UTF-8 inside strings with
         // U+FFFD and carries on; this host does not, so it refuses instead of
         // silently starting empty.
-        Err(error) if has_repairable_string(&bytes) => Err(ConfigError::new(
-            path.display().to_string(),
-            format!(
-                "{plugin_tag}: source manifest has a string the reference repairs \
+        Err(error) if has_repairable_string(&bytes) => {
+            return Err(ConfigError::new(
+                path.display().to_string(),
+                format!(
+                    "{plugin_tag}: source manifest has a string the reference repairs \
                      (lone surrogate or invalid UTF-8) which this host does not: {error}"
-            ),
-        )),
+                ),
+            ));
+        }
         Err(error) => {
             crate::diag::warn_line!(
                 "{plugin_tag}: cannot parse source manifest {}: {error}; starting empty",
                 path.display()
             );
-            Ok(Vec::new())
+            return Ok(Manifest {
+                entries: Vec::new(),
+                unreadable: true,
+            });
         }
-    }
-}
-
-/// Keeps one entry per name (a later duplicate replaces the earlier one in
-/// place) and drops nameless entries, as the reference loader does.
-fn by_name(entries: Vec<SourceEntry>, plugin_tag: &str) -> Vec<SourceEntry> {
+    };
     let mut out: Vec<SourceEntry> = Vec::new();
     for entry in entries {
-        if entry.name.is_empty() {
+        if schema != Schema::Adguard && entry.name.is_empty() {
             crate::diag::warn_line!("{plugin_tag}: skipping a rule source with an empty name");
             continue;
         }
-        match out.iter().position(|existing| existing.name == entry.name) {
+        let key = |e: &SourceEntry| {
+            if schema == Schema::Adguard {
+                e.id.clone()
+            } else {
+                e.name.clone()
+            }
+        };
+        match out.iter().position(|existing| key(existing) == key(&entry)) {
             Some(index) => out[index] = entry,
             None => out.push(entry),
         }
     }
-    out
+    Ok(Manifest {
+        entries: out,
+        unreadable: false,
+    })
 }
 
-fn local_config(plugin: &RawPlugin, kind: &str) -> Result<(PathBuf, String), ConfigError> {
-    let (path, args) = args_map(plugin, &["socks5", "local_config"])?;
-    // `socks5` only configures downloads, which this host never performs.
-    if let Some(value) = args.get("socks5") {
-        if !matches!(value, RawValue::Null) {
-            expect_string(value, &format!("{path}.socks5"))?;
+/// `sd_set_light`/`si_set` (`local_config`) and `adguard_rule` (`dir`)
+/// arguments.
+pub(super) fn manifest_spec(
+    plugin: &RawPlugin,
+    schema: Schema,
+) -> Result<ManifestSpec, ConfigError> {
+    let kind = match schema {
+        Schema::Sd => "sd_set_light",
+        Schema::Si => "si_set",
+        Schema::Adguard => "adguard_rule",
+    };
+    let allowed: &[&str] = if schema == Schema::Adguard {
+        &["dir", "socks5"]
+    } else {
+        &["socks5", "local_config"]
+    };
+    let (path, args) = args_map(plugin, allowed)?;
+    let socks5 = match args.get("socks5") {
+        Some(value) if !matches!(value, RawValue::Null) => {
+            expect_string(value, &format!("{path}.socks5"))?
         }
-    }
-    let config = match args.get("local_config") {
-        Some(value) => expect_string(value, &format!("{path}.local_config"))?,
+        _ => String::new(),
+    };
+    let key = if schema == Schema::Adguard {
+        "dir"
+    } else {
+        "local_config"
+    };
+    let value = match args.get(key) {
+        Some(value) => expect_string(value, &format!("{path}.{key}"))?,
         None => String::new(),
     };
-    if config.is_empty() {
+    if value.is_empty() {
         return Err(ConfigError::new(
-            format!("{path}.local_config"),
-            format!("{kind}: 'local_config' must be specified"),
+            format!("{path}.{key}"),
+            format!("{kind}: '{key}' must be specified"),
         ));
     }
-    Ok((
-        resolve_relative(&config, &plugin.root_dir),
-        plugin.tag.clone(),
-    ))
+    let resolved = resolve_relative(&value, &plugin.root_dir);
+    let (manifest, dir) = if schema == Schema::Adguard {
+        (resolved.join("config.json"), resolved)
+    } else {
+        (resolved, PathBuf::new())
+    };
+    Ok(ManifestSpec {
+        tag: plugin.tag.clone(),
+        schema,
+        manifest,
+        dir,
+        root_dir: plugin.root_dir.clone(),
+        socks5,
+    })
 }
 
-/// `sd_set_light`: enabled manifest sources whose `.srs` file decodes.
-pub(super) fn load_sd_set_light(
-    plugin: &RawPlugin,
+/// Rule counts observed while loading, keyed like the manifest (`name`, or
+/// `id` for adguard). Only sources that were actually read are listed.
+pub(crate) type Counts = Vec<(String, i64)>;
+
+/// `sd_set_light`: enabled manifest sources whose `.srs` file decodes. The
+/// count of a source that cannot be opened or decoded is left unchanged, as
+/// in the reference reload.
+pub(crate) fn load_sd(
+    spec: &ManifestSpec,
+    sources: &[SourceEntry],
     mut inputs: Inputs<'_>,
-) -> Result<Vec<RuleEntry>, ConfigError> {
-    let (manifest, tag) = local_config(plugin, "sd_set_light")?;
-    let sources = by_name(
-        read_manifest(&manifest, &tag, Schema::Sd, &mut inputs)?,
-        &tag,
-    );
+) -> (Vec<RuleEntry>, Counts) {
+    let tag = &spec.tag;
     let mut out = Vec::new();
+    let mut counts = Vec::new();
     for source in sources {
         if !source.enabled || source.files.is_empty() {
             continue;
         }
-        let file = resolve_relative(&source.files, &plugin.root_dir);
+        let file = spec.source_file(source);
         let bytes = match read_file(&file, &mut inputs) {
             Ok(Some(bytes)) => bytes,
             Ok(None) | Err(_) => {
@@ -557,7 +718,7 @@ pub(super) fn load_sd_set_light(
                 continue;
             }
         };
-        let name: Rc<str> = Rc::from(source.name.as_str());
+        let name: Arc<str> = Arc::from(source.name.as_str());
         match decode_domain_srs(&bytes, source.enable_regexp) {
             Ok(srs) => {
                 if !srs.complete {
@@ -566,9 +727,10 @@ pub(super) fn load_sd_set_light(
                         source.name
                     );
                 }
+                counts.push((source.name.clone(), srs.rules.len() as i64));
                 out.extend(srs.rules.into_iter().map(|rule| RuleEntry {
                     rule,
-                    source: Some(Rc::clone(&name)),
+                    source: Some(Arc::clone(&name)),
                 }));
             }
             Err(error) => {
@@ -576,20 +738,19 @@ pub(super) fn load_sd_set_light(
             }
         }
     }
-    Ok(out)
+    (out, counts)
 }
 
-/// `si_set`: the CIDRs of every enabled source's `.srs` file.
-pub(super) fn load_si_set(
-    plugin: &RawPlugin,
+/// `si_set`: the CIDRs of every enabled source's `.srs` file. A missing or
+/// unusable file counts as zero, as in the reference reload.
+pub(crate) fn load_si(
+    spec: &ManifestSpec,
+    sources: &[SourceEntry],
     mut inputs: Inputs<'_>,
-) -> Result<Rc<IpPrefixList>, ConfigError> {
-    let (manifest, tag) = local_config(plugin, "si_set")?;
-    let sources = by_name(
-        read_manifest(&manifest, &tag, Schema::Si, &mut inputs)?,
-        &tag,
-    );
+) -> (IpPrefixList, Counts) {
+    let tag = &spec.tag;
     let mut list = IpPrefixList::new();
+    let mut counts = Vec::new();
     for source in sources {
         if !source.enabled {
             continue;
@@ -601,7 +762,8 @@ pub(super) fn load_si_set(
             );
             continue;
         }
-        let file = resolve_relative(&source.files, &plugin.root_dir);
+        let file = spec.source_file(source);
+        let mut count = 0_i64;
         match read_file(&file, &mut inputs) {
             // A missing file is "not there yet", not an error.
             Ok(None) => {}
@@ -609,6 +771,7 @@ pub(super) fn load_si_set(
                 Ok(srs) => {
                     // Prefixes read before a decode problem stay, as in the
                     // reference loader.
+                    count = srs.prefixes.len() as i64;
                     for (address, bits) in srs.prefixes {
                         list.append(address, bits);
                     }
@@ -629,28 +792,35 @@ pub(super) fn load_si_set(
                 );
             }
         }
+        counts.push((source.name.clone(), count));
     }
     list.rebuild();
-    Ok(Rc::new(list))
+    (list, counts)
 }
 
 /// The rules of one `adguard_rule`: the block rules `domain_mapper` consumes
 /// (shared), and the `@@` exception rules a direct `qname $tag` reference
 /// needs in addition.
-pub(super) struct AdguardRules {
-    pub(super) allow: Vec<String>,
-    pub(super) deny: ProviderRules,
+pub(crate) struct AdguardRules {
+    pub(crate) allow: Vec<String>,
+    pub(crate) deny: ProviderRules,
+}
+
+/// The direct `qname $tag` matcher of an `adguard_rule`: a name matches when
+/// no exception rule matches and a block rule does.
+pub(crate) struct Filtered {
+    pub(crate) allow: mosdns_matcher_core::MixMatcher<()>,
+    pub(crate) deny: mosdns_matcher_core::MixMatcher<()>,
 }
 
 impl AdguardRules {
-    /// The reference provider's direct matcher: a name matches when no
-    /// exception rule matches and a block rule does.
+    /// The reference provider's direct matcher.
     ///
     /// # Errors
     ///
     /// A `regexp:` rule that is valid Go but outside what this host can run
     /// with Go semantics is refused instead of being left out.
-    pub(super) fn matcher(&self, tag: &str) -> Result<crate::managed::DomainSetHandle, String> {
+    pub(crate) fn filtered(&self, tag: &str) -> Result<Filtered, String> {
         let build = |rules: &mut dyn Iterator<Item = &str>| -> Result<_, String> {
             let mut set = mosdns_matcher_core::MixMatcher::new();
             set.set_default("domain");
@@ -671,90 +841,101 @@ impl AdguardRules {
                 // Any other rule the matcher rejects is not part of the set.
                 let _ = set.add(rule, ());
             }
-            Ok(Rc::new(set))
+            Ok(set)
         };
-        Ok(crate::managed::DomainSetHandle::Filtered {
+        Ok(Filtered {
             allow: build(&mut self.allow.iter().map(String::as_str))?,
             deny: build(&mut self.deny.iter().map(|entry| entry.rule.as_str()))?,
         })
     }
 }
 
+/// Parses one filter list into `(allow, deny)` rules and the reference rule
+/// count (lines that produce a rule, minus regexps Go rejects). The reference
+/// scanner stops at a line over its limit and keeps what it read before.
+pub(crate) fn parse_adguard_list(
+    tag: &str,
+    name: &str,
+    bytes: &[u8],
+    allow: &mut Vec<String>,
+    deny: &mut Vec<RuleEntry>,
+) -> i64 {
+    let mut count = 0;
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.len() >= MAX_LINE_BYTES {
+            crate::diag::warn_line!(
+                "{tag}: rule list '{name}' has a line over the scanner limit; the rest is ignored"
+            );
+            break;
+        }
+        let line = String::from_utf8_lossy(line);
+        let Some((is_allow, rule)) = adguard_line(&line) else {
+            continue;
+        };
+        let invalid = rule.strip_prefix("regexp:").is_some_and(|pattern| {
+            mosdns_matcher_core::check_go_regexp(pattern).is_err_and(|e| e.is_invalid_in_go())
+        });
+        if !invalid {
+            count += 1;
+        }
+        if is_allow {
+            allow.push(rule);
+        } else {
+            deny.push(RuleEntry { rule, source: None });
+        }
+    }
+    count
+}
+
 /// `adguard_rule`: rules (`||domain^`, wildcards, `/regex/`, plain
-/// hostnames) of every enabled list in `<dir>/config.json`, read from
-/// `<dir>/<id>.rules`. Missing list files are skipped and are never
-/// downloaded.
-pub(super) fn load_adguard_rule(
-    plugin: &RawPlugin,
+/// hostnames) of every enabled list, read from `<dir>/<id>.rules`. Missing
+/// list files are skipped (counted as zero). With `count_all`, disabled lists
+/// are read for their count too (the reference reload counts every list).
+pub(crate) fn load_adguard(
+    spec: &ManifestSpec,
+    sources: &[SourceEntry],
+    count_all: bool,
     mut inputs: Inputs<'_>,
-) -> Result<AdguardRules, ConfigError> {
-    let (path, args) = args_map(plugin, &["dir", "socks5"])?;
-    if let Some(value) = args.get("socks5") {
-        if !matches!(value, RawValue::Null) {
-            expect_string(value, &format!("{path}.socks5"))?;
-        }
-    }
-    let dir = match args.get("dir") {
-        Some(value) => expect_string(value, &format!("{path}.dir"))?,
-        None => String::new(),
-    };
-    if dir.is_empty() {
-        return Err(ConfigError::new(
-            format!("{path}.dir"),
-            "adguard_rule: 'dir' must be specified",
-        ));
-    }
-    let dir = resolve_relative(&dir, &plugin.root_dir);
-    let manifest = dir.join("config.json");
-    let tag = plugin.tag.as_str();
-    // One list per id (a later duplicate replaces the earlier one in place).
-    let mut sources: Vec<SourceEntry> = Vec::new();
-    for entry in read_manifest(&manifest, tag, Schema::Adguard, &mut inputs)? {
-        match sources.iter().position(|existing| existing.id == entry.id) {
-            Some(index) => sources[index] = entry,
-            None => sources.push(entry),
-        }
-    }
+) -> (AdguardRules, Counts) {
+    let tag = spec.tag.as_str();
     let mut allow = Vec::new();
     let mut deny = Vec::new();
+    let mut counts = Vec::new();
     for source in sources {
-        if !source.enabled {
+        if !source.enabled && !count_all {
             continue;
         }
-        let file = dir.join(format!("{}.rules", source.id));
+        let file = spec.source_file(source);
         let bytes = match read_file(&file, &mut inputs) {
             Ok(Some(bytes)) => bytes,
             Ok(None) | Err(_) => {
-                crate::diag::warn_line!(
-                    "{tag}: skipping enabled rule '{}', cannot open {}",
-                    source.name,
-                    file.display()
-                );
+                if source.enabled {
+                    crate::diag::warn_line!(
+                        "{tag}: skipping enabled rule '{}', cannot open {}",
+                        source.name,
+                        file.display()
+                    );
+                }
+                counts.push((source.id.clone(), 0));
                 continue;
             }
         };
-        for line in bytes.split(|byte| *byte == b'\n') {
-            // The reference scanner stops this list at a line this long and
-            // keeps what it read before.
-            if line.len() >= MAX_LINE_BYTES {
-                crate::diag::warn_line!(
-                    "{tag}: rule list '{}' has a line over the scanner limit; the rest is ignored",
-                    source.name
-                );
-                break;
-            }
-            let line = String::from_utf8_lossy(line);
-            match adguard_line(&line) {
-                Some((true, rule)) => allow.push(rule),
-                Some((false, rule)) => deny.push(RuleEntry { rule, source: None }),
-                None => {}
-            }
+        if source.enabled {
+            let count = parse_adguard_list(tag, &source.name, &bytes, &mut allow, &mut deny);
+            counts.push((source.id.clone(), count));
+        } else {
+            let count =
+                parse_adguard_list(tag, &source.name, &bytes, &mut Vec::new(), &mut Vec::new());
+            counts.push((source.id.clone(), count));
         }
     }
-    Ok(AdguardRules {
-        allow,
-        deny: Rc::new(deny),
-    })
+    (
+        AdguardRules {
+            allow,
+            deny: Rc::new(deny),
+        },
+        counts,
+    )
 }
 
 fn is_word(byte: u8) -> bool {
@@ -823,15 +1004,15 @@ fn adguard_line(raw: &str) -> Option<(bool, String)> {
     None
 }
 
-/// The compiled `domain_mapper`.
+/// The compiled `domain_mapper`. Its matcher is the current published
+/// generation; a hot rebuild (`crate::rule_sources`) replaces it whole.
 #[derive(Clone)]
 pub struct DomainMapperConfig {
     pub tag: String,
-    matcher: Rc<ValuedDomainMatcher>,
+    pub(crate) matcher: Rc<crate::rule_sources::Live<ValuedDomainMatcher>>,
     default_mark: u8,
     default_ctx_mark: u32,
     default_tag: String,
-    rule_count: usize,
 }
 
 /// The query name in DNS presentation form, which is what the reference host
@@ -885,10 +1066,10 @@ pub struct MapperOutcome {
 }
 
 impl DomainMapperConfig {
-    /// The number of unique rules the mapper compiled.
+    /// The number of unique rules in the current generation.
     #[must_use]
-    pub const fn rule_count(&self) -> usize {
-        self.rule_count
+    pub fn rule_count(&self) -> usize {
+        self.matcher.get().len()
     }
 
     /// Evaluates a query name given in DNS wire form, exactly as the executor
@@ -903,7 +1084,8 @@ impl DomainMapperConfig {
     /// Evaluates a presentation-form query name (no trailing dot required).
     #[must_use]
     pub fn evaluate(&self, name: Option<&str>) -> MapperOutcome {
-        if let Some(result) = name.and_then(|name| self.matcher.r#match(name)) {
+        let matcher = self.matcher.get();
+        if let Some(result) = name.and_then(|name| matcher.r#match(name)) {
             // Rule mark `m` is stored as bit `m - 1` of the result mask and
             // set as fast flag `m`.
             return MapperOutcome {
@@ -970,12 +1152,34 @@ impl Executor for MapperExecutor {
     }
 }
 
-/// Compiles a `domain_mapper` against the already loaded providers.
-pub(super) fn compile_domain_mapper(
+/// One `domain_mapper` rule: which provider, and what a match applies.
+#[derive(Clone, Debug)]
+pub(crate) struct MapperRule {
+    pub(crate) tag: String,
+    mark: u8,
+    ctx_mark: u32,
+    output_tag: String,
+}
+
+/// The validated arguments of one `domain_mapper`.
+#[derive(Clone, Debug)]
+pub(crate) struct MapperSpec {
+    pub(crate) tag: String,
+    /// `$.plugins[i].args.rules`, for error locations.
+    path: String,
+    pub(crate) rules: Vec<MapperRule>,
+    default_mark: u8,
+    default_ctx_mark: u32,
+    default_tag: String,
+}
+
+/// Validates a `domain_mapper` definition; every rule must name a loaded
+/// provider.
+pub(super) fn mapper_spec(
     plugin: &RawPlugin,
     kind_of: &dyn Fn(&str) -> Option<String>,
-    providers: &BTreeMap<String, ProviderRules>,
-) -> Result<DomainMapperConfig, ConfigError> {
+    is_provider: &dyn Fn(&str) -> bool,
+) -> Result<MapperSpec, ConfigError> {
     let (path, args) = args_map(
         plugin,
         &["rules", "default_mark", "default_ctx_mark", "default_tag"],
@@ -1010,10 +1214,10 @@ pub(super) fn compile_domain_mapper(
         None => String::new(),
     };
 
-    let mut valued: Vec<ValuedRule> = Vec::new();
-    if let Some(rules) = args.get("rules") {
-        if !matches!(rules, RawValue::Null) {
-            for (index, rule) in expect_sequence(rules, &format!("{path}.rules"))?
+    let mut rules = Vec::new();
+    if let Some(list) = args.get("rules") {
+        if !matches!(list, RawValue::Null) {
+            for (index, rule) in expect_sequence(list, &format!("{path}.rules"))?
                 .iter()
                 .enumerate()
             {
@@ -1030,7 +1234,7 @@ pub(super) fn compile_domain_mapper(
                     Some(value) => expect_string(value, &format!("{rule_path}.output_tag"))?,
                     None => String::new(),
                 };
-                let Some(entries) = providers.get(&tag) else {
+                if !is_provider(&tag) {
                     let at = format!("{rule_path}.tag");
                     return Err(match kind_of(&tag) {
                         None => ConfigError::unknown_reference(
@@ -1043,43 +1247,74 @@ pub(super) fn compile_domain_mapper(
                             format!("plugin {tag} does not support rule export"),
                         ),
                     });
-                };
-                let target_tag = if output_tag.is_empty() {
-                    tag.as_str()
-                } else {
-                    output_tag.as_str()
-                };
-                let fast_mask = if rule_mark > 0 {
-                    1u64 << (rule_mark - 1)
-                } else {
-                    0
-                };
-                for entry in entries.iter() {
-                    let source = entry
-                        .source
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(&tag);
-                    valued.push(ValuedRule::new(
-                        entry.rule.clone(),
-                        fast_mask,
-                        (ctx_mark > 0).then_some(ctx_mark),
-                        target_tag,
-                        source,
-                    ));
                 }
+                rules.push(MapperRule {
+                    tag,
+                    mark: rule_mark,
+                    ctx_mark,
+                    output_tag,
+                });
             }
         }
     }
-    let (matcher, rule_count) = build_matcher(valued, &plugin.tag, &format!("{path}.rules"))?;
-    Ok(DomainMapperConfig {
+    Ok(MapperSpec {
         tag: plugin.tag.clone(),
-        matcher: Rc::new(matcher),
+        path: format!("{path}.rules"),
+        rules,
         default_mark,
         default_ctx_mark,
         default_tag,
-        rule_count,
     })
+}
+
+/// Builds a mapper matcher from the provider rules (looked up by tag). Used
+/// at compile time and by hot rebuilds on the blocking pool.
+pub(crate) fn build_mapper_matcher<'a>(
+    spec: &MapperSpec,
+    rules_of: &dyn Fn(&str) -> Option<&'a [RuleEntry]>,
+) -> Result<ValuedDomainMatcher, ConfigError> {
+    let mut valued: Vec<ValuedRule> = Vec::new();
+    for rule in &spec.rules {
+        let tag = rule.tag.as_str();
+        let target_tag = if rule.output_tag.is_empty() {
+            tag
+        } else {
+            rule.output_tag.as_str()
+        };
+        let fast_mask = if rule.mark > 0 {
+            1u64 << (rule.mark - 1)
+        } else {
+            0
+        };
+        for entry in rules_of(tag).unwrap_or_default() {
+            let source = entry
+                .source
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(tag);
+            valued.push(ValuedRule::new(
+                entry.rule.clone(),
+                fast_mask,
+                (rule.ctx_mark > 0).then_some(rule.ctx_mark),
+                target_tag,
+                source,
+            ));
+        }
+    }
+    build_matcher(valued, &spec.tag, &spec.path)
+}
+
+impl MapperSpec {
+    /// The compiled mapper around an already built matcher.
+    pub(super) fn config(&self, matcher: ValuedDomainMatcher) -> DomainMapperConfig {
+        DomainMapperConfig {
+            tag: self.tag.clone(),
+            matcher: Rc::new(crate::rule_sources::Live::new(matcher)),
+            default_mark: self.default_mark,
+            default_ctx_mark: self.default_ctx_mark,
+            default_tag: self.default_tag.clone(),
+        }
+    }
 }
 
 /// Whether Go's `strings.ToLower` (a per-rune simple mapping) turns the text
@@ -1104,6 +1339,21 @@ fn unicode_lowercase_refusal(tag: &str, rule: &str) -> Option<String> {
     })
 }
 
+/// Why this host would refuse a configuration holding `rule` (a valid-Go
+/// regexp outside the gate, or a Unicode-lowercase rule), if it would. Used
+/// to keep downloads and posted lists from making the next start fail.
+pub(crate) fn rule_refusal(tag: &str, rule: &str) -> Option<String> {
+    if let Some(pattern) = rule.strip_prefix("regexp:") {
+        return match mosdns_matcher_core::check_go_regexp(pattern) {
+            Err(error) if !error.is_invalid_in_go() => {
+                Some(unsupported_regexp_message(tag, rule, &error))
+            }
+            _ => None,
+        };
+    }
+    unicode_lowercase_refusal(tag, rule)
+}
+
 fn unsupported_regexp_message(tag: &str, rule: &str, error: &RegexBuildError) -> String {
     format!(
         "{tag}: regexp rule {rule:?} is valid Go but uses syntax this host cannot run \
@@ -1125,7 +1375,7 @@ fn build_matcher(
     mut rules: Vec<ValuedRule>,
     tag: &str,
     path: &str,
-) -> Result<(ValuedDomainMatcher, usize), ConfigError> {
+) -> Result<ValuedDomainMatcher, ConfigError> {
     rules.retain(|rule| {
         let keep = known_rule_kind(&rule.rule);
         if !keep {
@@ -1172,10 +1422,7 @@ fn build_matcher(
     }
     for _ in 0..100_000 {
         match ValuedDomainMatcher::build(&rules) {
-            Ok(matcher) => {
-                let count = matcher.len();
-                return Ok((matcher, count));
-            }
+            Ok(matcher) => return Ok(matcher),
             Err(
                 ValuedBuildError::InvalidRule(rule)
                 | ValuedBuildError::InvalidRegex { rule, .. }

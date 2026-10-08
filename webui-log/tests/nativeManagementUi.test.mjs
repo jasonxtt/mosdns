@@ -10,6 +10,7 @@ import {
   classifyDiversionSource,
   isNativeUpstreamReadOnly,
   loadLegacyDiversionCatalogs,
+  loadNativeOnlineCatalogs,
   validateDiversionCatalogChange
 } from '../src/api/nativeManagement.js'
 
@@ -127,4 +128,22 @@ test('unsupported upstreams stay read-only and visible', () => {
   assert.deepEqual(isNativeUpstreamReadOnly({
     tag: 'local', protocol: 'udp', enabled: true, addr: '127.0.0.1:5300'
   }, capabilities), { readOnly: false, reason: '' })
+})
+
+test('native online catalogs keep configured providers and treat 404 as not configured', async () => {
+  const requested = []
+  const result = await loadNativeOnlineCatalogs(
+    [['geositecn', 'geosite_cn'], ['geoipcn', 'geoip_cn'], ['cuscn', 'cuscn'], ['odd', 'a b']],
+    async (url) => {
+      requested.push(url)
+      if (url === '/plugins/geoip_cn/config') throw Object.assign(new Error('404 page not found'), { status: 404 })
+      if (url === '/plugins/cuscn/config') throw Object.assign(new Error('boom'), { status: 500 })
+      return [{ name: 'x', type: 'geositecn' }]
+    }
+  )
+  assert.deepEqual(requested, [
+    '/plugins/geosite_cn/config', '/plugins/geoip_cn/config', '/plugins/cuscn/config', '/plugins/a%20b/config'
+  ])
+  assert.deepEqual(result.catalogs.map((catalog) => [catalog.type, catalog.tag]), [['geositecn', 'geosite_cn'], ['odd', 'a b']])
+  assert.deepEqual(result.failures.map((failure) => [failure.tag, failure.status]), [['cuscn', 500]])
 })

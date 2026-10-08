@@ -77,7 +77,7 @@ defineEmits(['create', 'update-all', 'toggle', 'update', 'edit', 'delete'])
             <td class="text-right">{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
             <td class="mono" :title="formatTime(rule.last_updated)">{{ formatTime(rule.last_updated) }}</td>
             <td class="row-actions">
-              <button class="btn tiny warning" :disabled="nativeLocalText" :title="nativeLocalText ? '原生运行时不支持在线更新' : ''" @click="$emit('update', rule)">更新</button>
+              <button class="btn tiny warning" :disabled="nativeLocalText || rule.__localText" :title="nativeLocalText || rule.__localText ? '原生运行时不支持在线更新' : ''" @click="$emit('update', rule)">更新</button>
               <button class="btn tiny secondary" :disabled="rule.__readOnly || !canMutate" @click="$emit('edit', rule)">编辑</button>
               <button class="btn tiny danger" :disabled="rule.__readOnly || !canMutate" @click="$emit('delete', rule)">删除</button>
             </td>
