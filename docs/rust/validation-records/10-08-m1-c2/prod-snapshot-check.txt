@@ -1,0 +1,4 @@
+SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
+NOTE first-error-per-definition; rerun after fixing to see further gaps
+NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues
+SUMMARY gaps=0 cascades=0 globals=0 definitions=126

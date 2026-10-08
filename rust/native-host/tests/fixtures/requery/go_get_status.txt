@@ -1,0 +1,2 @@
+200
+{"task_state":"idle","last_run_start_time":"2026-10-03T20:30:00.001381517Z","last_run_end_time":"2026-10-03T20:46:39.422409373Z","last_run_domain_count":9976,"progress":{"processed":9976,"total":9976}}

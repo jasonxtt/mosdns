@@ -103,6 +103,11 @@ impl RuntimeControlWeak {
         Self(Rc::downgrade(&control.0))
     }
 
+    /// The control, unless the host has been dropped.
+    pub(crate) fn upgrade(&self) -> Option<RuntimeControl> {
+        self.0.upgrade().map(RuntimeControl)
+    }
+
     /// Acquires the management lease, or `None` while admission is paused,
     /// closed, or recovering.
     pub(crate) fn begin_management_mutation(&self) -> Option<ManagementLease> {
@@ -746,10 +751,11 @@ impl RuntimeControl {
         live.config.rule_sources.start();
         // The retired view saves its statistics before the new view loads them.
         previous.config.local.fence();
-        live.config.local.start(
-            &live.config.rule_sources,
-            live.config.api.as_ref().map(|api| api.http),
-        );
+        live.config.local.start(&crate::local_url::LocalApi {
+            control: RuntimeControlWeak::from_control(&self.clone()),
+            api: live.config.api.as_ref().map(|api| api.http),
+            roots: live.config.rule_sources.roots(),
+        });
         assert!(
             self.0.retired.borrow_mut().replace(previous).is_none(),
             "only one retired snapshot"

@@ -1283,6 +1283,103 @@ fn request_mutates_managed_state(request: &Request) -> bool {
     }
 }
 
+/// The plugin routes a host serves from its own state: rule providers,
+/// `webinfo`/`rewrite`/`domain_output`, and named caches. `None` when no such
+/// plugin owns the path.
+async fn plugin_response(
+    config: &CompiledConfig,
+    cache: &CacheCatalog,
+    request: &Request,
+) -> Option<Response> {
+    if let Some((tag, rest)) = rule_source_path(&request.target) {
+        if let Some(provider) = config.rule_sources.provider(tag.as_ref()) {
+            let query = request
+                .target
+                .split_once('?')
+                .map_or("", |(_, query)| query);
+            let reply = config
+                .rule_sources
+                .handle(&provider, &request.method, rest, query, &request.body)
+                .await;
+            return Some(Response {
+                status: reply.status,
+                content_type: reply.content_type,
+                body: reply.body,
+                headers: reply.headers,
+            });
+        }
+    }
+    if let Some(reply) = local_plugin_reply(config, request).await {
+        return Some(Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+            headers: reply.headers,
+        });
+    }
+    if let Route::Plugin { tag, action } = route(&request.target) {
+        if let Some(item) = config
+            .caches
+            .iter()
+            .find(|item| item.kind == CacheKind::Named && item.tag == tag.as_ref())
+        {
+            let Some(store) = cache.get(item.id) else {
+                return Some(Response::error(500, "cache owner missing"));
+            };
+            return Some(dispatch_cache(store, action, request).await);
+        }
+    }
+    None
+}
+
+/// The reply of [`local_plugin_request`].
+type LocalReply<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<(u16, Vec<u8>)>> + 'a>>;
+
+/// Serves a plugin-route request the way the management listener does, without
+/// a connection: `domain_output` and `requery` call their own host through it.
+/// The reply is `(status, body)`. `None` for a route this entrance does not
+/// own (a switch, say); the caller then sends the request over HTTP.
+pub(crate) fn local_plugin_request<'a>(
+    control: &'a crate::runtime_snapshot::RuntimeControl,
+    method: &'a str,
+    target: &'a str,
+    body: &'a [u8],
+) -> LocalReply<'a> {
+    // Boxed: `requery` serves a route that calls this entrance again.
+    Box::pin(async move {
+        let request = Request {
+            method: method.to_owned(),
+            target: target.to_owned(),
+            if_none_match: None,
+            content_type: None,
+            config_generation: None,
+            config_generation_duplicate: false,
+            body: body.to_vec(),
+        };
+        if !control.admission_open() {
+            return Some((503, b"host is applying configuration\n".to_vec()));
+        }
+        let view = control.view();
+        if let Route::Plugin { tag, .. } = route(&request.target) {
+            if view.switches.is_known(tag.as_ref()) {
+                return None;
+            }
+        }
+        let _lease = if request_mutates_managed_state(&request) {
+            match control.begin_management_mutation() {
+                Ok(lease) => Some(lease),
+                Err(_) => return Some((503, b"host is applying configuration\n".to_vec())),
+            }
+        } else {
+            None
+        };
+        plugin_response(&view.config, &view.cache, &request)
+            .await
+            .map(|response| (response.status, response.body))
+    })
+}
+
 /// The HTTP surface of `webinfo` (`GET`/`PUT` on `/plugins/{tag}`),
 /// `rewrite` (`GET /show`, `POST /post`) and `domain_output` (`GET /show`,
 /// `/save`, `/flush`, `/restartall`); `None` when no such plugin owns the
@@ -1321,6 +1418,19 @@ async fn local_plugin_reply(
             .split_once('?')
             .map_or("", |(_, query)| query);
         return Some(output.runtime.handle(&request.method, action, query).await);
+    }
+    if let Some(requery) = config
+        .local
+        .requeries
+        .iter()
+        .find(|requery| requery.tag == tag.as_ref())
+    {
+        return Some(
+            requery
+                .runtime
+                .handle(&request.method, action, &request.body)
+                .await,
+        );
     }
     if let Some(webinfo) = config
         .local
@@ -2437,31 +2547,8 @@ async fn dispatch(
             }
         }
     }
-    if let Some((tag, rest)) = rule_source_path(&request.target) {
-        if let Some(provider) = config.rule_sources.provider(tag.as_ref()) {
-            let query = request
-                .target
-                .split_once('?')
-                .map_or("", |(_, query)| query);
-            let reply = config
-                .rule_sources
-                .handle(&provider, &request.method, rest, query, &request.body)
-                .await;
-            return Response {
-                status: reply.status,
-                content_type: reply.content_type,
-                body: reply.body,
-                headers: reply.headers,
-            };
-        }
-    }
-    if let Some(reply) = local_plugin_reply(config, request).await {
-        return Response {
-            status: reply.status,
-            content_type: reply.content_type,
-            body: reply.body,
-            headers: reply.headers,
-        };
+    if let Some(response) = plugin_response(config, cache, request).await {
+        return response;
     }
     match route(&request.target) {
         Route::Capabilities => {
@@ -2522,22 +2609,6 @@ async fn dispatch(
                 body: text.into_bytes(),
                 headers: Vec::new(),
             }
-        }
-        Route::Plugin { tag, action }
-            if config
-                .caches
-                .iter()
-                .any(|item| item.kind == CacheKind::Named && item.tag == tag.as_ref()) =>
-        {
-            let item = config
-                .caches
-                .iter()
-                .find(|item| item.kind == CacheKind::Named && item.tag == tag.as_ref())
-                .expect("matching cache");
-            let Some(store) = cache.get(item.id) else {
-                return Response::error(500, "cache owner missing");
-            };
-            dispatch_cache(store, action, request).await
         }
         Route::Plugin {
             action: "flush" | "dump" | "load_dump",
@@ -3430,6 +3501,14 @@ fn ui_operations(
             "reason": if aliases { None } else { Some("当前配置没有标签为 clientname 的 webinfo 插件") }
         }),
     );
+    let requery = !config.local.requeries.is_empty();
+    operations.insert(
+        "cache.requery".to_owned(),
+        serde_json::json!({
+            "supported": requery,
+            "reason": if requery { None } else { Some("当前配置没有 requery 插件") }
+        }),
+    );
     let remembered = config
         .local
         .domain_outputs
@@ -3444,7 +3523,6 @@ fn ui_operations(
     );
     for id in [
         "capture.logs",
-        "cache.requery",
         "appearance.server",
         "system.restart",
         "system.webui_port",

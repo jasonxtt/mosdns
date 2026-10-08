@@ -14,7 +14,7 @@ plugins:
         - addr: "udp://127.0.0.1:15453"
 
   - tag: requery_x
-    type: requery
+    type: reverse_lookup
     args:
       rules: []
 

@@ -1,0 +1,58 @@
+{
+  "domain_processing": {
+    "source_files": [
+      {
+        "alias": "域名全集",
+        "path": "gen/top_domains.txt"
+      }
+    ]
+  },
+  "url_actions": {
+    "save_rules": [
+      "http://127.0.0.1:9099/plugins/cache_all/save",
+      "http://127.0.0.1:9099/plugins/cache_all_noleak/save",
+      "http://127.0.0.1:9099/plugins/cache_cn/save",
+      "http://127.0.0.1:9099/plugins/cache_google/save",
+      "http://127.0.0.1:9099/plugins/cache_google_node/save",
+      "http://127.0.0.1:9099/plugins/top_domains/save",
+      "http://127.0.0.1:9099/plugins/my_fakeiplist/save",
+      "http://127.0.0.1:9099/plugins/my_realiplist/save",
+      "http://127.0.0.1:9099/plugins/my_nov4list/save",
+      "http://127.0.0.1:9099/plugins/my_nov6list/save",
+      "http://127.0.0.1:9099/plugins/my_sv4list/save"
+    ],
+    "flush_rules": [
+      "http://127.0.0.1:9099/plugins/cache_all/flush",
+      "http://127.0.0.1:9099/plugins/cache_all_noleak/flush",
+      "http://127.0.0.1:9099/plugins/cache_cn/flush",
+      "http://127.0.0.1:9099/plugins/cache_google/flush",
+      "http://127.0.0.1:9099/plugins/cache_google_node/flush",
+      "http://127.0.0.1:9099/plugins/my_fakeiplist/flush",
+      "http://127.0.0.1:9099/plugins/my_realiplist/flush",
+      "http://127.0.0.1:9099/plugins/my_nov4list/flush",
+      "http://127.0.0.1:9099/plugins/my_nov6list/flush",
+      "http://127.0.0.1:9099/plugins/my_sv4list/flush"
+    ]
+  },
+  "scheduler": {
+    "enabled": true,
+    "start_datetime": "2025-10-14T20:30:00.000Z",
+    "interval_minutes": 4320
+  },
+  "execution_settings": {
+    "queries_per_second": 10,
+    "resolver_address": "127.0.0.1:3066",
+    "url_call_delay_ms": 50,
+    "date_range_days": 30
+  },
+  "status": {
+    "task_state": "idle",
+    "last_run_start_time": "2026-10-03T20:30:00.001381517Z",
+    "last_run_end_time": "2026-10-03T20:46:39.422409373Z",
+    "last_run_domain_count": 9976,
+    "progress": {
+      "processed": 9976,
+      "total": 9976
+    }
+  }
+}
