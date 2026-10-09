@@ -1,0 +1,295 @@
+{
+  "profiles": [
+    {
+      "run": "diag-f-soft",
+      "samples_header": "# Samples: 3K of event 'cpu-clock'",
+      "event_count": 6204408768,
+      "lost_samples": 0,
+      "top_self_symbols": [
+        {
+          "self_percent": 3.0,
+          "shared_object": "mosdns-native",
+          "symbol": "__bn_sqrx8x_reduction"
+        },
+        {
+          "self_percent": 2.97,
+          "shared_object": "[kernel.kallsyms]",
+          "symbol": "_raw_spin_unlock_irqrestore"
+        },
+        {
+          "self_percent": 2.84,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__sha512_block_data_order_avx"
+        },
+        {
+          "self_percent": 2.75,
+          "shared_object": "libc.so.6",
+          "symbol": "__memmove_avx_unaligned_erms"
+        },
+        {
+          "self_percent": 2.26,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__fiat_curve25519_adx_mul"
+        },
+        {
+          "self_percent": 1.97,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__x25519_ge_scalarmult_base_adx"
+        },
+        {
+          "self_percent": 1.94,
+          "shared_object": "libc.so.6",
+          "symbol": "malloc"
+        },
+        {
+          "self_percent": 1.84,
+          "shared_object": "[kernel.kallsyms]",
+          "symbol": "finish_task_switch"
+        },
+        {
+          "self_percent": 1.58,
+          "shared_object": "libc.so.6",
+          "symbol": "_int_malloc"
+        },
+        {
+          "self_percent": 1.52,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__bn_sqrx8x_internal"
+        },
+        {
+          "self_percent": 1.32,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__fiat_curve25519_adx_square"
+        },
+        {
+          "self_percent": 1.2,
+          "shared_object": "mosdns-native",
+          "symbol": "fe4_sub"
+        },
+        {
+          "self_percent": 1.16,
+          "shared_object": "mosdns-native",
+          "symbol": "core::slice::sort::stable::drift::sort"
+        },
+        {
+          "self_percent": 1.13,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__x25519_scalar_mult_adx"
+        },
+        {
+          "self_percent": 0.9,
+          "shared_object": "libc.so.6",
+          "symbol": "cfree@GLIBC_2.2.5"
+        },
+        {
+          "self_percent": 0.68,
+          "shared_object": "mosdns-native",
+          "symbol": "_ZN20mosdns_upstream_core6secure3doh14exchange_inner28_$u7b$$u7b$closure$u7d$$u7d$17h29d83eb7fb1a73f1E.llvm.9045367525736129187"
+        },
+        {
+          "self_percent": 0.68,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_matcher_core::valued::ValuedDomainMatcher::match"
+        },
+        {
+          "self_percent": 0.68,
+          "shared_object": "mosdns-native",
+          "symbol": "ring_core_0_17_14__LIMBS_shl_mod"
+        },
+        {
+          "self_percent": 0.65,
+          "shared_object": "mosdns-native",
+          "symbol": "_ZN18mosdns_native_host3udp9UdpServer5serve28_$u7b$$u7b$closure$u7d$$u7d$28_$u7b$$u7b$closure$u7d$$u7d$17hda21699d55089dc3E.llvm.14979539676610443893"
+        },
+        {
+          "self_percent": 0.65,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_native_host::execution::execute_request_with_observation::_$u7b$$u7b$closure$u7d$$u7d$::h56e95a4c2fbc645c"
+        }
+      ],
+      "event": "cpu-clock",
+      "excluded_from_formal": true
+    },
+    {
+      "run": "diag-memory-soft",
+      "samples_header": "# Samples: 12K of event 'cpu-clock'",
+      "event_count": 24789578960,
+      "lost_samples": 0,
+      "top_self_symbols": [
+        {
+          "self_percent": 6.7,
+          "shared_object": "libc.so.6",
+          "symbol": "__memmove_avx_unaligned_erms"
+        },
+        {
+          "self_percent": 3.44,
+          "shared_object": "libc.so.6",
+          "symbol": "_int_malloc"
+        },
+        {
+          "self_percent": 3.39,
+          "shared_object": "mosdns-native",
+          "symbol": "core::slice::sort::stable::drift::sort"
+        },
+        {
+          "self_percent": 3.1,
+          "shared_object": "libc.so.6",
+          "symbol": "cfree@GLIBC_2.2.5"
+        },
+        {
+          "self_percent": 2.89,
+          "shared_object": "libc.so.6",
+          "symbol": "malloc"
+        },
+        {
+          "self_percent": 2.79,
+          "shared_object": "[kernel.kallsyms]",
+          "symbol": "_raw_spin_unlock_irqrestore"
+        },
+        {
+          "self_percent": 2.16,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_matcher_core::valued::ValuedDomainMatcher::match"
+        },
+        {
+          "self_percent": 2.13,
+          "shared_object": "libc.so.6",
+          "symbol": "__memcmp_avx2_movbe"
+        },
+        {
+          "self_percent": 1.92,
+          "shared_object": "mosdns-native",
+          "symbol": "regex_automata::hybrid::search::find_fwd"
+        },
+        {
+          "self_percent": 1.9,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_native_host::config::providers::DomainMapperConfig::evaluate"
+        },
+        {
+          "self_percent": 1.75,
+          "shared_object": "mosdns-native",
+          "symbol": "moka::cht::map::bucket::BucketArray<K,V>::get"
+        },
+        {
+          "self_percent": 1.44,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_sequence_core::engine::ExecutionMachine::drive"
+        },
+        {
+          "self_percent": 1.23,
+          "shared_object": "libc.so.6",
+          "symbol": "malloc_consolidate"
+        },
+        {
+          "self_percent": 1.0,
+          "shared_object": "mosdns-native",
+          "symbol": "_RNvNtCsgEmfK2I1SDS_4core3fmt5write"
+        },
+        {
+          "self_percent": 0.99,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_native_host::execution::execute_request_with_observation::_$u7b$$u7b$closure$u7d$$u7d$::h56e95a4c2fbc645c"
+        },
+        {
+          "self_percent": 0.95,
+          "shared_object": "libc.so.6",
+          "symbol": "_int_free_chunk"
+        },
+        {
+          "self_percent": 0.95,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_matcher_core::trie::DomainSuffixMatcher<V>::match_normalized"
+        },
+        {
+          "self_percent": 0.93,
+          "shared_object": "[kernel.kallsyms]",
+          "symbol": "finish_task_switch"
+        },
+        {
+          "self_percent": 0.91,
+          "shared_object": "libc.so.6",
+          "symbol": "realloc"
+        },
+        {
+          "self_percent": 0.91,
+          "shared_object": "mosdns-native",
+          "symbol": "mosdns_native_host::execution::result_from_wire"
+        }
+      ],
+      "event": "cpu-clock",
+      "excluded_from_formal": true
+    }
+  ],
+  "audit_memory_diagnostics": [
+    {
+      "run": "diag-memory-on",
+      "resources": {
+        "cpu_s": 34.19,
+        "cpu_us_per_correct": 50.306562512414786,
+        "rss_median_kib": 177220,
+        "rss_peak_kib": 181184,
+        "fd_start": 41,
+        "fd_end": 34,
+        "threads_end": 3
+      },
+      "last_smaps_kib": {
+        "Rss": 181184,
+        "Pss_Anon": 169812,
+        "Private_Dirty": 169812,
+        "Anonymous": 169812,
+        "Swap": 0
+      },
+      "audit_capacity": 100000,
+      "excluded_from_formal": true
+    },
+    {
+      "run": "diag-memory-off",
+      "resources": {
+        "cpu_s": 31.779999999999998,
+        "cpu_us_per_correct": 46.759430235312635,
+        "rss_median_kib": 68956,
+        "rss_peak_kib": 68956,
+        "fd_start": 39,
+        "fd_end": 32,
+        "threads_end": 3
+      },
+      "last_smaps_kib": {
+        "Rss": 68956,
+        "Pss_Anon": 57532,
+        "Private_Dirty": 57532,
+        "Anonymous": 57532,
+        "Swap": 0
+      },
+      "audit_capacity": 100000,
+      "excluded_from_formal": true
+    },
+    {
+      "run": "diag-memory-soft",
+      "resources": {
+        "cpu_s": 32.1,
+        "cpu_us_per_correct": 47.265311531410816,
+        "rss_median_kib": 176192,
+        "rss_peak_kib": 183196,
+        "fd_start": 36,
+        "fd_end": 32,
+        "threads_end": 3
+      },
+      "last_smaps_kib": {
+        "Rss": 183196,
+        "Pss_Anon": 171684,
+        "Private_Dirty": 171684,
+        "Anonymous": 171684,
+        "Swap": 0
+      },
+      "audit_capacity": 100000,
+      "excluded_from_formal": true
+    }
+  ],
+  "hardware_event_attempts_no_samples": [
+    "diag-f-perf",
+    "diag-memory-on",
+    "diag-memory-off"
+  ],
+  "callgraph_percentages_not_additive": true
+}

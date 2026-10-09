@@ -1,0 +1,11 @@
+{
+  "owned_sut_mock_pids_absent": true,
+  "owned_namespaces_absent": true,
+  "original_service": [
+    "MainPID=827437",
+    "ActiveState=active"
+  ],
+  "original_service_unchanged": true,
+  "private_workspace_retained_for_freeze": "/root/5d1-20261009",
+  "native_formal_runs": 0
+}

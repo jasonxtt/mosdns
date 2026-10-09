@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-09",
+  "confirmed_by": "用户",
+  "basis": "User-confirmed external Claude feedback; F formula approved before native measurement",
+  "base": "747607a4948d9c1ddd48d31b301d44f9465ef23f",
+  "latency_scope": "median of three stable per-run quantiles; individual repeats and scatter retained",
+  "latency_ms": {
+    "q20": {"p95": 14.025, "p99": 15.168},
+    "q100": {"p95": 13.853, "p99": 15.006},
+    "q500": {"p95": 12.333, "p99": 13.866},
+    "F": {"p95": 92.401, "p99": 93.339}
+  },
+  "F_go_median_ms": {"p50": 82.342951, "p95": 84.000269, "p99": 84.853301},
+  "F_formula": "max(Go median * 1.10, Go median + 0.2 ms), ceil to 0.001 ms",
+  "correct_on_time_each_repeat": 0.999,
+  "sender_coverage_each_repeat": 0.999,
+  "wrong_dns_responses": 0,
+  "capacity_floor_qps": 2000,
+  "capacity_latency_ms": {"p95": 14.025, "p99": 15.168},
+  "capacity_scope": "highest measured mixed-workload rate with latency/correctness/coverage in each repeat; ratio to Go report-only",
+  "cpu_gate": "report-only",
+  "cpu_profiling_trigger": "any native non-overload stage repeat > Go three-run median * 1.5",
+  "steady_rss_mib": 128,
+  "steady_rss_also": "<= Go same-stage three-run median, each native repeat",
+  "sampled_total_peak_rss_mib": 256,
+  "recovery_seconds": 10,
+  "recovery_definition": "after actual overload, finish five consecutive healthy one-second bins within 10s; FD return <= pre-overload + 2, bounded resources; query-in-flight observation limitations explicit",
+  "F_definition": "100 QPS, globally unique names, A70/AAAA30, forced foreign DoH via SOCKS5, mock80ms; continued unique tail is not overload recovery"
+}

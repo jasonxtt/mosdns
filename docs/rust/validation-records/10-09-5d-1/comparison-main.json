@@ -1,0 +1,302 @@
+{
+  "stages": [
+    {
+      "stage": "warmup",
+      "rate": 100,
+      "median_latency_ms": {
+        "p50": 1.562429,
+        "p95": 13.084706,
+        "p99": 13.996312
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": true,
+      "native_cpu_us_per_correct": 312.12484993997595,
+      "go_cpu_us_per_correct": 324.1296518607443,
+      "cpu_ratio": 0.9629629629629629,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        43688,
+        43616,
+        43392
+      ],
+      "go_steady_median_kib": 183048,
+      "steady_rss_pass": true
+    },
+    {
+      "stage": "q20",
+      "rate": 20,
+      "median_latency_ms": {
+        "p50": 1.326545,
+        "p95": 13.204306,
+        "p99": 14.7029
+      },
+      "latency_pass": true,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": true,
+      "native_cpu_us_per_correct": 439.99999999999994,
+      "go_cpu_us_per_correct": 380.00000000000034,
+      "cpu_ratio": 1.157894736842104,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": false,
+      "native_steady_rss_kib": [
+        44372,
+        44208,
+        44084
+      ],
+      "go_steady_median_kib": 187228,
+      "steady_rss_pass": true
+    },
+    {
+      "stage": "q100",
+      "rate": 100,
+      "median_latency_ms": {
+        "p50": 0.967182,
+        "p95": 12.124522,
+        "p99": 13.123593
+      },
+      "latency_pass": true,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 228.0912364945979,
+      "go_cpu_us_per_correct": 312.0,
+      "cpu_ratio": 0.7310616554314036,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        46892,
+        46856,
+        46708
+      ],
+      "go_steady_median_kib": 193560,
+      "steady_rss_pass": true
+    },
+    {
+      "stage": "q500",
+      "rate": 500,
+      "median_latency_ms": {
+        "p50": 0.754585,
+        "p95": 11.123202,
+        "p99": 12.149496
+      },
+      "latency_pass": true,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 114.47326288824848,
+      "go_cpu_us_per_correct": 146.39999999999995,
+      "cpu_ratio": 0.7819211945918615,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        58436,
+        58388,
+        58292
+      ],
+      "go_steady_median_kib": 200180,
+      "steady_rss_pass": true
+    },
+    {
+      "stage": "q1000",
+      "rate": 1000,
+      "median_latency_ms": {
+        "p50": 0.702952,
+        "p95": 1.938819,
+        "p99": 12.216718
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 114.43204097147203,
+      "go_cpu_us_per_correct": 114.00456018240732,
+      "cpu_ratio": 1.0037496814897644,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        89120,
+        89220,
+        89036
+      ],
+      "go_steady_median_kib": 176424,
+      "steady_rss_pass": true
+    },
+    {
+      "stage": "q2000",
+      "rate": 2000,
+      "median_latency_ms": {
+        "p50": 0.676104,
+        "p95": 1.49727,
+        "p99": 11.920444
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 84.64062750120057,
+      "go_cpu_us_per_correct": 88.60354414176571,
+      "cpu_ratio": 0.9552736103397346,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        148924,
+        148904,
+        148620
+      ],
+      "go_steady_median_kib": 199232,
+      "steady_rss_pass": false
+    },
+    {
+      "stage": "q4000",
+      "rate": 4000,
+      "median_latency_ms": {
+        "p50": 0.627489,
+        "p95": 1.353934,
+        "p99": 11.357479
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 61.129342084200424,
+      "go_cpu_us_per_correct": 68.5212415848913,
+      "cpu_ratio": 0.8921225107759757,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        173992,
+        173884,
+        173428
+      ],
+      "go_steady_median_kib": 220912,
+      "steady_rss_pass": false
+    },
+    {
+      "stage": "q8000",
+      "rate": 8000,
+      "median_latency_ms": {
+        "p50": 0.528793,
+        "p95": 1.349584,
+        "p99": 4.60277
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 46.173548509739966,
+      "go_cpu_us_per_correct": 47.5516643082508,
+      "cpu_ratio": 0.971018558055565,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        180452,
+        177836,
+        177252
+      ],
+      "go_steady_median_kib": 231044,
+      "steady_rss_pass": false
+    },
+    {
+      "stage": "q16000",
+      "rate": 16000,
+      "median_latency_ms": {
+        "p50": 0.312782,
+        "p95": 1.551595,
+        "p99": 5.964893
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": false,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 32.09682584157226,
+      "go_cpu_us_per_correct": 32.65073464152944,
+      "cpu_ratio": 0.9830353342416791,
+      "profiling_required": false,
+      "non_overload_for_cpu": false,
+      "sustainable_each_repeat": false,
+      "native_steady_rss_kib": [
+        184612,
+        182536,
+        186900
+      ],
+      "go_steady_median_kib": 241700,
+      "steady_rss_pass": false
+    },
+    {
+      "stage": "recovery",
+      "rate": 100,
+      "median_latency_ms": {
+        "p50": 0.918249,
+        "p95": 1.589144,
+        "p99": 2.822128
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 245.16344229486305,
+      "go_cpu_us_per_correct": 221.6666666666664,
+      "cpu_ratio": 1.1060004915557744,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        184612,
+        186240,
+        186900
+      ],
+      "go_steady_median_kib": 245924,
+      "steady_rss_pass": false
+    }
+  ],
+  "peak_rss_kib": [
+    184836,
+    186304,
+    187036
+  ],
+  "peak_rss_pass": true,
+  "tested_sustainable_capacity": 8000,
+  "go_tested_sustainable_capacity": 16000,
+  "capacity_ratio_report_only": 0.5,
+  "capacity_floor_pass": true,
+  "recovery": [
+    {
+      "seed": 501,
+      "five_healthy_bins_finish_s": 5,
+      "latency_correctness_within_10s": true,
+      "context": "inspect service overload and FD traces before recovery conclusion",
+      "fd_end": 34,
+      "threads_end": 3
+    },
+    {
+      "seed": 502,
+      "five_healthy_bins_finish_s": 5,
+      "latency_correctness_within_10s": true,
+      "context": "inspect service overload and FD traces before recovery conclusion",
+      "fd_end": 32,
+      "threads_end": 3
+    },
+    {
+      "seed": 503,
+      "five_healthy_bins_finish_s": 5,
+      "latency_correctness_within_10s": true,
+      "context": "inspect service overload and FD traces before recovery conclusion",
+      "fd_end": 32,
+      "threads_end": 3
+    }
+  ],
+  "oracle_agreement_definition": "strict pre-frozen oracle plus TTL; disagreement alone does not prove a product-contract violation",
+  "query_in_flight_observability": "not exposed by pinned native HTTP/metrics API; not proven"
+}

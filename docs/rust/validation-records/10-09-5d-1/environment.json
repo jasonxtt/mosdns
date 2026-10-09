@@ -1,0 +1,39 @@
+{
+  "base": "747607a4948d9c1ddd48d31b301d44f9465ef23f",
+  "config_commit": "0412666b9648a1f52d831e43d7817abd7a5ab556",
+  "input_hashes": {
+    "config_all": "03056ed40195670eb1c1a712ffa9b4195c508708c55e7e6ec6ac3e7028fe42be",
+    "config_rust": "0bfd899d8f06a9df63975892780eade225d36299890d1aeb32878179d895bb93",
+    "snapshot": "6e97508e9b1fa1d53ad9771540c5feabd06e2b9e668bda8ec1cf7c907b77c46d"
+  },
+  "binaries": {
+    "mosdns-go": "eeb89923453d955d4783f380ca203ac64ee387fa5e2ff50dee8bd6b3b05591fc",
+    "mosdns-native": "5498536939f4dc2b28cebf3f3f21dd4358e172d306003661ed1c8bcefa391c66"
+  },
+  "kernel": "7.0.9-x64v3-xanmod1",
+  "machine": "x86_64",
+  "clk_tck": 100,
+  "rust": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "go": "go1.26.4 linux/amd64",
+  "node": "v20.19.2",
+  "fd_limit": "1024",
+  "sut_cpu": 0,
+  "helper_cpu": 1,
+  "delays_ms": {
+    "domestic": 10,
+    "foreign": 80,
+    "foreignecs": 80,
+    "cnfake": 1,
+    "nocnfake": 1
+  },
+  "post_freeze_measured_tool_hashes": {
+    "tools/5d-1/load.py": "7c8f05e004b13a2cfe390f7c90132a71460a6437513a30d52e43f0ace63c2154",
+    "tools/5d-1/run.py": "e401596154af245fd565c32a9cbc17800db4cb5987887dbbf48f949b7b1ed18b"
+  },
+  "tool_hashes": {
+    "tools/5d-1/load.py": "1b0c29f057a844d5fa32df51e625722ca11045e6c38b7ed6da3a202503fbb6fc",
+    "tools/5d-1/run.py": "099443cb1f6a7f831f46b8ba8016d7f8ed40a3b8e2c44af88aa622829eca255d",
+    "tools/e2e-1/prepare.py": "160009a015c5a718702ae4d89dfa7ceec54ecca1c8bc9781aa0dd997d183dcf3",
+    "tools/e2e-1/mock.py": "d4a1430062ea6963a44e88743d302612bd8126288d792a3d697cc1556419bd07"
+  }
+}

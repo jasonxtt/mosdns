@@ -1,0 +1,10 @@
+{
+  "base": "747607a4948d9c1ddd48d31b301d44f9465ef23f",
+  "source_manifest_sha256": "4a364cd8e60cb7c0d5d8a60d4039a02cd69dec4cfdbd0bbe5511c372ec498791",
+  "release": true,
+  "offline": true,
+  "version": "5d1-747607a4",
+  "excluded_from_formal": true,
+  "helper_sha256": "ffcd0743ecd60ad2c13f01a2a974cb08c8db3938f8b9d7205e4aaa87bedb9f3a",
+  "binary_sha256": "1db42d2c865a9703f206c3b63c7fb91924d4de614f941249385271ddd44212be"
+}

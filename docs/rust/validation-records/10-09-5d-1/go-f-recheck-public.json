@@ -1,0 +1,6118 @@
+{
+  "runs": [
+    {
+      "role": "go",
+      "seed": 501,
+      "corpus_sha256": "39c4ba5b5d8560100a366fd304ae3194881f5bbe007fecc8bc8ed523b754e19f",
+      "oracle_sha256": "c1cffa344d428f34c51976de6889d759c67701b4ddb90b159fddb3f0f3870267",
+      "startup_rss_kib": [
+        236,
+        97272,
+        173484,
+        188664
+      ],
+      "startup_peak_rss_kib": 188664,
+      "cache_counters": {
+        "mosdns_cache_hit_total": 0.0,
+        "mosdns_cache_lazy_hit_total": 0.0,
+        "mosdns_cache_query_total": 10000.0
+      },
+      "cache_lookup_hit_fraction": 0.0,
+      "outer_cache_counters": {
+        "mosdns_cache_hit_total": 0.0,
+        "mosdns_cache_lazy_hit_total": 0.0,
+        "mosdns_cache_query_total": 10000.0
+      },
+      "outer_cache_hit_fraction": 0.0,
+      "mock_counts": {
+        "socks_allowed": 10,
+        "foreign:https": 10000
+      },
+      "cpus": {
+        "cpu0": {
+          "busy_fraction": 0.03381251265438348,
+          "steal_fraction": 0.0012148208139299453
+        },
+        "cpu1": {
+          "busy_fraction": 0.11492315319781854,
+          "steal_fraction": 0.001487357461576599
+        }
+      },
+      "processes": {
+        "sut": {
+          "cpu_s": 4.319999999999999,
+          "peak_rss_kib": 214700,
+          "affinity": "0",
+          "fd_start": 27,
+          "fd_end": 36
+        },
+        "mock": {
+          "cpu_s": 6.71,
+          "peak_rss_kib": 30064,
+          "affinity": "1",
+          "fd_start": 28,
+          "fd_end": 55
+        },
+        "sender": {
+          "cpu_s": 3.43,
+          "peak_rss_kib": 36772,
+          "affinity": "1",
+          "fd_start": 133,
+          "fd_end": 133
+        }
+      },
+      "orphan_or_late_packets": 0,
+      "stages": [
+        {
+          "stage": "warmup",
+          "rate": 100,
+          "duration": 10.0,
+          "all": {
+            "planned": 1000,
+            "sent": 1000,
+            "received": 1000,
+            "correct_on_time": 1000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 1000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.318302,
+              "p95": 83.870666,
+              "p99": 84.923823
+            },
+            "sent_latency_ms": {
+              "p50": 81.649823,
+              "p95": 83.038717,
+              "p99": 83.721961
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.626004,
+              "p95": 1.104739,
+              "p99": 1.660663
+            }
+          },
+          "stable": {
+            "planned": 833,
+            "sent": 833,
+            "received": 833,
+            "correct_on_time": 833,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 833
+            },
+            "effective_qps": 99.96,
+            "planned_latency_ms": {
+              "p50": 82.225877,
+              "p95": 83.711336,
+              "p99": 84.614711
+            },
+            "sent_latency_ms": {
+              "p50": 81.57197,
+              "p95": 82.798492,
+              "p99": 83.619109
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.611745,
+              "p95": 1.100188,
+              "p99": 1.660663
+            }
+          },
+          "resources": {
+            "cpu_s": 0.29999999999999993,
+            "cpu_us_per_correct": 360.14405762304915,
+            "rss_median_kib": 195188,
+            "rss_peak_kib": 199356,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "sampling_cpu_fraction": {
+            "sut": 0.03970697351076007,
+            "mock": 0.06210577908093243,
+            "sender": 0.03156195330342467
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.001040582726326743,
+            "cpu1": 0.002044989775051125
+          }
+        },
+        {
+          "stage": "q100",
+          "rate": 100,
+          "duration": 30.0,
+          "all": {
+            "planned": 3000,
+            "sent": 3000,
+            "received": 3000,
+            "correct_on_time": 3000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 3000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.43125,
+              "p95": 84.071191,
+              "p99": 85.281678
+            },
+            "sent_latency_ms": {
+              "p50": 81.78398,
+              "p95": 83.135015,
+              "p99": 83.942394
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.639684,
+              "p95": 1.118836,
+              "p99": 2.104031
+            }
+          },
+          "stable": {
+            "planned": 2500,
+            "sent": 2500,
+            "received": 2500,
+            "correct_on_time": 2500,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 2500
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.390411,
+              "p95": 84.035453,
+              "p99": 85.043604
+            },
+            "sent_latency_ms": {
+              "p50": 81.732789,
+              "p95": 83.062116,
+              "p99": 83.897674
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.639825,
+              "p95": 1.113949,
+              "p99": 1.908868
+            }
+          },
+          "resources": {
+            "cpu_s": 1.0799999999999998,
+            "cpu_us_per_correct": 431.9999999999999,
+            "rss_median_kib": 212376,
+            "rss_peak_kib": 212408,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "sampling_cpu_fraction": {
+            "sut": 0.044969271719497265,
+            "mock": 0.06980304863921963,
+            "sender": 0.03490152431960982
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.001029512697323267,
+            "cpu1": 0.0013486176668914363
+          }
+        },
+        {
+          "stage": "recovery",
+          "rate": 100,
+          "duration": 60.0,
+          "all": {
+            "planned": 6000,
+            "sent": 6000,
+            "received": 6000,
+            "correct_on_time": 6000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 6000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.368108,
+              "p95": 84.079148,
+              "p99": 85.100732
+            },
+            "sent_latency_ms": {
+              "p50": 81.704072,
+              "p95": 83.153055,
+              "p99": 83.972301
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.632494,
+              "p95": 1.120993,
+              "p99": 1.649084
+            }
+          },
+          "stable": {
+            "planned": 6000,
+            "sent": 6000,
+            "received": 6000,
+            "correct_on_time": 6000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 6000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.368108,
+              "p95": 84.079148,
+              "p99": 85.100732
+            },
+            "sent_latency_ms": {
+              "p50": 81.704072,
+              "p95": 83.153055,
+              "p99": 83.972301
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.632494,
+              "p95": 1.120993,
+              "p99": 1.649084
+            }
+          },
+          "resources": {
+            "cpu_s": 2.5599999999999996,
+            "cpu_us_per_correct": 426.6666666666666,
+            "rss_median_kib": 212456,
+            "rss_peak_kib": 214700,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "seconds": [
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.444029,
+                "p95": 83.949106,
+                "p99": 85.274182
+              },
+              "sent_latency_ms": {
+                "p50": 81.940083,
+                "p95": 83.118397,
+                "p99": 84.645757
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.608423,
+                "p95": 1.141333,
+                "p99": 1.649084
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.700718,
+                "p95": 84.146447,
+                "p99": 85.512798
+              },
+              "sent_latency_ms": {
+                "p50": 82.092281,
+                "p95": 83.320606,
+                "p99": 83.503417
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.739298,
+                "p95": 1.163222,
+                "p99": 3.033808
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.939021,
+                "p95": 82.806503,
+                "p99": 83.321491
+              },
+              "sent_latency_ms": {
+                "p50": 81.337671,
+                "p95": 82.054901,
+                "p99": 82.250213
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.622173,
+                "p95": 1.064998,
+                "p99": 1.104113
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.415822,
+                "p95": 83.887801,
+                "p99": 84.340032
+              },
+              "sent_latency_ms": {
+                "p50": 81.906041,
+                "p95": 83.105744,
+                "p99": 83.463569
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.612648,
+                "p95": 1.116217,
+                "p99": 1.226323
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.63707,
+                "p95": 84.092192,
+                "p99": 84.727955
+              },
+              "sent_latency_ms": {
+                "p50": 81.937152,
+                "p95": 83.185716,
+                "p99": 84.028108
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.672326,
+                "p95": 1.133939,
+                "p99": 1.331909
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.43038,
+                "p95": 83.790042,
+                "p99": 84.153291
+              },
+              "sent_latency_ms": {
+                "p50": 81.831822,
+                "p95": 82.93062,
+                "p99": 83.294442
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.600597,
+                "p95": 1.072302,
+                "p99": 1.120062
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.349169,
+                "p95": 84.260401,
+                "p99": 85.266207
+              },
+              "sent_latency_ms": {
+                "p50": 81.656186,
+                "p95": 83.314772,
+                "p99": 83.598403
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.752714,
+                "p95": 1.099997,
+                "p99": 1.153699
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.926647,
+                "p95": 82.736756,
+                "p99": 82.944458
+              },
+              "sent_latency_ms": {
+                "p50": 81.28989,
+                "p95": 81.898614,
+                "p99": 82.125237
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.673905,
+                "p95": 1.062298,
+                "p99": 1.141119
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.735627,
+                "p95": 82.773712,
+                "p99": 83.293114
+              },
+              "sent_latency_ms": {
+                "p50": 81.13609,
+                "p95": 81.929662,
+                "p99": 82.238213
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.603964,
+                "p95": 1.050957,
+                "p99": 1.335241
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.913767,
+                "p95": 82.894083,
+                "p99": 83.129351
+              },
+              "sent_latency_ms": {
+                "p50": 81.326928,
+                "p95": 82.029304,
+                "p99": 82.189758
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.686441,
+                "p95": 1.077921,
+                "p99": 1.232246
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.205193,
+                "p95": 83.947821,
+                "p99": 84.785623
+              },
+              "sent_latency_ms": {
+                "p50": 81.624967,
+                "p95": 83.117987,
+                "p99": 83.503245
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.557947,
+                "p95": 1.094254,
+                "p99": 1.282378
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.27247,
+                "p95": 83.713643,
+                "p99": 84.266708
+              },
+              "sent_latency_ms": {
+                "p50": 81.558838,
+                "p95": 82.922426,
+                "p99": 83.126284
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.608972,
+                "p95": 1.061149,
+                "p99": 1.195799
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.741584,
+                "p95": 83.969331,
+                "p99": 84.391368
+              },
+              "sent_latency_ms": {
+                "p50": 81.978844,
+                "p95": 83.149668,
+                "p99": 83.437292
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.663709,
+                "p95": 1.100856,
+                "p99": 1.144698
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.050543,
+                "p95": 83.397519,
+                "p99": 84.00779
+              },
+              "sent_latency_ms": {
+                "p50": 81.423543,
+                "p95": 82.543701,
+                "p99": 83.0102
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.62468,
+                "p95": 1.048312,
+                "p99": 1.1735
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.560281,
+                "p95": 84.747066,
+                "p99": 86.328062
+              },
+              "sent_latency_ms": {
+                "p50": 81.896512,
+                "p95": 83.349857,
+                "p99": 84.290829
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.579939,
+                "p95": 1.167972,
+                "p99": 3.413115
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.437006,
+                "p95": 84.345375,
+                "p99": 87.059529
+              },
+              "sent_latency_ms": {
+                "p50": 81.807934,
+                "p95": 83.588785,
+                "p99": 85.169647
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.545727,
+                "p95": 1.065394,
+                "p99": 1.205028
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.505216,
+                "p95": 84.055655,
+                "p99": 84.546875
+              },
+              "sent_latency_ms": {
+                "p50": 82.018735,
+                "p95": 83.168425,
+                "p99": 83.583227
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.674645,
+                "p95": 1.170838,
+                "p99": 1.656884
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.621654,
+                "p95": 83.92388,
+                "p99": 84.340099
+              },
+              "sent_latency_ms": {
+                "p50": 82.150986,
+                "p95": 83.027626,
+                "p99": 83.252923
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.673309,
+                "p95": 1.126683,
+                "p99": 1.227882
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.685921,
+                "p95": 84.162295,
+                "p99": 84.391297
+              },
+              "sent_latency_ms": {
+                "p50": 82.103536,
+                "p95": 83.041776,
+                "p99": 83.202383
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.62555,
+                "p95": 1.165729,
+                "p99": 1.965572
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.853071,
+                "p95": 84.249594,
+                "p99": 84.774579
+              },
+              "sent_latency_ms": {
+                "p50": 82.095587,
+                "p95": 83.172561,
+                "p99": 83.345935
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.759979,
+                "p95": 1.143272,
+                "p99": 1.906758
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.005583,
+                "p95": 83.479955,
+                "p99": 84.551339
+              },
+              "sent_latency_ms": {
+                "p50": 81.428889,
+                "p95": 82.671354,
+                "p99": 83.694372
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.525667,
+                "p95": 1.075368,
+                "p99": 1.113355
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.022109,
+                "p95": 83.124403,
+                "p99": 83.483119
+              },
+              "sent_latency_ms": {
+                "p50": 81.297443,
+                "p95": 82.233641,
+                "p99": 82.415964
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.565168,
+                "p95": 1.067155,
+                "p99": 1.19317
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.149327,
+                "p95": 83.2218,
+                "p99": 84.161716
+              },
+              "sent_latency_ms": {
+                "p50": 81.663206,
+                "p95": 82.510903,
+                "p99": 83.096505
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.53648,
+                "p95": 1.100412,
+                "p99": 1.118954
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.87386,
+                "p95": 82.836039,
+                "p99": 83.029124
+              },
+              "sent_latency_ms": {
+                "p50": 81.261098,
+                "p95": 81.915853,
+                "p99": 82.459788
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.505789,
+                "p95": 1.057272,
+                "p99": 1.096075
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.967069,
+                "p95": 82.970447,
+                "p99": 83.470475
+              },
+              "sent_latency_ms": {
+                "p50": 81.461464,
+                "p95": 81.941615,
+                "p99": 82.59179
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.671007,
+                "p95": 1.13639,
+                "p99": 1.326586
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.606551,
+                "p95": 84.024326,
+                "p99": 85.689798
+              },
+              "sent_latency_ms": {
+                "p50": 81.826859,
+                "p95": 83.170149,
+                "p99": 83.89122
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.793117,
+                "p95": 1.147435,
+                "p99": 2.077929
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.675687,
+                "p95": 84.11515,
+                "p99": 84.62033
+              },
+              "sent_latency_ms": {
+                "p50": 81.997792,
+                "p95": 83.212093,
+                "p99": 83.825396
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.639058,
+                "p95": 1.137323,
+                "p99": 1.259502
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.432326,
+                "p95": 84.706778,
+                "p99": 86.583764
+              },
+              "sent_latency_ms": {
+                "p50": 81.805679,
+                "p95": 83.53798,
+                "p99": 84.613063
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.642412,
+                "p95": 1.133433,
+                "p99": 3.816876
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.767618,
+                "p95": 84.034969,
+                "p99": 84.190142
+              },
+              "sent_latency_ms": {
+                "p50": 82.12348,
+                "p95": 83.198973,
+                "p99": 83.351628
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.647901,
+                "p95": 1.099803,
+                "p99": 1.222975
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.856915,
+                "p95": 84.484603,
+                "p99": 85.114999
+              },
+              "sent_latency_ms": {
+                "p50": 82.269927,
+                "p95": 83.357725,
+                "p99": 84.551797
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.673876,
+                "p95": 1.149441,
+                "p99": 1.705988
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.31147,
+                "p95": 83.57007,
+                "p99": 84.078469
+              },
+              "sent_latency_ms": {
+                "p50": 81.568881,
+                "p95": 82.885063,
+                "p99": 83.093009
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.608142,
+                "p95": 1.062144,
+                "p99": 1.097862
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.245585,
+                "p95": 83.871084,
+                "p99": 84.399119
+              },
+              "sent_latency_ms": {
+                "p50": 81.631279,
+                "p95": 82.869224,
+                "p99": 83.381689
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.545779,
+                "p95": 1.129315,
+                "p99": 1.794559
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.756962,
+                "p95": 84.128004,
+                "p99": 84.447267
+              },
+              "sent_latency_ms": {
+                "p50": 82.139606,
+                "p95": 83.251827,
+                "p99": 83.580224
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.615389,
+                "p95": 1.128322,
+                "p99": 1.224839
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.872228,
+                "p95": 84.292207,
+                "p99": 84.955072
+              },
+              "sent_latency_ms": {
+                "p50": 82.245753,
+                "p95": 83.269603,
+                "p99": 83.607992
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.645131,
+                "p95": 1.177915,
+                "p99": 1.271938
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.839174,
+                "p95": 85.022573,
+                "p99": 86.641187
+              },
+              "sent_latency_ms": {
+                "p50": 82.18055,
+                "p95": 83.914449,
+                "p99": 85.091102
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.753013,
+                "p95": 1.17205,
+                "p99": 3.30124
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.123678,
+                "p95": 83.22749,
+                "p99": 83.827599
+              },
+              "sent_latency_ms": {
+                "p50": 81.523443,
+                "p95": 82.373907,
+                "p99": 83.158768
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.618904,
+                "p95": 1.12234,
+                "p99": 1.946515
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.833956,
+                "p95": 82.752069,
+                "p99": 82.850896
+              },
+              "sent_latency_ms": {
+                "p50": 81.182022,
+                "p95": 81.920305,
+                "p99": 82.155873
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.62162,
+                "p95": 1.04456,
+                "p99": 1.069263
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.868037,
+                "p95": 82.707635,
+                "p99": 82.976618
+              },
+              "sent_latency_ms": {
+                "p50": 81.248823,
+                "p95": 81.933571,
+                "p99": 82.147632
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.640192,
+                "p95": 1.071431,
+                "p99": 1.11511
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.996969,
+                "p95": 83.765116,
+                "p99": 84.236002
+              },
+              "sent_latency_ms": {
+                "p50": 81.395836,
+                "p95": 82.980386,
+                "p99": 83.642352
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.6308,
+                "p95": 1.081424,
+                "p99": 1.129282
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.696096,
+                "p95": 84.215753,
+                "p99": 84.89888
+              },
+              "sent_latency_ms": {
+                "p50": 82.187632,
+                "p95": 83.174915,
+                "p99": 83.71711
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.709194,
+                "p95": 1.150976,
+                "p99": 1.18177
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.715375,
+                "p95": 84.249951,
+                "p99": 84.483087
+              },
+              "sent_latency_ms": {
+                "p50": 82.129118,
+                "p95": 83.18694,
+                "p99": 83.837394
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.606792,
+                "p95": 1.120824,
+                "p99": 1.353571
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.958452,
+                "p95": 84.661245,
+                "p99": 85.12353
+              },
+              "sent_latency_ms": {
+                "p50": 82.383545,
+                "p95": 83.532095,
+                "p99": 84.588831
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.645937,
+                "p95": 1.145654,
+                "p99": 1.59045
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.833735,
+                "p95": 84.561298,
+                "p99": 84.706093
+              },
+              "sent_latency_ms": {
+                "p50": 82.235309,
+                "p95": 83.47112,
+                "p99": 83.682402
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.619186,
+                "p95": 1.184519,
+                "p99": 1.268056
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.265841,
+                "p95": 83.838783,
+                "p99": 85.100732
+              },
+              "sent_latency_ms": {
+                "p50": 81.577016,
+                "p95": 82.912804,
+                "p99": 84.061438
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.628888,
+                "p95": 1.088762,
+                "p99": 1.875962
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.510303,
+                "p95": 83.85306,
+                "p99": 84.249554
+              },
+              "sent_latency_ms": {
+                "p50": 81.889305,
+                "p95": 82.949156,
+                "p99": 83.10569
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.570889,
+                "p95": 1.105034,
+                "p99": 1.201704
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.562795,
+                "p95": 84.660375,
+                "p99": 88.754963
+              },
+              "sent_latency_ms": {
+                "p50": 81.875312,
+                "p95": 84.374684,
+                "p99": 87.968712
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.596338,
+                "p95": 1.093743,
+                "p99": 1.43836
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.457957,
+                "p95": 83.927126,
+                "p99": 84.394087
+              },
+              "sent_latency_ms": {
+                "p50": 81.763767,
+                "p95": 82.933211,
+                "p99": 83.247631
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.626428,
+                "p95": 1.085177,
+                "p99": 1.307127
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.188462,
+                "p95": 83.793414,
+                "p99": 84.426386
+              },
+              "sent_latency_ms": {
+                "p50": 81.597409,
+                "p95": 82.860946,
+                "p99": 83.516088
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.663091,
+                "p95": 1.086642,
+                "p99": 1.211581
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.721859,
+                "p95": 84.463453,
+                "p99": 85.009238
+              },
+              "sent_latency_ms": {
+                "p50": 82.054934,
+                "p95": 83.612376,
+                "p99": 83.945793
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.656271,
+                "p95": 1.135585,
+                "p99": 2.527142
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.11448,
+                "p95": 83.059518,
+                "p99": 83.433589
+              },
+              "sent_latency_ms": {
+                "p50": 81.450086,
+                "p95": 82.202756,
+                "p99": 82.308948
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.647752,
+                "p95": 1.069628,
+                "p99": 1.127042
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.974941,
+                "p95": 84.427711,
+                "p99": 85.408264
+              },
+              "sent_latency_ms": {
+                "p50": 81.375103,
+                "p95": 83.679718,
+                "p99": 84.696518
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.533626,
+                "p95": 1.038184,
+                "p99": 1.297925
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.899561,
+                "p95": 82.911733,
+                "p99": 83.325044
+              },
+              "sent_latency_ms": {
+                "p50": 81.368101,
+                "p95": 82.038115,
+                "p99": 82.388192
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.685156,
+                "p95": 1.015024,
+                "p99": 1.168092
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.899672,
+                "p95": 83.072942,
+                "p99": 83.478678
+              },
+              "sent_latency_ms": {
+                "p50": 81.412774,
+                "p95": 82.175747,
+                "p99": 82.780426
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.40943,
+                "p95": 1.07267,
+                "p99": 1.124833
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.937373,
+                "p95": 84.621559,
+                "p99": 84.98302
+              },
+              "sent_latency_ms": {
+                "p50": 82.357991,
+                "p95": 83.801838,
+                "p99": 84.018819
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.596315,
+                "p95": 1.148392,
+                "p99": 1.477735
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.53991,
+                "p95": 85.007931,
+                "p99": 86.927541
+              },
+              "sent_latency_ms": {
+                "p50": 81.849925,
+                "p95": 84.343015,
+                "p99": 86.695377
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.575386,
+                "p95": 1.166012,
+                "p99": 1.855352
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.515775,
+                "p95": 83.865209,
+                "p99": 84.657012
+              },
+              "sent_latency_ms": {
+                "p50": 81.767516,
+                "p95": 82.955205,
+                "p99": 83.814388
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.640862,
+                "p95": 1.166019,
+                "p99": 1.981943
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.574504,
+                "p95": 84.024762,
+                "p99": 84.691916
+              },
+              "sent_latency_ms": {
+                "p50": 81.95748,
+                "p95": 83.137125,
+                "p99": 83.492439
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.610758,
+                "p95": 1.114307,
+                "p99": 1.343725
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.32196,
+                "p95": 83.900171,
+                "p99": 84.142554
+              },
+              "sent_latency_ms": {
+                "p50": 81.753248,
+                "p95": 83.031366,
+                "p99": 83.301585
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.596448,
+                "p95": 1.115181,
+                "p99": 1.196734
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.316738,
+                "p95": 83.46682,
+                "p99": 84.196498
+              },
+              "sent_latency_ms": {
+                "p50": 81.578761,
+                "p95": 82.853063,
+                "p99": 83.49541
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.656766,
+                "p95": 1.090773,
+                "p99": 1.208994
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.260679,
+                "p95": 83.898043,
+                "p99": 85.908916
+              },
+              "sent_latency_ms": {
+                "p50": 81.644483,
+                "p95": 82.91791,
+                "p99": 84.901193
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.58373,
+                "p95": 1.106963,
+                "p99": 1.227692
+              }
+            }
+          ],
+          "sampling_cpu_fraction": {
+            "sut": 0.04268669789697124,
+            "mock": 0.06636447563669748,
+            "sender": 0.03401596238664896
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.0013640238704177323,
+            "cpu1": 0.0015010006671114075
+          }
+        }
+      ],
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "role": "go",
+      "seed": 502,
+      "corpus_sha256": "39c4ba5b5d8560100a366fd304ae3194881f5bbe007fecc8bc8ed523b754e19f",
+      "oracle_sha256": "c1cffa344d428f34c51976de6889d759c67701b4ddb90b159fddb3f0f3870267",
+      "startup_rss_kib": [
+        368,
+        93172,
+        167292,
+        184572
+      ],
+      "startup_peak_rss_kib": 184572,
+      "cache_counters": {
+        "mosdns_cache_hit_total": 0.0,
+        "mosdns_cache_lazy_hit_total": 0.0,
+        "mosdns_cache_query_total": 9999.0
+      },
+      "cache_lookup_hit_fraction": 0.0,
+      "outer_cache_counters": {
+        "mosdns_cache_hit_total": 0.0,
+        "mosdns_cache_lazy_hit_total": 0.0,
+        "mosdns_cache_query_total": 9999.0
+      },
+      "outer_cache_hit_fraction": 0.0,
+      "mock_counts": {
+        "socks_allowed": 11,
+        "foreign:https": 9999
+      },
+      "cpus": {
+        "cpu0": {
+          "busy_fraction": 0.03341433778857837,
+          "steal_fraction": 0.0016200891049007696
+        },
+        "cpu1": {
+          "busy_fraction": 0.0910569105691057,
+          "steal_fraction": 0.0016260162601626016
+        }
+      },
+      "processes": {
+        "sut": {
+          "cpu_s": 4.28,
+          "peak_rss_kib": 206456,
+          "affinity": "0",
+          "fd_start": 27,
+          "fd_end": 36
+        },
+        "mock": {
+          "cpu_s": 6.6,
+          "peak_rss_kib": 30644,
+          "affinity": "1",
+          "fd_start": 28,
+          "fd_end": 55
+        },
+        "sender": {
+          "cpu_s": 3.39,
+          "peak_rss_kib": 36728,
+          "affinity": "1",
+          "fd_start": 133,
+          "fd_end": 133
+        }
+      },
+      "orphan_or_late_packets": 0,
+      "stages": [
+        {
+          "stage": "warmup",
+          "rate": 100,
+          "duration": 10.0,
+          "all": {
+            "planned": 1000,
+            "sent": 1000,
+            "received": 1000,
+            "correct_on_time": 1000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 1000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.278773,
+              "p95": 84.025068,
+              "p99": 86.279787
+            },
+            "sent_latency_ms": {
+              "p50": 81.609946,
+              "p95": 83.108018,
+              "p99": 85.0984
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.641641,
+              "p95": 1.09596,
+              "p99": 1.389209
+            }
+          },
+          "stable": {
+            "planned": 833,
+            "sent": 833,
+            "received": 833,
+            "correct_on_time": 833,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 833
+            },
+            "effective_qps": 99.96,
+            "planned_latency_ms": {
+              "p50": 82.302754,
+              "p95": 84.002803,
+              "p99": 84.840685
+            },
+            "sent_latency_ms": {
+              "p50": 81.634089,
+              "p95": 83.087061,
+              "p99": 83.699519
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.634124,
+              "p95": 1.096552,
+              "p99": 1.434541
+            }
+          },
+          "resources": {
+            "cpu_s": 0.31000000000000005,
+            "cpu_us_per_correct": 372.1488595438176,
+            "rss_median_kib": 193164,
+            "rss_peak_kib": 195284,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "sampling_cpu_fraction": {
+            "sut": 0.03973517088137147,
+            "mock": 0.06418758373144622,
+            "sender": 0.02954666552717365
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.0,
+            "cpu1": 0.0010416666666666667
+          }
+        },
+        {
+          "stage": "q100",
+          "rate": 100,
+          "duration": 30.0,
+          "all": {
+            "planned": 3000,
+            "sent": 3000,
+            "received": 3000,
+            "correct_on_time": 3000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 3000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.408899,
+              "p95": 84.032937,
+              "p99": 85.171959
+            },
+            "sent_latency_ms": {
+              "p50": 81.765503,
+              "p95": 83.154603,
+              "p99": 83.933343
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.648439,
+              "p95": 1.118551,
+              "p99": 1.698117
+            }
+          },
+          "stable": {
+            "planned": 2500,
+            "sent": 2500,
+            "received": 2500,
+            "correct_on_time": 2500,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 2500
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.386396,
+              "p95": 83.990366,
+              "p99": 85.160492
+            },
+            "sent_latency_ms": {
+              "p50": 81.735688,
+              "p95": 83.124758,
+              "p99": 83.935548
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.646194,
+              "p95": 1.116622,
+              "p99": 1.698117
+            }
+          },
+          "resources": {
+            "cpu_s": 1.0999999999999999,
+            "cpu_us_per_correct": 439.9999999999999,
+            "rss_median_kib": 206096,
+            "rss_peak_kib": 206128,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "sampling_cpu_fraction": {
+            "sut": 0.04532251285320918,
+            "mock": 0.06848735275596055,
+            "sender": 0.03491512101284263
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.0013778849466069584,
+            "cpu1": 0.0013745704467353953
+          }
+        },
+        {
+          "stage": "recovery",
+          "rate": 100,
+          "duration": 60.0,
+          "all": {
+            "planned": 6000,
+            "sent": 5999,
+            "received": 5999,
+            "correct_on_time": 5999,
+            "correct_rate": 0.9998333333333334,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 0.9998333333333334,
+            "statuses": {
+              "correct": 5999,
+              "unsent": 1
+            },
+            "effective_qps": 99.98333333333333,
+            "planned_latency_ms": {
+              "p50": 82.365852,
+              "p95": 83.980601,
+              "p99": 85.084071
+            },
+            "sent_latency_ms": {
+              "p50": 81.692929,
+              "p95": 83.088395,
+              "p99": 83.938478
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.65871,
+              "p95": 1.109288,
+              "p99": 1.7869
+            }
+          },
+          "stable": {
+            "planned": 6000,
+            "sent": 5999,
+            "received": 5999,
+            "correct_on_time": 5999,
+            "correct_rate": 0.9998333333333334,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 0.9998333333333334,
+            "statuses": {
+              "correct": 5999,
+              "unsent": 1
+            },
+            "effective_qps": 99.98333333333333,
+            "planned_latency_ms": {
+              "p50": 82.365852,
+              "p95": 83.980601,
+              "p99": 85.084071
+            },
+            "sent_latency_ms": {
+              "p50": 81.692929,
+              "p95": 83.088395,
+              "p99": 83.938478
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.65871,
+              "p95": 1.109288,
+              "p99": 1.7869
+            }
+          },
+          "resources": {
+            "cpu_s": 2.52,
+            "cpu_us_per_correct": 420.0700116686114,
+            "rss_median_kib": 206164,
+            "rss_peak_kib": 206456,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "seconds": [
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.701444,
+                "p95": 84.460977,
+                "p99": 85.958287
+              },
+              "sent_latency_ms": {
+                "p50": 82.062183,
+                "p95": 83.210707,
+                "p99": 84.449359
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.644841,
+                "p95": 1.163495,
+                "p99": 3.619477
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.654181,
+                "p95": 84.189801,
+                "p99": 85.279821
+              },
+              "sent_latency_ms": {
+                "p50": 81.978649,
+                "p95": 83.069564,
+                "p99": 83.45042
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.679245,
+                "p95": 1.186993,
+                "p99": 2.638878
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.083862,
+                "p95": 82.966255,
+                "p99": 83.772796
+              },
+              "sent_latency_ms": {
+                "p50": 81.459281,
+                "p95": 82.083052,
+                "p99": 82.509504
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.771942,
+                "p95": 1.0835,
+                "p99": 1.14315
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.839798,
+                "p95": 82.62149,
+                "p99": 83.040261
+              },
+              "sent_latency_ms": {
+                "p50": 81.199793,
+                "p95": 81.792114,
+                "p99": 81.990175
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.547066,
+                "p95": 1.073104,
+                "p99": 1.099326
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.026435,
+                "p95": 83.186058,
+                "p99": 84.222362
+              },
+              "sent_latency_ms": {
+                "p50": 81.357668,
+                "p95": 82.398551,
+                "p99": 83.915211
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.586901,
+                "p95": 1.095407,
+                "p99": 1.131449
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.221055,
+                "p95": 83.154348,
+                "p99": 83.503074
+              },
+              "sent_latency_ms": {
+                "p50": 81.525023,
+                "p95": 82.371668,
+                "p99": 82.517867
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.617508,
+                "p95": 1.074216,
+                "p99": 1.158774
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.357173,
+                "p95": 83.981651,
+                "p99": 84.499675
+              },
+              "sent_latency_ms": {
+                "p50": 81.713965,
+                "p95": 82.949247,
+                "p99": 83.469856
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.646872,
+                "p95": 1.078727,
+                "p99": 1.172864
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.849833,
+                "p95": 84.779212,
+                "p99": 87.95996
+              },
+              "sent_latency_ms": {
+                "p50": 82.279754,
+                "p95": 83.780869,
+                "p99": 84.611887
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.602954,
+                "p95": 1.163916,
+                "p99": 3.348073
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 99,
+              "received": 99,
+              "correct_on_time": 99,
+              "correct_rate": 0.99,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 0.99,
+              "statuses": {
+                "correct": 99,
+                "unsent": 1
+              },
+              "effective_qps": 99.0,
+              "planned_latency_ms": {
+                "p50": 82.812437,
+                "p95": 84.729272,
+                "p99": 86.299808
+              },
+              "sent_latency_ms": {
+                "p50": 82.300809,
+                "p95": 83.461458,
+                "p99": 85.684832
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.621157,
+                "p95": 1.181238,
+                "p99": 4.694527
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.784437,
+                "p95": 83.902092,
+                "p99": 84.214474
+              },
+              "sent_latency_ms": {
+                "p50": 82.095581,
+                "p95": 82.975481,
+                "p99": 83.214582
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.570139,
+                "p95": 1.093982,
+                "p99": 1.168764
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.973768,
+                "p95": 83.116048,
+                "p99": 83.295873
+              },
+              "sent_latency_ms": {
+                "p50": 81.313198,
+                "p95": 82.008413,
+                "p99": 82.34344
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.601139,
+                "p95": 1.059496,
+                "p99": 1.157741
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.830462,
+                "p95": 84.642704,
+                "p99": 86.461937
+              },
+              "sent_latency_ms": {
+                "p50": 82.17641,
+                "p95": 83.037371,
+                "p99": 83.661281
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.656682,
+                "p95": 1.108874,
+                "p99": 3.580397
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.97749,
+                "p95": 84.302347,
+                "p99": 85.28155
+              },
+              "sent_latency_ms": {
+                "p50": 82.271114,
+                "p95": 83.363371,
+                "p99": 84.148918
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.727035,
+                "p95": 1.11743,
+                "p99": 1.19573
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.65786,
+                "p95": 84.603123,
+                "p99": 86.009549
+              },
+              "sent_latency_ms": {
+                "p50": 82.050228,
+                "p95": 83.612073,
+                "p99": 84.438444
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.607663,
+                "p95": 1.066434,
+                "p99": 1.182869
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.661262,
+                "p95": 84.305372,
+                "p99": 85.807311
+              },
+              "sent_latency_ms": {
+                "p50": 81.974838,
+                "p95": 83.514045,
+                "p99": 84.56801
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.682293,
+                "p95": 1.186661,
+                "p99": 1.46905
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 83.143494,
+                "p95": 85.058425,
+                "p99": 86.180518
+              },
+              "sent_latency_ms": {
+                "p50": 82.461844,
+                "p95": 84.211323,
+                "p99": 85.226604
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.70067,
+                "p95": 1.324071,
+                "p99": 2.572163
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.961499,
+                "p95": 83.023319,
+                "p99": 83.691287
+              },
+              "sent_latency_ms": {
+                "p50": 81.314779,
+                "p95": 82.310757,
+                "p99": 82.828809
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.656006,
+                "p95": 1.080502,
+                "p99": 1.183027
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.100929,
+                "p95": 83.46866,
+                "p99": 84.421803
+              },
+              "sent_latency_ms": {
+                "p50": 81.464243,
+                "p95": 82.460697,
+                "p99": 82.975689
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.574861,
+                "p95": 1.10241,
+                "p99": 1.219544
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.100759,
+                "p95": 83.267116,
+                "p99": 83.677881
+              },
+              "sent_latency_ms": {
+                "p50": 81.432329,
+                "p95": 82.28147,
+                "p99": 82.705967
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.661312,
+                "p95": 1.081112,
+                "p99": 1.142616
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.078647,
+                "p95": 83.087451,
+                "p99": 83.623448
+              },
+              "sent_latency_ms": {
+                "p50": 81.414598,
+                "p95": 82.200467,
+                "p99": 82.448931
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.652385,
+                "p95": 1.073706,
+                "p99": 1.485135
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.161643,
+                "p95": 82.919689,
+                "p99": 83.057683
+              },
+              "sent_latency_ms": {
+                "p50": 81.469947,
+                "p95": 82.048622,
+                "p99": 82.13016
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.649577,
+                "p95": 1.064909,
+                "p99": 1.118881
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.14824,
+                "p95": 83.022407,
+                "p99": 83.567787
+              },
+              "sent_latency_ms": {
+                "p50": 81.517002,
+                "p95": 82.121754,
+                "p99": 82.70355
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.662782,
+                "p95": 1.094665,
+                "p99": 1.39323
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.393443,
+                "p95": 83.552894,
+                "p99": 84.991517
+              },
+              "sent_latency_ms": {
+                "p50": 81.704955,
+                "p95": 82.694345,
+                "p99": 83.81952
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.768944,
+                "p95": 1.145871,
+                "p99": 1.227333
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.000298,
+                "p95": 82.962824,
+                "p99": 83.268479
+              },
+              "sent_latency_ms": {
+                "p50": 81.332772,
+                "p95": 82.050128,
+                "p99": 82.265274
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.635802,
+                "p95": 1.053816,
+                "p99": 1.532641
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.066397,
+                "p95": 82.976795,
+                "p99": 83.170761
+              },
+              "sent_latency_ms": {
+                "p50": 81.433918,
+                "p95": 81.993805,
+                "p99": 82.066582
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.673658,
+                "p95": 1.09334,
+                "p99": 1.178528
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.272774,
+                "p95": 84.046782,
+                "p99": 85.534056
+              },
+              "sent_latency_ms": {
+                "p50": 81.70744,
+                "p95": 83.179031,
+                "p99": 84.015336
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.591767,
+                "p95": 1.135201,
+                "p99": 4.325133
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.65215,
+                "p95": 83.623705,
+                "p99": 83.92658
+              },
+              "sent_latency_ms": {
+                "p50": 82.031246,
+                "p95": 82.980716,
+                "p99": 83.250703
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.594192,
+                "p95": 1.08224,
+                "p99": 1.154859
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.698021,
+                "p95": 83.955689,
+                "p99": 84.182877
+              },
+              "sent_latency_ms": {
+                "p50": 82.038988,
+                "p95": 83.104338,
+                "p99": 83.441581
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.710124,
+                "p95": 1.102655,
+                "p99": 1.153285
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.771132,
+                "p95": 84.153923,
+                "p99": 84.469238
+              },
+              "sent_latency_ms": {
+                "p50": 82.019548,
+                "p95": 83.1447,
+                "p99": 83.418572
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.699123,
+                "p95": 1.198665,
+                "p99": 1.686658
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.438369,
+                "p95": 83.816662,
+                "p99": 84.165322
+              },
+              "sent_latency_ms": {
+                "p50": 81.854474,
+                "p95": 82.955014,
+                "p99": 83.414173
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.682782,
+                "p95": 1.047333,
+                "p99": 1.136214
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.371044,
+                "p95": 83.796571,
+                "p99": 84.328239
+              },
+              "sent_latency_ms": {
+                "p50": 81.611803,
+                "p95": 83.167643,
+                "p99": 83.393752
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.606794,
+                "p95": 1.04975,
+                "p99": 1.071863
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.034855,
+                "p95": 83.152942,
+                "p99": 83.672971
+              },
+              "sent_latency_ms": {
+                "p50": 81.357502,
+                "p95": 82.143644,
+                "p99": 82.742233
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.615569,
+                "p95": 1.097419,
+                "p99": 2.122104
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.999079,
+                "p95": 83.055306,
+                "p99": 84.033115
+              },
+              "sent_latency_ms": {
+                "p50": 81.474189,
+                "p95": 82.21497,
+                "p99": 82.977998
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.667814,
+                "p95": 1.086628,
+                "p99": 1.169119
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.194609,
+                "p95": 83.021044,
+                "p99": 83.31039
+              },
+              "sent_latency_ms": {
+                "p50": 81.389374,
+                "p95": 81.964111,
+                "p99": 82.834246
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.733067,
+                "p95": 1.129368,
+                "p99": 1.737584
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.445333,
+                "p95": 84.269649,
+                "p99": 85.065214
+              },
+              "sent_latency_ms": {
+                "p50": 81.82131,
+                "p95": 83.609675,
+                "p99": 84.177586
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.635027,
+                "p95": 1.079334,
+                "p99": 1.183442
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.757024,
+                "p95": 84.325799,
+                "p99": 84.913665
+              },
+              "sent_latency_ms": {
+                "p50": 82.211493,
+                "p95": 83.253645,
+                "p99": 83.791686
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.67482,
+                "p95": 1.082229,
+                "p99": 1.236578
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.80042,
+                "p95": 83.887876,
+                "p99": 84.844713
+              },
+              "sent_latency_ms": {
+                "p50": 82.117008,
+                "p95": 82.97429,
+                "p99": 83.673669
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.742553,
+                "p95": 1.152373,
+                "p99": 1.181089
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.363973,
+                "p95": 83.993023,
+                "p99": 86.560619
+              },
+              "sent_latency_ms": {
+                "p50": 81.769077,
+                "p95": 83.088395,
+                "p99": 85.389296
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.616696,
+                "p95": 1.095613,
+                "p99": 1.234497
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.83543,
+                "p95": 85.092322,
+                "p99": 86.296704
+              },
+              "sent_latency_ms": {
+                "p50": 82.056339,
+                "p95": 84.069851,
+                "p99": 85.15193
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.72304,
+                "p95": 1.183936,
+                "p99": 2.744889
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.826521,
+                "p95": 83.980524,
+                "p99": 85.01653
+              },
+              "sent_latency_ms": {
+                "p50": 82.172239,
+                "p95": 83.041145,
+                "p99": 83.403328
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.726188,
+                "p95": 1.103193,
+                "p99": 1.24028
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.655348,
+                "p95": 83.994757,
+                "p99": 84.480515
+              },
+              "sent_latency_ms": {
+                "p50": 81.989056,
+                "p95": 83.209203,
+                "p99": 83.609725
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.703878,
+                "p95": 1.11967,
+                "p99": 1.165674
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.544166,
+                "p95": 83.876326,
+                "p99": 84.870569
+              },
+              "sent_latency_ms": {
+                "p50": 81.874292,
+                "p95": 83.090944,
+                "p99": 83.753154
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.730641,
+                "p95": 1.132511,
+                "p99": 1.382731
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.85802,
+                "p95": 84.513975,
+                "p99": 85.776932
+              },
+              "sent_latency_ms": {
+                "p50": 82.16104,
+                "p95": 83.405927,
+                "p99": 84.609855
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.693802,
+                "p95": 1.126091,
+                "p99": 1.197273
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.304933,
+                "p95": 83.820432,
+                "p99": 84.801303
+              },
+              "sent_latency_ms": {
+                "p50": 81.606893,
+                "p95": 83.234138,
+                "p99": 83.929617
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.604104,
+                "p95": 1.080141,
+                "p99": 1.237464
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.888643,
+                "p95": 83.493171,
+                "p99": 84.847697
+              },
+              "sent_latency_ms": {
+                "p50": 81.296421,
+                "p95": 82.667581,
+                "p99": 84.283046
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.647003,
+                "p95": 1.057482,
+                "p99": 2.002488
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.046918,
+                "p95": 83.163443,
+                "p99": 83.592844
+              },
+              "sent_latency_ms": {
+                "p50": 81.434261,
+                "p95": 82.353815,
+                "p99": 82.683093
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.688848,
+                "p95": 1.069525,
+                "p99": 1.179035
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.115576,
+                "p95": 83.280711,
+                "p99": 83.911683
+              },
+              "sent_latency_ms": {
+                "p50": 81.42792,
+                "p95": 82.371613,
+                "p99": 82.874783
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.655696,
+                "p95": 1.041505,
+                "p99": 1.912464
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.948875,
+                "p95": 82.772491,
+                "p99": 83.503121
+              },
+              "sent_latency_ms": {
+                "p50": 81.323676,
+                "p95": 81.930155,
+                "p99": 82.278407
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.716649,
+                "p95": 1.070823,
+                "p99": 1.316621
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.00557,
+                "p95": 83.572497,
+                "p99": 84.041321
+              },
+              "sent_latency_ms": {
+                "p50": 81.476985,
+                "p95": 82.644814,
+                "p99": 83.137255
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.647828,
+                "p95": 1.083204,
+                "p99": 1.166223
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.320807,
+                "p95": 83.678631,
+                "p99": 83.960835
+              },
+              "sent_latency_ms": {
+                "p50": 81.626749,
+                "p95": 82.727184,
+                "p99": 83.304995
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.701424,
+                "p95": 1.099159,
+                "p99": 1.919977
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.743454,
+                "p95": 84.358193,
+                "p99": 84.477803
+              },
+              "sent_latency_ms": {
+                "p50": 82.056318,
+                "p95": 83.266974,
+                "p99": 83.348866
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.628978,
+                "p95": 1.127496,
+                "p99": 1.884996
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.842472,
+                "p95": 83.945056,
+                "p99": 85.078363
+              },
+              "sent_latency_ms": {
+                "p50": 82.154108,
+                "p95": 83.132174,
+                "p99": 84.038875
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.657401,
+                "p95": 1.08295,
+                "p99": 1.17906
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.644808,
+                "p95": 84.235182,
+                "p99": 84.901411
+              },
+              "sent_latency_ms": {
+                "p50": 81.994294,
+                "p95": 83.436159,
+                "p99": 83.535634
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.713482,
+                "p95": 1.120641,
+                "p99": 1.85124
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.233481,
+                "p95": 83.659762,
+                "p99": 84.230167
+              },
+              "sent_latency_ms": {
+                "p50": 81.596251,
+                "p95": 82.7737,
+                "p99": 83.175369
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.614015,
+                "p95": 1.094199,
+                "p99": 1.625394
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.332154,
+                "p95": 83.7302,
+                "p99": 84.015971
+              },
+              "sent_latency_ms": {
+                "p50": 81.726408,
+                "p95": 82.878583,
+                "p99": 83.300195
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.636413,
+                "p95": 1.112075,
+                "p99": 1.161212
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.238954,
+                "p95": 83.296243,
+                "p99": 84.075737
+              },
+              "sent_latency_ms": {
+                "p50": 81.598217,
+                "p95": 82.622927,
+                "p99": 83.647528
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.597683,
+                "p95": 1.051672,
+                "p99": 1.144708
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.268735,
+                "p95": 84.010478,
+                "p99": 84.676356
+              },
+              "sent_latency_ms": {
+                "p50": 81.637822,
+                "p95": 83.158651,
+                "p99": 83.750463
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.574279,
+                "p95": 1.037458,
+                "p99": 1.149071
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.430046,
+                "p95": 84.19957,
+                "p99": 84.595532
+              },
+              "sent_latency_ms": {
+                "p50": 81.73165,
+                "p95": 83.284128,
+                "p99": 83.605229
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.642544,
+                "p95": 1.100038,
+                "p99": 3.165683
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.555846,
+                "p95": 84.736878,
+                "p99": 85.41584
+              },
+              "sent_latency_ms": {
+                "p50": 81.929954,
+                "p95": 83.822426,
+                "p99": 84.609649
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.675909,
+                "p95": 1.185862,
+                "p99": 2.252646
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.893214,
+                "p95": 82.957999,
+                "p99": 83.121532
+              },
+              "sent_latency_ms": {
+                "p50": 81.375383,
+                "p95": 82.044963,
+                "p99": 82.40623
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.542746,
+                "p95": 1.041997,
+                "p99": 1.147223
+              }
+            }
+          ],
+          "sampling_cpu_fraction": {
+            "sut": 0.042009789100065906,
+            "mock": 0.06501514979772104,
+            "sender": 0.03384121899727532
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.002043944813490036,
+            "cpu1": 0.001886468873263591
+          }
+        }
+      ],
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "role": "go",
+      "seed": 503,
+      "corpus_sha256": "39c4ba5b5d8560100a366fd304ae3194881f5bbe007fecc8bc8ed523b754e19f",
+      "oracle_sha256": "c1cffa344d428f34c51976de6889d759c67701b4ddb90b159fddb3f0f3870267",
+      "startup_rss_kib": [
+        376,
+        111588,
+        167272,
+        184560
+      ],
+      "startup_peak_rss_kib": 184560,
+      "cache_counters": {
+        "mosdns_cache_hit_total": 0.0,
+        "mosdns_cache_lazy_hit_total": 0.0,
+        "mosdns_cache_query_total": 9998.0
+      },
+      "cache_lookup_hit_fraction": 0.0,
+      "outer_cache_counters": {
+        "mosdns_cache_hit_total": 0.0,
+        "mosdns_cache_lazy_hit_total": 0.0,
+        "mosdns_cache_query_total": 9998.0
+      },
+      "outer_cache_hit_fraction": 0.0,
+      "mock_counts": {
+        "socks_allowed": 10,
+        "foreign:https": 9998
+      },
+      "cpus": {
+        "cpu0": {
+          "busy_fraction": 0.0746687300512622,
+          "steal_fraction": 0.0013540961408259986
+        },
+        "cpu1": {
+          "busy_fraction": 0.12598501799785972,
+          "steal_fraction": 0.001459285922755132
+        }
+      },
+      "processes": {
+        "sut": {
+          "cpu_s": 4.11,
+          "peak_rss_kib": 202272,
+          "affinity": "0",
+          "fd_start": 27,
+          "fd_end": 36
+        },
+        "mock": {
+          "cpu_s": 6.37,
+          "peak_rss_kib": 30440,
+          "affinity": "1",
+          "fd_start": 28,
+          "fd_end": 55
+        },
+        "sender": {
+          "cpu_s": 3.27,
+          "peak_rss_kib": 36736,
+          "affinity": "1",
+          "fd_start": 133,
+          "fd_end": 133
+        }
+      },
+      "orphan_or_late_packets": 0,
+      "stages": [
+        {
+          "stage": "warmup",
+          "rate": 100,
+          "duration": 10.0,
+          "all": {
+            "planned": 1000,
+            "sent": 1000,
+            "received": 1000,
+            "correct_on_time": 1000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 1000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.598506,
+              "p95": 84.323967,
+              "p99": 87.611492
+            },
+            "sent_latency_ms": {
+              "p50": 81.909951,
+              "p95": 83.364888,
+              "p99": 85.868831
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.64862,
+              "p95": 1.120151,
+              "p99": 2.516441
+            }
+          },
+          "stable": {
+            "planned": 833,
+            "sent": 833,
+            "received": 833,
+            "correct_on_time": 833,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 833
+            },
+            "effective_qps": 99.96,
+            "planned_latency_ms": {
+              "p50": 82.58432,
+              "p95": 84.207124,
+              "p99": 85.620633
+            },
+            "sent_latency_ms": {
+              "p50": 81.894905,
+              "p95": 83.261671,
+              "p99": 84.013388
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.665441,
+              "p95": 1.126354,
+              "p99": 1.796974
+            }
+          },
+          "resources": {
+            "cpu_s": 0.40000000000000013,
+            "cpu_us_per_correct": 480.19207683073245,
+            "rss_median_kib": 191080,
+            "rss_peak_kib": 195268,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "sampling_cpu_fraction": {
+            "sut": 0.049801693933883666,
+            "mock": 0.07825980475324575,
+            "sender": 0.03862172182627712
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.0029354207436399216,
+            "cpu1": 0.000998003992015968
+          }
+        },
+        {
+          "stage": "q100",
+          "rate": 100,
+          "duration": 30.0,
+          "all": {
+            "planned": 3000,
+            "sent": 3000,
+            "received": 3000,
+            "correct_on_time": 3000,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 3000
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.418056,
+              "p95": 83.90479,
+              "p99": 85.102131
+            },
+            "sent_latency_ms": {
+              "p50": 81.753207,
+              "p95": 83.034044,
+              "p99": 83.862415
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.643095,
+              "p95": 1.109497,
+              "p99": 1.7091
+            }
+          },
+          "stable": {
+            "planned": 2500,
+            "sent": 2500,
+            "received": 2500,
+            "correct_on_time": 2500,
+            "correct_rate": 1.0,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 1.0,
+            "statuses": {
+              "correct": 2500
+            },
+            "effective_qps": 100.0,
+            "planned_latency_ms": {
+              "p50": 82.439143,
+              "p95": 83.993113,
+              "p99": 85.186339
+            },
+            "sent_latency_ms": {
+              "p50": 81.773586,
+              "p95": 83.095191,
+              "p99": 83.89811
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.641718,
+              "p95": 1.10832,
+              "p99": 1.730695
+            }
+          },
+          "resources": {
+            "cpu_s": 1.0399999999999998,
+            "cpu_us_per_correct": 415.9999999999999,
+            "rss_median_kib": 199856,
+            "rss_peak_kib": 199876,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "sampling_cpu_fraction": {
+            "sut": 0.04293890935238757,
+            "mock": 0.06608566517515899,
+            "sender": 0.033881483160868316
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.0013097576948264572,
+            "cpu1": 0.0013149243918474688
+          }
+        },
+        {
+          "stage": "recovery",
+          "rate": 100,
+          "duration": 60.0,
+          "all": {
+            "planned": 6000,
+            "sent": 5998,
+            "received": 5998,
+            "correct_on_time": 5998,
+            "correct_rate": 0.9996666666666667,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 0.9996666666666667,
+            "statuses": {
+              "correct": 5998,
+              "unsent": 2
+            },
+            "effective_qps": 99.96666666666667,
+            "planned_latency_ms": {
+              "p50": 82.247119,
+              "p95": 83.857159,
+              "p99": 84.925259
+            },
+            "sent_latency_ms": {
+              "p50": 81.585039,
+              "p95": 82.976028,
+              "p99": 83.818671
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.65357,
+              "p95": 1.091823,
+              "p99": 1.604806
+            }
+          },
+          "stable": {
+            "planned": 6000,
+            "sent": 5998,
+            "received": 5998,
+            "correct_on_time": 5998,
+            "correct_rate": 0.9996666666666667,
+            "sent_correct_rate": 1.0,
+            "send_coverage": 0.9996666666666667,
+            "statuses": {
+              "correct": 5998,
+              "unsent": 2
+            },
+            "effective_qps": 99.96666666666667,
+            "planned_latency_ms": {
+              "p50": 82.247119,
+              "p95": 83.857159,
+              "p99": 84.925259
+            },
+            "sent_latency_ms": {
+              "p50": 81.585039,
+              "p95": 82.976028,
+              "p99": 83.818671
+            },
+            "dispatch_lag_ms": {
+              "p50": 0.65357,
+              "p95": 1.091823,
+              "p99": 1.604806
+            }
+          },
+          "resources": {
+            "cpu_s": 2.32,
+            "cpu_us_per_correct": 386.7955985328443,
+            "rss_median_kib": 201944,
+            "rss_peak_kib": 202272,
+            "fd_start": 36,
+            "fd_end": 36,
+            "threads_end": 6
+          },
+          "seconds": [
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.255781,
+                "p95": 83.242004,
+                "p99": 83.71086
+              },
+              "sent_latency_ms": {
+                "p50": 81.566855,
+                "p95": 82.341742,
+                "p99": 82.5595
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.726861,
+                "p95": 1.065391,
+                "p99": 1.141837
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.9052,
+                "p95": 82.859325,
+                "p99": 83.49426
+              },
+              "sent_latency_ms": {
+                "p50": 81.349622,
+                "p95": 82.067898,
+                "p99": 82.292257
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.475906,
+                "p95": 1.029405,
+                "p99": 1.892201
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.89965,
+                "p95": 82.936673,
+                "p99": 83.151677
+              },
+              "sent_latency_ms": {
+                "p50": 81.323119,
+                "p95": 82.266131,
+                "p99": 82.557096
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.586251,
+                "p95": 1.017446,
+                "p99": 1.128314
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.137523,
+                "p95": 83.579659,
+                "p99": 84.061614
+              },
+              "sent_latency_ms": {
+                "p50": 81.398712,
+                "p95": 82.650348,
+                "p99": 83.068374
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.644109,
+                "p95": 1.088328,
+                "p99": 1.426127
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 99,
+              "received": 99,
+              "correct_on_time": 99,
+              "correct_rate": 0.99,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 0.99,
+              "statuses": {
+                "correct": 99,
+                "unsent": 1
+              },
+              "effective_qps": 99.0,
+              "planned_latency_ms": {
+                "p50": 82.47714,
+                "p95": 84.18335,
+                "p99": 86.117167
+              },
+              "sent_latency_ms": {
+                "p50": 81.841392,
+                "p95": 83.414319,
+                "p99": 84.941181
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.606756,
+                "p95": 1.036839,
+                "p99": 2.487426
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.64235,
+                "p95": 84.441888,
+                "p99": 86.057391
+              },
+              "sent_latency_ms": {
+                "p50": 82.017068,
+                "p95": 83.488382,
+                "p99": 85.099486
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.741522,
+                "p95": 1.100002,
+                "p99": 1.319274
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.749255,
+                "p95": 85.361671,
+                "p99": 85.999866
+              },
+              "sent_latency_ms": {
+                "p50": 82.188609,
+                "p95": 84.605424,
+                "p99": 84.911828
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.623717,
+                "p95": 1.245783,
+                "p99": 1.846137
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.022088,
+                "p95": 83.973479,
+                "p99": 84.207792
+              },
+              "sent_latency_ms": {
+                "p50": 81.425645,
+                "p95": 82.913994,
+                "p99": 83.455777
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.539029,
+                "p95": 1.066612,
+                "p99": 1.226036
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.039763,
+                "p95": 83.368755,
+                "p99": 84.000736
+              },
+              "sent_latency_ms": {
+                "p50": 81.447688,
+                "p95": 82.642299,
+                "p99": 82.976028
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.644977,
+                "p95": 1.058165,
+                "p99": 1.198389
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.48242,
+                "p95": 83.706329,
+                "p99": 83.922214
+              },
+              "sent_latency_ms": {
+                "p50": 81.768124,
+                "p95": 82.8389,
+                "p99": 83.049577
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.704252,
+                "p95": 1.091823,
+                "p99": 1.200593
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.657638,
+                "p95": 84.149125,
+                "p99": 85.099261
+              },
+              "sent_latency_ms": {
+                "p50": 81.872784,
+                "p95": 83.25973,
+                "p99": 83.626844
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.790764,
+                "p95": 1.132935,
+                "p99": 2.150158
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.599886,
+                "p95": 84.04749,
+                "p99": 85.802685
+              },
+              "sent_latency_ms": {
+                "p50": 81.874315,
+                "p95": 83.394103,
+                "p99": 84.271552
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.74681,
+                "p95": 1.099915,
+                "p99": 1.251613
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.101392,
+                "p95": 83.759986,
+                "p99": 84.143281
+              },
+              "sent_latency_ms": {
+                "p50": 81.479803,
+                "p95": 82.985104,
+                "p99": 83.263764
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.561884,
+                "p95": 1.047822,
+                "p99": 1.141185
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.407424,
+                "p95": 83.981998,
+                "p99": 84.605878
+              },
+              "sent_latency_ms": {
+                "p50": 81.73558,
+                "p95": 83.321284,
+                "p99": 83.410839
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.663063,
+                "p95": 1.107208,
+                "p99": 1.623989
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.805236,
+                "p95": 82.667595,
+                "p99": 82.855545
+              },
+              "sent_latency_ms": {
+                "p50": 81.163433,
+                "p95": 81.807577,
+                "p99": 82.031981
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.673669,
+                "p95": 1.024197,
+                "p99": 1.057908
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.917891,
+                "p95": 82.975505,
+                "p99": 83.18865
+              },
+              "sent_latency_ms": {
+                "p50": 81.299692,
+                "p95": 82.206043,
+                "p99": 82.419937
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.725399,
+                "p95": 1.080673,
+                "p99": 1.523246
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.99415,
+                "p95": 82.851205,
+                "p99": 83.010483
+              },
+              "sent_latency_ms": {
+                "p50": 81.360059,
+                "p95": 81.904366,
+                "p99": 82.050977
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.581145,
+                "p95": 1.078419,
+                "p99": 1.367243
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.128111,
+                "p95": 83.238379,
+                "p99": 84.385304
+              },
+              "sent_latency_ms": {
+                "p50": 81.525315,
+                "p95": 82.586468,
+                "p99": 83.496072
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.558584,
+                "p95": 1.046906,
+                "p99": 1.107584
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.212992,
+                "p95": 83.463506,
+                "p99": 84.472064
+              },
+              "sent_latency_ms": {
+                "p50": 81.583981,
+                "p95": 82.563261,
+                "p99": 83.885983
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.636053,
+                "p95": 1.002296,
+                "p99": 1.296948
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.147742,
+                "p95": 83.508792,
+                "p99": 83.984082
+              },
+              "sent_latency_ms": {
+                "p50": 81.509954,
+                "p95": 82.784707,
+                "p99": 83.244448
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.605458,
+                "p95": 1.10823,
+                "p99": 1.217464
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.466887,
+                "p95": 83.902716,
+                "p99": 84.10947
+              },
+              "sent_latency_ms": {
+                "p50": 81.860333,
+                "p95": 82.984645,
+                "p99": 83.439295
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.632881,
+                "p95": 1.078324,
+                "p99": 1.163626
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.900021,
+                "p95": 83.197835,
+                "p99": 83.78243
+              },
+              "sent_latency_ms": {
+                "p50": 81.301164,
+                "p95": 82.434183,
+                "p99": 82.820011
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.582612,
+                "p95": 1.026422,
+                "p99": 1.095685
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.685882,
+                "p95": 82.571845,
+                "p99": 83.144006
+              },
+              "sent_latency_ms": {
+                "p50": 81.175802,
+                "p95": 81.59676,
+                "p99": 81.828204
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.543191,
+                "p95": 1.042439,
+                "p99": 1.787217
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.692212,
+                "p95": 82.498986,
+                "p99": 82.730261
+              },
+              "sent_latency_ms": {
+                "p50": 81.131089,
+                "p95": 81.550213,
+                "p99": 81.768903
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.584239,
+                "p95": 1.043379,
+                "p99": 1.092147
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.85426,
+                "p95": 83.341681,
+                "p99": 83.9765
+              },
+              "sent_latency_ms": {
+                "p50": 81.263557,
+                "p95": 82.467638,
+                "p99": 82.952489
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.668711,
+                "p95": 1.075217,
+                "p99": 1.114171
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.758367,
+                "p95": 84.312352,
+                "p99": 85.118728
+              },
+              "sent_latency_ms": {
+                "p50": 82.092464,
+                "p95": 83.220377,
+                "p99": 84.089766
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.61458,
+                "p95": 1.124576,
+                "p99": 1.207945
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.845388,
+                "p95": 84.315008,
+                "p99": 85.081942
+              },
+              "sent_latency_ms": {
+                "p50": 82.205965,
+                "p95": 83.092611,
+                "p99": 83.795595
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.642209,
+                "p95": 1.163873,
+                "p99": 2.648137
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.390566,
+                "p95": 83.524156,
+                "p99": 83.926286
+              },
+              "sent_latency_ms": {
+                "p50": 81.625171,
+                "p95": 82.860723,
+                "p99": 83.335543
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.696767,
+                "p95": 1.101736,
+                "p99": 1.249443
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.941962,
+                "p95": 82.775147,
+                "p99": 83.124063
+              },
+              "sent_latency_ms": {
+                "p50": 81.235628,
+                "p95": 81.86739,
+                "p99": 82.138425
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.62035,
+                "p95": 1.095979,
+                "p99": 1.171711
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.044934,
+                "p95": 83.028987,
+                "p99": 83.436193
+              },
+              "sent_latency_ms": {
+                "p50": 81.413784,
+                "p95": 82.161001,
+                "p99": 82.444569
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.55478,
+                "p95": 1.104393,
+                "p99": 1.437392
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.933581,
+                "p95": 82.924611,
+                "p99": 83.764878
+              },
+              "sent_latency_ms": {
+                "p50": 81.385385,
+                "p95": 82.247877,
+                "p99": 82.435685
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.598193,
+                "p95": 1.098822,
+                "p99": 1.1541
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.037631,
+                "p95": 82.987249,
+                "p99": 83.81946
+              },
+              "sent_latency_ms": {
+                "p50": 81.393724,
+                "p95": 82.328529,
+                "p99": 82.617142
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.536321,
+                "p95": 1.066862,
+                "p99": 1.671187
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.430882,
+                "p95": 83.88606,
+                "p99": 84.60113
+              },
+              "sent_latency_ms": {
+                "p50": 81.660648,
+                "p95": 83.06761,
+                "p99": 83.665459
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.620982,
+                "p95": 1.127078,
+                "p99": 1.191313
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.687313,
+                "p95": 84.030812,
+                "p99": 85.454355
+              },
+              "sent_latency_ms": {
+                "p50": 82.11555,
+                "p95": 83.369609,
+                "p99": 84.39737
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.708947,
+                "p95": 1.072997,
+                "p99": 1.137646
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 99,
+              "received": 99,
+              "correct_on_time": 99,
+              "correct_rate": 0.99,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 0.99,
+              "statuses": {
+                "correct": 99,
+                "unsent": 1
+              },
+              "effective_qps": 99.0,
+              "planned_latency_ms": {
+                "p50": 82.817232,
+                "p95": 84.322417,
+                "p99": 88.958024
+              },
+              "sent_latency_ms": {
+                "p50": 82.072159,
+                "p95": 83.606161,
+                "p99": 88.260082
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.705107,
+                "p95": 1.110298,
+                "p99": 2.563653
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.675002,
+                "p95": 84.068351,
+                "p99": 87.784513
+              },
+              "sent_latency_ms": {
+                "p50": 82.148841,
+                "p95": 83.259701,
+                "p99": 85.966984
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.698035,
+                "p95": 1.120739,
+                "p99": 1.262487
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.395551,
+                "p95": 83.743769,
+                "p99": 84.319634
+              },
+              "sent_latency_ms": {
+                "p50": 81.564795,
+                "p95": 82.753014,
+                "p99": 83.617316
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.708482,
+                "p95": 1.082764,
+                "p99": 1.126158
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.749029,
+                "p95": 84.247101,
+                "p99": 85.725426
+              },
+              "sent_latency_ms": {
+                "p50": 82.121903,
+                "p95": 83.07926,
+                "p99": 83.814181
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.654289,
+                "p95": 1.13619,
+                "p99": 2.986352
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.909885,
+                "p95": 85.409845,
+                "p99": 86.766175
+              },
+              "sent_latency_ms": {
+                "p50": 82.241306,
+                "p95": 84.299997,
+                "p99": 85.726519
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.669871,
+                "p95": 1.19423,
+                "p99": 1.535209
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.665065,
+                "p95": 83.864669,
+                "p99": 84.831124
+              },
+              "sent_latency_ms": {
+                "p50": 81.994456,
+                "p95": 83.229234,
+                "p99": 84.237393
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.642091,
+                "p95": 1.044979,
+                "p99": 1.22522
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.065113,
+                "p95": 83.628355,
+                "p99": 85.173584
+              },
+              "sent_latency_ms": {
+                "p50": 81.45286,
+                "p95": 83.133645,
+                "p99": 84.7779
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.656182,
+                "p95": 1.045605,
+                "p99": 1.108964
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.34516,
+                "p95": 83.906132,
+                "p99": 85.015967
+              },
+              "sent_latency_ms": {
+                "p50": 81.714095,
+                "p95": 83.217068,
+                "p99": 84.488568
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.633847,
+                "p95": 1.080248,
+                "p99": 1.155587
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.067149,
+                "p95": 83.48223,
+                "p99": 83.883387
+              },
+              "sent_latency_ms": {
+                "p50": 81.372269,
+                "p95": 82.393027,
+                "p99": 83.13913
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.704477,
+                "p95": 1.075454,
+                "p99": 1.138896
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.959682,
+                "p95": 82.988572,
+                "p99": 83.131983
+              },
+              "sent_latency_ms": {
+                "p50": 81.392317,
+                "p95": 82.167931,
+                "p99": 82.654484
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.601107,
+                "p95": 1.072634,
+                "p99": 1.144806
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.039555,
+                "p95": 82.941039,
+                "p99": 83.326691
+              },
+              "sent_latency_ms": {
+                "p50": 81.383293,
+                "p95": 82.00694,
+                "p99": 82.224557
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.7649,
+                "p95": 1.099753,
+                "p99": 1.124165
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.820328,
+                "p95": 82.838594,
+                "p99": 82.915884
+              },
+              "sent_latency_ms": {
+                "p50": 81.283636,
+                "p95": 82.140321,
+                "p99": 82.455811
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.642485,
+                "p95": 1.073525,
+                "p99": 1.152891
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.577188,
+                "p95": 84.517045,
+                "p99": 86.873202
+              },
+              "sent_latency_ms": {
+                "p50": 82.019769,
+                "p95": 83.524396,
+                "p99": 85.966356
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.627817,
+                "p95": 1.062784,
+                "p99": 1.902335
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.646015,
+                "p95": 84.012631,
+                "p99": 84.577758
+              },
+              "sent_latency_ms": {
+                "p50": 82.024104,
+                "p95": 83.063799,
+                "p99": 83.601312
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.659367,
+                "p95": 1.064967,
+                "p99": 1.147865
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.668604,
+                "p95": 84.186575,
+                "p99": 84.925259
+              },
+              "sent_latency_ms": {
+                "p50": 82.044721,
+                "p95": 83.241421,
+                "p99": 83.776872
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.744358,
+                "p95": 1.148387,
+                "p99": 1.31796
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.993032,
+                "p95": 83.11927,
+                "p99": 83.944974
+              },
+              "sent_latency_ms": {
+                "p50": 81.360852,
+                "p95": 82.390661,
+                "p99": 82.915337
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.673248,
+                "p95": 1.052673,
+                "p99": 1.264441
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.595513,
+                "p95": 84.129174,
+                "p99": 84.404433
+              },
+              "sent_latency_ms": {
+                "p50": 81.886027,
+                "p95": 82.91658,
+                "p99": 83.520504
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.685925,
+                "p95": 1.124415,
+                "p99": 1.190123
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.330904,
+                "p95": 83.820002,
+                "p99": 84.568266
+              },
+              "sent_latency_ms": {
+                "p50": 81.614365,
+                "p95": 82.889577,
+                "p99": 83.517133
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.695372,
+                "p95": 1.083281,
+                "p99": 2.527358
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.091218,
+                "p95": 83.720047,
+                "p99": 84.011236
+              },
+              "sent_latency_ms": {
+                "p50": 81.624505,
+                "p95": 82.768893,
+                "p99": 83.161493
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.582916,
+                "p95": 1.073684,
+                "p99": 1.120815
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.056858,
+                "p95": 83.076246,
+                "p99": 83.453329
+              },
+              "sent_latency_ms": {
+                "p50": 81.460753,
+                "p95": 82.353609,
+                "p99": 82.737902
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.56989,
+                "p95": 1.027285,
+                "p99": 1.088369
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 83.052867,
+                "p95": 84.083651,
+                "p99": 86.994629
+              },
+              "sent_latency_ms": {
+                "p50": 82.299509,
+                "p95": 83.004801,
+                "p99": 86.128238
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.764195,
+                "p95": 1.142578,
+                "p99": 1.95988
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.823981,
+                "p95": 84.271849,
+                "p99": 84.751913
+              },
+              "sent_latency_ms": {
+                "p50": 82.173982,
+                "p95": 83.169074,
+                "p99": 83.683912
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.641949,
+                "p95": 1.120298,
+                "p99": 2.121812
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 82.286133,
+                "p95": 83.647823,
+                "p99": 83.99747
+              },
+              "sent_latency_ms": {
+                "p50": 81.594698,
+                "p95": 82.63608,
+                "p99": 83.132182
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.650588,
+                "p95": 1.089865,
+                "p99": 1.159215
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.893974,
+                "p95": 82.949272,
+                "p99": 83.430527
+              },
+              "sent_latency_ms": {
+                "p50": 81.240751,
+                "p95": 81.991322,
+                "p99": 82.272324
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.666536,
+                "p95": 1.069182,
+                "p99": 1.1566
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.877839,
+                "p95": 82.806799,
+                "p99": 83.12639
+              },
+              "sent_latency_ms": {
+                "p50": 81.290674,
+                "p95": 81.926394,
+                "p99": 82.150941
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.678477,
+                "p95": 1.061081,
+                "p99": 1.123617
+              }
+            },
+            {
+              "planned": 100,
+              "sent": 100,
+              "received": 100,
+              "correct_on_time": 100,
+              "correct_rate": 1.0,
+              "sent_correct_rate": 1.0,
+              "send_coverage": 1.0,
+              "statuses": {
+                "correct": 100
+              },
+              "effective_qps": 100.0,
+              "planned_latency_ms": {
+                "p50": 81.967188,
+                "p95": 83.003435,
+                "p99": 83.424352
+              },
+              "sent_latency_ms": {
+                "p50": 81.396911,
+                "p95": 82.188487,
+                "p99": 82.61579
+              },
+              "dispatch_lag_ms": {
+                "p50": 0.592689,
+                "p95": 1.031115,
+                "p99": 1.091094
+              }
+            }
+          ],
+          "sampling_cpu_fraction": {
+            "sut": 0.03882057457426504,
+            "mock": 0.06007149255241876,
+            "sender": 0.030788731558899867
+          },
+          "cpu_steal_fraction": {
+            "cpu0": 0.0011469768966082255,
+            "cpu1": 0.0016458196181698486
+          }
+        }
+      ],
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    }
+  ],
+  "aggregates": [
+    {
+      "stage": "warmup",
+      "rate": 100,
+      "planned_latency_ms": {
+        "p50": {
+          "median": 82.302754,
+          "min": 82.225877,
+          "max": 82.58432
+        },
+        "p95": {
+          "median": 84.002803,
+          "min": 83.711336,
+          "max": 84.207124
+        },
+        "p99": {
+          "median": 84.840685,
+          "min": 84.614711,
+          "max": 85.620633
+        }
+      },
+      "correct_rate": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "send_coverage": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "cpu_us_per_correct": {
+        "median": 372.1488595438176,
+        "min": 360.14405762304915,
+        "max": 480.19207683073245
+      },
+      "rss_median_kib": {
+        "median": 193164,
+        "min": 191080,
+        "max": 195188
+      },
+      "rss_peak_kib": {
+        "median": 195284,
+        "min": 195268,
+        "max": 199356
+      }
+    },
+    {
+      "stage": "q100",
+      "rate": 100,
+      "planned_latency_ms": {
+        "p50": {
+          "median": 82.390411,
+          "min": 82.386396,
+          "max": 82.439143
+        },
+        "p95": {
+          "median": 83.993113,
+          "min": 83.990366,
+          "max": 84.035453
+        },
+        "p99": {
+          "median": 85.160492,
+          "min": 85.043604,
+          "max": 85.186339
+        }
+      },
+      "correct_rate": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "send_coverage": {
+        "median": 1.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "cpu_us_per_correct": {
+        "median": 431.9999999999999,
+        "min": 415.9999999999999,
+        "max": 439.9999999999999
+      },
+      "rss_median_kib": {
+        "median": 206096,
+        "min": 199856,
+        "max": 212376
+      },
+      "rss_peak_kib": {
+        "median": 206128,
+        "min": 199876,
+        "max": 212408
+      }
+    },
+    {
+      "stage": "recovery",
+      "rate": 100,
+      "planned_latency_ms": {
+        "p50": {
+          "median": 82.365852,
+          "min": 82.247119,
+          "max": 82.368108
+        },
+        "p95": {
+          "median": 83.980601,
+          "min": 83.857159,
+          "max": 84.079148
+        },
+        "p99": {
+          "median": 85.084071,
+          "min": 84.925259,
+          "max": 85.100732
+        }
+      },
+      "correct_rate": {
+        "median": 0.9998333333333334,
+        "min": 0.9996666666666667,
+        "max": 1.0
+      },
+      "send_coverage": {
+        "median": 0.9998333333333334,
+        "min": 0.9996666666666667,
+        "max": 1.0
+      },
+      "cpu_us_per_correct": {
+        "median": 420.0700116686114,
+        "min": 386.7955985328443,
+        "max": 426.6666666666666
+      },
+      "rss_median_kib": {
+        "median": 206164,
+        "min": 201944,
+        "max": 212456
+      },
+      "rss_peak_kib": {
+        "median": 206456,
+        "min": 202272,
+        "max": 214700
+      }
+    }
+  ]
+}

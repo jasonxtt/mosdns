@@ -1,0 +1,461 @@
+{
+  "runs": [
+    {
+      "run": "native-ext-r1",
+      "counts": [
+        {
+          "stage": "q32000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 68
+        },
+        {
+          "stage": "q32000",
+          "window": "settling",
+          "category": "unexplained_cell",
+          "status": "late_wrong",
+          "count": 258
+        },
+        {
+          "stage": "q32000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 381
+        },
+        {
+          "stage": "q64000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 117
+        },
+        {
+          "stage": "q64000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 579
+        },
+        {
+          "stage": "recovery",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "run": "native-ext-r2",
+      "counts": [
+        {
+          "stage": "q32000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 57
+        },
+        {
+          "stage": "q32000",
+          "window": "settling",
+          "category": "unexplained_cell",
+          "status": "late_wrong",
+          "count": 252
+        },
+        {
+          "stage": "q32000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 365
+        },
+        {
+          "stage": "q64000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 125
+        },
+        {
+          "stage": "q64000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 630
+        },
+        {
+          "stage": "recovery",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "run": "native-ext-r3",
+      "counts": [
+        {
+          "stage": "q32000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 56
+        },
+        {
+          "stage": "q32000",
+          "window": "settling",
+          "category": "unexplained_cell",
+          "status": "late_wrong",
+          "count": 163
+        },
+        {
+          "stage": "q32000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 325
+        },
+        {
+          "stage": "q64000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 132
+        },
+        {
+          "stage": "q64000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 569
+        },
+        {
+          "stage": "recovery",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "run": "native-f-r1",
+      "counts": []
+    },
+    {
+      "run": "native-f-r2",
+      "counts": []
+    },
+    {
+      "run": "native-f-r3",
+      "counts": []
+    },
+    {
+      "run": "native-main-r1",
+      "counts": [
+        {
+          "stage": "q100",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 2
+        },
+        {
+          "stage": "q1000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 8
+        },
+        {
+          "stage": "q16000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 47
+        },
+        {
+          "stage": "q16000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 184
+        },
+        {
+          "stage": "q2000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 3
+        },
+        {
+          "stage": "q2000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 21
+        },
+        {
+          "stage": "q4000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 9
+        },
+        {
+          "stage": "q4000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 48
+        },
+        {
+          "stage": "q500",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 2
+        },
+        {
+          "stage": "q500",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 7
+        },
+        {
+          "stage": "q8000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 18
+        },
+        {
+          "stage": "q8000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 98
+        },
+        {
+          "stage": "recovery",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "run": "native-main-r2",
+      "counts": [
+        {
+          "stage": "q100",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 1
+        },
+        {
+          "stage": "q1000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 1
+        },
+        {
+          "stage": "q1000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 8
+        },
+        {
+          "stage": "q16000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 39
+        },
+        {
+          "stage": "q16000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 190
+        },
+        {
+          "stage": "q20",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 1
+        },
+        {
+          "stage": "q2000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 4
+        },
+        {
+          "stage": "q2000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 17
+        },
+        {
+          "stage": "q4000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 7
+        },
+        {
+          "stage": "q4000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 38
+        },
+        {
+          "stage": "q500",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 7
+        },
+        {
+          "stage": "q8000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 15
+        },
+        {
+          "stage": "q8000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 91
+        },
+        {
+          "stage": "recovery",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "run": "native-main-r3",
+      "counts": [
+        {
+          "stage": "q100",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 1
+        },
+        {
+          "stage": "q100",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 1
+        },
+        {
+          "stage": "q1000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 2
+        },
+        {
+          "stage": "q1000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 3
+        },
+        {
+          "stage": "q16000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 46
+        },
+        {
+          "stage": "q16000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 145
+        },
+        {
+          "stage": "q2000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 4
+        },
+        {
+          "stage": "q2000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 18
+        },
+        {
+          "stage": "q4000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 12
+        },
+        {
+          "stage": "q4000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 42
+        },
+        {
+          "stage": "q500",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 4
+        },
+        {
+          "stage": "q8000",
+          "window": "settling",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 20
+        },
+        {
+          "stage": "q8000",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 79
+        },
+        {
+          "stage": "recovery",
+          "window": "stable",
+          "category": "known_case_contract_cell",
+          "status": "wrong",
+          "count": 2
+        }
+      ]
+    }
+  ],
+  "actual_timed_response_payloads_retained": false,
+  "no_reclassification_or_oracle_change": true
+}

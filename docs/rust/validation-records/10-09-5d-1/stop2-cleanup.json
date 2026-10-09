@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-09",
+  "checked_at_utc": "2026-10-09T14:37:53.156610+00:00",
+  "attempt_cleanup_receipts": 47,
+  "all_owned_processes_exited": true,
+  "owned_active_processes": [],
+  "owned_namespaces_deleted": true,
+  "vm_temporary_root_deleted": "/root/5d1-20261009",
+  "vm_archive_copy_deleted": true,
+  "original_service": {
+    "ActiveState": "active",
+    "MainPID": 827437,
+    "identity_unchanged": true
+  },
+  "private_evidence": {
+    "local_archive": "/private/tmp/5d1-private-evidence-20261009.tar.gz",
+    "sha256": "0afc0d933fd939db7f57144c49ded77bdf97701ac381959f8a9abcaed4b1f5cb",
+    "mode": "0600",
+    "source_target_excluded": true,
+    "raw_runs_inputs_binaries_tool_versions_profiles_preserved": true
+  },
+  "commit": false,
+  "push": false,
+  "deployment": false
+}
