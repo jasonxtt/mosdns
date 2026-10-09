@@ -555,6 +555,11 @@ impl HostAssembly {
             Some((server, address)) => (Some(server), Some(address)),
             None => (None, None),
         };
+        if let Some(profile) = &self.config.standard_groups {
+            profile
+                .recover()
+                .map_err(|error| HostRunError::Task(error.to_string()))?;
+        }
         Ok(BoundHost {
             control: self.control(),
             dns,

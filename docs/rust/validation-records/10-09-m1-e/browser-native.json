@@ -1,0 +1,22 @@
+[
+  {
+    "shell": "/",
+    "create": true,
+    "edit": true,
+    "delete": true,
+    "source": "normal",
+    "privateUpstream": true,
+    "customPortOnly": 15355,
+    "pageErrors": []
+  },
+  {
+    "shell": "/log",
+    "create": true,
+    "edit": true,
+    "delete": true,
+    "source": "normal",
+    "privateUpstream": true,
+    "customPortOnly": 15355,
+    "pageErrors": []
+  }
+]

@@ -884,7 +884,7 @@ fn raw_to_entry(item: &RawMap, proxied: bool) -> UpstreamEntry {
 }
 
 /// One enabled UI entry as the YAML mapping `aliapi` decodes.
-fn upstream_to_raw(entry: &UpstreamEntry) -> RawValue {
+pub(super) fn upstream_to_raw(entry: &UpstreamEntry) -> RawValue {
     let string = |value: &str| RawValue::String(value.to_owned());
     let number = |value: i64| RawValue::Number(super::RawNumber::Signed(value));
     let mut map = RawMap {

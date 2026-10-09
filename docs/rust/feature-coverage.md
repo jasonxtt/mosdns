@@ -397,7 +397,7 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | C02 | DNS wire/server | M1（全链路固有） | [5A routing](validation-records/09-22-rust-phase5a-native-routing/) |
 | C03 | 上游配置及策略 | M1（https/tls/udp，经 `aliapi`；M1-b1 已接入；设置层与热生效 M1-f1 后端已接入） | [上游转发](validation-records/09-30-rust-native-upstream-forwarding/prd.md) |
 | C04 | 数据格式与规则下载 | M1：SRS/manifest/adguard 加载（M1-a1）与下载、自动更新、热更新（M1-a2）已原生接入；环境变量 HTTP 代理未实现（见契约） | [M1-a2 记录](validation-records/10-07-m1-a2-rule-management/README.md) |
-| C05 | `special_groups` | M1；未托管配置下的形态见 M1 清单 §3.2 | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
+| C05 | `special_groups` | M1-e 标准配置 schema-4、组引用/私有上游与热生效已实施，VM 验证通过、待外部审查；旧 managed 模式冻结 | [M1-e](validation-records/10-09-m1-e/README.md) |
 | C06 | 上游管理 | M1（随 `aliapi`；非托管下的上游/覆盖/生成开关 API 由 M1-f1 以类型化设置实现，WebUI 接线与配置包为 M1-f2） | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
 | C07 | 配置导出/更新/生成 | M1（切换门槛，执行顺序第 5 项） |  |
 | C08 | 查询审计 | M1（WebUI 使用面；`check` 不覆盖 API） | [查询诊断](validation-records/09-30-rust-native-query-diagnostics-overview/prd.md) |

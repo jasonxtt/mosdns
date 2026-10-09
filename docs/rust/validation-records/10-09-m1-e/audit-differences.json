@@ -1,0 +1,212 @@
+[
+  {
+    "input": {
+      "run": 1,
+      "port": 15353,
+      "name": "port.example.com",
+      "qtype": 1
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 1,
+      "port": 15353,
+      "name": "port.example.com",
+      "qtype": 28
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 1,
+      "port": 15354,
+      "name": "port.example.com",
+      "qtype": 1
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "sequence_special_51",
+      "final_upstream": "special_upstream_51"
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": null,
+      "final_sequence": "sequence_special_51",
+      "final_upstream": "special_upstream_51"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 1,
+      "port": 15354,
+      "name": "port.example.com",
+      "qtype": 28
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "sequence_special_51",
+      "final_upstream": "special_upstream_51"
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": null,
+      "final_sequence": "sequence_special_51",
+      "final_upstream": "special_upstream_51"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 2,
+      "port": 15353,
+      "name": "main.example.com",
+      "qtype": 1
+    },
+    "go": {
+      "domain_set": "特殊上游50",
+      "effective_tag": "特殊上游50",
+      "final_sequence": null,
+      "final_upstream": null
+    },
+    "native": {
+      "domain_set": "特殊上游50",
+      "effective_tag": "特殊上游50",
+      "final_sequence": "sequence_special_50",
+      "final_upstream": "special_50_0"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 2,
+      "port": 15353,
+      "name": "main.example.com",
+      "qtype": 28
+    },
+    "go": {
+      "domain_set": "特殊上游50",
+      "effective_tag": "特殊上游50",
+      "final_sequence": null,
+      "final_upstream": null
+    },
+    "native": {
+      "domain_set": "特殊上游50",
+      "effective_tag": "特殊上游50",
+      "final_sequence": "sequence_special_50",
+      "final_upstream": "special_50_0"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 2,
+      "port": 15353,
+      "name": "port.example.com",
+      "qtype": 1
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 2,
+      "port": 15353,
+      "name": "port.example.com",
+      "qtype": 28
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": "unmatched_rule",
+      "final_sequence": "main",
+      "final_upstream": "normal"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 2,
+      "port": 15354,
+      "name": "port.example.com",
+      "qtype": 1
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": null,
+      "final_upstream": null
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": null,
+      "final_sequence": "sequence_special_51",
+      "final_upstream": "special_51_0"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  },
+  {
+    "input": {
+      "run": 2,
+      "port": 15354,
+      "name": "port.example.com",
+      "qtype": 28
+    },
+    "go": {
+      "domain_set": "unmatched_rule",
+      "effective_tag": "unmatched_rule",
+      "final_sequence": null,
+      "final_upstream": null
+    },
+    "native": {
+      "domain_set": null,
+      "effective_tag": null,
+      "final_sequence": "sequence_special_51",
+      "final_upstream": "special_51_0"
+    },
+    "classification": "empty unmatched sentinel; Go cached route fields absent; native actual cache sequence/supplier retained"
+  }
+]

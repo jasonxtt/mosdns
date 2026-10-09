@@ -39,9 +39,20 @@ entries compile; `concurrent` stays the YAML value; all entries disabled is an e
 `so_mark`, `bind_to_device`, `enable_pipeline`, `enable_http3`, positive `idle_timeout`, `quic`, unknown fields.
 Loading errors (start, `check`): unreadable or unparsable file, a version other than 1, an unknown top-level key, a settings key that names no object / the wrong kind, an invalid
 value. A missing or empty file is "no settings". Compiling and `check` never write. With `native_management` the file is still read at start, but the settings API is not served and a settings apply is refused (that mode keeps its own upstream
-overrides until M1-e).
+overrides; this mode remains frozen through M1-e).
 
 ## The effective configuration
+
+M1-e group-proxy rule (user approved 2026-10-09): owned special-group upstreams
+with `use_proxy=true` require exactly one configured `socks5_proxy`, like the
+overrides page. Zero objects reject the change with a missing-object reason;
+multiple objects reject with an ambiguity reason. The sole object's address,
+including its explicit empty "no proxy" value, applies. Group references inherit
+the source plugin/entry's resolved proxy. Standard-mode groups resolve after the
+ordinary typed settings overlay on every compile/apply; group entries and
+sources appear in effective reports. Derived group YAML participates in the same
+authority-file commit and startup recovery described in
+[native-special-groups](native-special-groups.md). External review remains pending.
 
 `config::settings::apply(definitions, settings)` runs inside the shared compile (`start`, `check`, hot apply): validate, resolve references to the literal forms the plugin compilers accept,
 overlay settings, and report every item (`kind`, `object`, `field`, `value`, `source` = `yaml` | `settings`). `domain_output` `enabled` is the plugin's setting (else the YAML `enabled`), and only while the master setting is on. A disabled list records and publishes nothing and injects nothing into the mapper layer.
@@ -60,7 +71,9 @@ query uses the new one. The candidate compile runs on the DNS thread (its cost w
 
 - `GET /api/v1/upstream/tags` (the `aliapi` tags), `GET /api/v1/upstream/config` (`{tag:[entries]}`: the effective list in the WebUI shape, `use_socks_proxy` = the effective switch),
   `GET /api/v1/upstream/runtime/{tag}` (`override_config` = the settings entries), `POST /api/v1/upstream/config {plugin_tag, upstreams}` (validated, stored, applied; an empty list removes the override;
-  404 unknown tag; 400 with the reason above). `/api/v1/upstream/sources` stays unsupported (special-group bindings, M1-e).
+  404 unknown tag; 400 with the reason above). Standard schema-4 profiles expose
+  `/api/v1/upstream/sources`; special-group tags are refused by ordinary upstream
+  POST and maintained through `/api/v1/special-groups` instead.
 - `GET /api/v1/overrides` -> `{socks5, ecs, replacements: []}` from the unique `socks5_proxy` / `ecs_address`; `POST` sets them (an empty value returns to the YAML value; non-empty `replacements` -> 400;
   several objects of a kind -> 409 `ambiguous`; no object but a value -> 400).
 - `GET /api/v1/domain-generation` -> `{enabled, remember_direct, remember_proxy, no_v4, no_v6}`; `POST` takes a partial of the same keys and answers `{settings, flush_targets}`. `enabled` is the

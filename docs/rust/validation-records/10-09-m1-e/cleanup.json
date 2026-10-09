@@ -1,0 +1,8 @@
+{
+  "processes_exited": true,
+  "namespaces_deleted": [
+    "m1e-1292483-go",
+    "m1e-1292483-native"
+  ],
+  "original_service_unchanged": true
+}

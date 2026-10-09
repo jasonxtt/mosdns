@@ -29,6 +29,12 @@ length and trailing-dot name; only IN, basic EDNS0/DO, no ECS suffix. Invalid or
 ECS queries bypass without changing forwarding. Cache response OPT removal must
 rebuild compression offsets. Store original Unix wall times and use monotonic
 runtime expiration. Nonempty hit domain_set restores successor metadata.
+M1-e also captures a cache response's restored routing label explicitly when
+it equals an inherited mapper label from another named sequence. Equality of
+text does not make that cached label a new response with unknown provenance.
+The cache's actually executed named sequence is retained in its response audit;
+later response replacement still discards that snapshot. The M1-e HTTP/DNS
+regression covers a mapper → dispatcher → group child warm hit.
 
 Detached Lazy refresh: owner singleflight key, 256 nonblocking slots/no queue,
 5 seconds, new shared root fuel64. Capture before stale response assignment.
