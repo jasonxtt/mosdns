@@ -210,6 +210,11 @@ special_groups 生成都挂在该开关上。**用户决定（2026-10-06）：�
 | D2 | v0.7.2 special_groups 生成结构（共享 `sequence_special`、`domain_mapper`/`mark` 路由、`switch4` 控制 cache、`flow_setter … upstream=`）与原生托管生成器输出的差异；先由 M1-a 补 `domain_mapper`/`mark` 使非托管形态可加载 |
 | D3 | 专用组上游引用/私有上游/刷新/无效引用告警、`/api/v1/upstream/sources`、`special_upstream_groups.json` 新字段；原生 UI 已通过 `groups.upstreams` 能力显式禁用 |
 
+M1-e（2026-10-09）已实施标准模式 schema-4 生成、上游引用/私有上游、
+`groups.manage/groups.upstreams` 与 listener 热变更；旧 `native_management` 冻结。
+上表 D2/D3 为原始漂移登记，当前验证结果与外部审查状态见
+[M1-e 记录](validation-records/10-09-m1-e/README.md)。外部审查未通过前不关闭缺口。
+
 ## 5. 不在 M1 的注册项
 
 `config_all` 未使用、延后到首次替换之后：见 [feature-coverage](feature-coverage.md)

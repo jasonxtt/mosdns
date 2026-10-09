@@ -2563,6 +2563,17 @@ async fn dispatch(
         .split_once('?')
         .map_or(request.target.as_str(), |(path, _)| path);
     if let Some(reply) =
+        crate::standard_groups_api::handle(control, config, &request.method, path, &request.body)
+            .await
+    {
+        return Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+            headers: reply.headers,
+        };
+    }
+    if let Some(reply) =
         crate::settings_api::handle(control, config, &request.method, path, &request.body).await
     {
         return Response {
@@ -3517,10 +3528,14 @@ fn ui_operations(
             local,
             "当前配置没有可管理的本地规则 provider",
         ),
-        ("groups.manage", managed, "专用组编辑需要原生托管配置"),
+        (
+            "groups.manage",
+            managed || config.standard_groups.is_some(),
+            "专用组编辑需要包含生成配置的文件配置",
+        ),
         (
             "groups.upstreams",
-            false,
+            config.standard_groups.is_some(),
             "专用组引用上游与组私有上游尚未在原生运行时实现",
         ),
         (
@@ -3623,7 +3638,7 @@ fn capabilities(
     config: &CompiledConfig,
     runtime_snapshot: Option<&crate::runtime_snapshot::RuntimeSnapshot>,
 ) -> serde_json::Value {
-    let enabled = config.managed_profile.is_some();
+    let enabled = config.managed_profile.is_some() || config.standard_groups.is_some();
     // Upstream edits are available with the managed profile or, without it,
     // on a file-backed configuration that has `aliapi` groups.
     let upstream_edit = enabled || settings_upstreams(config);
@@ -3687,7 +3702,7 @@ fn capabilities(
         },
         "special_groups": {
             "enabled": enabled,
-            "profile": if enabled { Some("local_text_dns_v1") } else { None::<&str> }
+            "profile": if config.standard_groups.is_some() { Some("schema4_standard") } else if enabled { Some("local_text_dns_v1") } else { None::<&str> }
         },
         "upstream_protocols": protocols,
         "rule_formats": rule_formats,

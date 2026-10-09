@@ -475,21 +475,32 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, (bool, u64, std::time::SystemTime,
 }
 
 #[test]
-fn an_unmanaged_special_groups_include_is_read_only() {
+fn standard_special_groups_check_is_read_only_and_start_recovers_derived_yaml() {
     let dir = TempDir::new("read-only");
     let port = free_port();
     dir.write(
         "config.yaml",
         &format!(
-            "log: {{ level: error }}\ninclude:\n  - sub_config/special_groups.yaml\nplugins:\n  - tag: fwd\n    type: forward\n    args: {{ upstreams: [{{ addr: \"udp://127.0.0.1:15453\" }}] }}\n  - tag: entry\n    type: sequence\n    args: [{{ exec: $plain }}]\n{}",
+            "log: {{ level: error }}\ninclude:\n  - sub_config/special_groups.yaml\nplugins:\n  - tag: fwd\n    type: forward\n    args: {{ upstreams: [{{ addr: \"udp://127.0.0.1:15453\" }}] }}\n  - tag: entry\n    type: sequence\n    args: [{{ exec: reject 3 }}]\n{}",
             listener("udp", "udp_server", &format!("127.0.0.1:{port}"), "")
         ),
     );
     dir.write(
         "sub_config/special_groups.yaml",
-        "plugins:\n  - tag: plain\n    type: sequence\n    args: [{ exec: reject 3 }]\n\n",
+        "plugins:\n  - tag: special_upstream_matcher\n    type: domain_mapper\n    args: {rules: []}\n  - tag: sequence_special\n    type: sequence\n    args: []\n",
     );
     let before = snapshot(dir.path());
+    assert!(
+        check_config(&dir.path().join("config.yaml"))
+            .unwrap()
+            .findings
+            .is_empty()
+    );
+    assert_eq!(
+        snapshot(dir.path()),
+        before,
+        "check never writes derived files"
+    );
     let host = HostAssembly::from_config_file(&dir.path().join("config.yaml")).unwrap();
     host.block_on(async {
         let bound = host.bind_host().await.unwrap();
@@ -500,7 +511,13 @@ fn an_unmanaged_special_groups_include_is_read_only() {
         serving.await.unwrap().unwrap();
     });
     drop(host);
-    assert_eq!(snapshot(dir.path()), before, "nothing created or rewritten");
+    let generated =
+        std::fs::read_to_string(dir.path().join("sub_config/special_groups.yaml")).unwrap();
+    assert!(generated.contains("由 special_groups API 自动生成"));
+    assert_eq!(
+        std::fs::read(dir.path().join("config.yaml")).unwrap(),
+        before[&dir.path().join("config.yaml")].3
+    );
     assert!(!dir.path().join("webinfo").exists());
 }
 

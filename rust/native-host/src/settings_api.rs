@@ -140,6 +140,15 @@ pub(crate) async fn post_upstream(control: &RuntimeControl, body: &[u8]) -> Repl
             return text(400, &reason);
         }
     }
+    if let Some(profile) = &current.config.standard_groups {
+        if profile
+            .groups
+            .iter()
+            .any(|group| format!("special_upstream_{}", group.slot) == tag)
+        {
+            return text(400, "专属分流组上游只能在专属分流组设置中维护");
+        }
+    }
     let mut settings = current.config.settings.clone();
     let mut entries = payload.upstreams;
     for entry in &mut entries {

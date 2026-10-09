@@ -37,6 +37,7 @@ pub(crate) mod aliapi;
 mod check;
 pub(crate) mod providers;
 pub(crate) mod settings;
+pub(crate) mod standard_groups;
 pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config, check_config_in};
 pub(crate) use providers::presentation_name;
 pub use providers::{DomainMapperConfig, MapperOutcome};
@@ -563,6 +564,8 @@ pub struct CompiledConfig {
     pub(crate) yaml_defaults: settings::YamlDefaults,
     /// How to compile the same configuration again (hot apply of settings).
     pub(crate) reload: Option<ReloadSource>,
+    pub(crate) standard_groups: Option<standard_groups::Profile>,
+    pub(crate) compile_inputs: crate::special_groups::CandidateInputSet,
     /// Runtime generation qualifies snapshot-local executable/metric IDs.
     pub(crate) generation: u64,
     /// Per-cache transitive wire-policy dependency fingerprints. `None`
@@ -819,7 +822,7 @@ fn compile_yaml_with_base_and_origin(
         Some(_) => settings::Settings::load(root_dir)?,
         None => settings::Settings::default(),
     };
-    compile_with_settings(yaml, base_dir, root_dir, origin, &settings)
+    compile_with_settings(yaml, base_dir, root_dir, origin, &settings, None)
 }
 
 /// Compiles with explicit typed settings (hot apply passes the candidate's).
@@ -829,9 +832,41 @@ fn compile_with_settings(
     root_dir: &Path,
     origin: Option<&Path>,
     settings: &settings::Settings,
+    groups: Option<&[standard_groups::Group]>,
 ) -> Result<CompiledConfig, ConfigError> {
     let raw = parse_yaml(yaml)?;
-    let mut compiled = compile_raw(&raw, base_dir, root_dir, None, None, None, origin, settings)?;
+    let mut inputs = crate::special_groups::CandidateInputSet::default();
+    if let Some(origin) = origin {
+        inputs
+            .record_bytes(origin, yaml.as_bytes())
+            .map_err(|reason| ConfigError::new(origin.display().to_string(), reason))?;
+        let path = settings::Settings::path(root_dir);
+        match std::fs::read(&path) {
+            Ok(bytes) => inputs.record_bytes(&path, &bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                inputs.record_missing(&path)
+            }
+            Err(error) => {
+                return Err(ConfigError::new(
+                    path.display().to_string(),
+                    error.to_string(),
+                ));
+            }
+        }
+        .map_err(|reason| ConfigError::new(path.display().to_string(), reason))?;
+    }
+    let mut compiled = compile_raw(
+        &raw,
+        base_dir,
+        root_dir,
+        None,
+        None,
+        origin.map(|_| &mut inputs),
+        origin,
+        settings,
+        groups,
+    )?;
+    compiled.compile_inputs = inputs;
     if !base_dir.as_os_str().is_empty() {
         compiled.ui_base = Some(absolute_base(base_dir)?);
     }
@@ -857,6 +892,7 @@ pub(crate) fn recompile(
         &reload.root_dir,
         Some(&reload.config_path),
         settings,
+        None,
     )?;
     compiled.ui_base = Some(absolute_base(&reload.base_dir)?);
     Ok(compiled)
@@ -883,6 +919,27 @@ fn absolute_base(base: &Path) -> Result<PathBuf, ConfigError> {
         .map_err(|error| ConfigError::new("$", format!("configuration base: {error}")))
 }
 
+fn is_standard_include(expression: &str, base: &Path) -> bool {
+    crate::special_groups::lexical_path(&resolve_relative(expression, base))
+        == crate::special_groups::lexical_path(&base.join(standard_groups::GENERATED))
+}
+
+pub(crate) fn recompile_groups(
+    reload: &ReloadSource,
+    settings: &settings::Settings,
+    groups: &[standard_groups::Group],
+) -> Result<CompiledConfig, ConfigError> {
+    let yaml = load_yaml(&reload.config_path)?;
+    compile_with_settings(
+        &yaml,
+        &reload.base_dir,
+        &reload.root_dir,
+        Some(&reload.config_path),
+        settings,
+        Some(groups),
+    )
+}
+
 pub(crate) fn compile_candidate_yaml(
     yaml: &str,
     base_dir: &Path,
@@ -901,6 +958,7 @@ pub(crate) fn compile_candidate_yaml(
         Some(inputs),
         None,
         &settings,
+        None,
     )
 }
 
@@ -944,6 +1002,7 @@ fn compile_raw(
     mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     config_origin: Option<&Path>,
     settings: &settings::Settings,
+    groups: Option<&[standard_groups::Group]>,
 ) -> Result<CompiledConfig, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
     root.reject_unknown(ROOT_FIELDS, "$")?;
@@ -970,11 +1029,19 @@ fn compile_raw(
     // definition without changing the effective order.
     let mut definitions = Vec::new();
     let mut include_paths = Vec::new();
+    let mut standard = false;
     if let Some(includes) = root.get("include") {
         let includes = expect_sequence(includes, "$.include")?;
         for (index, include) in includes.iter().enumerate() {
             let expression = expect_string(include, &format!("$.include[{index}]"))?;
             include_paths.push(resolve_relative(&expression, base_dir));
+            if managed.is_none()
+                && config_origin.is_some()
+                && is_standard_include(&expression, base_dir)
+            {
+                standard = true;
+                continue;
+            }
             if let Some(profile) = &managed {
                 reject_generated_include(profile, &expression)?;
             }
@@ -1003,6 +1070,7 @@ fn compile_raw(
         config_origin,
         include_paths: &include_paths,
         settings,
+        standard: standard.then_some((root_dir, groups)),
     };
     finish_compile(log, api, definitions, managed, staged, inputs, &sources)
 }
@@ -1100,11 +1168,28 @@ fn finish_compile(
     definitions: Vec<RawPlugin>,
     managed: Option<crate::special_groups::ManagedProfile>,
     staged: Option<&crate::special_groups::StagedFiles>,
-    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+    mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     sources: &CompileSources<'_>,
 ) -> Result<CompiledConfig, ConfigError> {
     let mut definitions = definitions;
-    let applied = settings::apply(&mut definitions, sources.settings, managed.is_some())?;
+    let mut applied = settings::apply(&mut definitions, sources.settings, managed.is_some())?;
+    let standard = match sources.standard {
+        Some((base, groups)) => Some(standard_groups::apply(
+            base,
+            groups,
+            &mut definitions,
+            &mut applied,
+        )?),
+        None => None,
+    };
+    if let (Some(profile), Some(inputs)) = (&standard, inputs.as_deref_mut()) {
+        let path = profile.base.join(standard_groups::STATE);
+        match &profile.expected_state {
+            Some(bytes) => inputs.record_bytes(&path, bytes),
+            None => inputs.record_missing(&path),
+        }
+        .map_err(|reason| ConfigError::new(standard_groups::STATE, reason))?;
+    }
     let dependency_definitions = definitions.clone();
     let mut compiled = compile_definitions(
         log,
@@ -1171,6 +1256,7 @@ fn finish_compile(
     compiled.settings_report = applied.items;
     compiled.effective_upstreams = applied.upstreams;
     compiled.yaml_defaults = applied.defaults;
+    compiled.standard_groups = standard;
     Ok(compiled)
 }
 
@@ -2106,6 +2192,7 @@ struct CompileSources<'a> {
     include_paths: &'a [PathBuf],
     /// The typed settings to overlay on the definitions.
     settings: &'a settings::Settings,
+    standard: Option<(&'a Path, Option<&'a [standard_groups::Group]>)>,
 }
 
 fn compile_definitions(
@@ -2985,6 +3072,8 @@ fn compile_definitions(
         effective_upstreams: BTreeMap::new(),
         yaml_defaults: settings::YamlDefaults::default(),
         reload: None,
+        standard_groups: None,
+        compile_inputs: crate::special_groups::CandidateInputSet::default(),
         generation: 0,
         cache_dependencies: Vec::new(),
         response_identities,

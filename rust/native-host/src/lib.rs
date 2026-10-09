@@ -32,6 +32,7 @@ mod settings_api;
 #[doc(hidden)]
 pub mod settings_migrate;
 mod special_groups;
+mod standard_groups_api;
 mod static_ui;
 mod switch;
 #[cfg(test)]

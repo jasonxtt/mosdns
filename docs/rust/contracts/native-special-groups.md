@@ -1,6 +1,85 @@
-# Native managed special groups
+# Native special groups
+
+## M1-e standard file configuration (2026-10-09)
+
+Implementation is under external review; validation is recorded in
+[M1-e evidence](../validation-records/10-09-m1-e/README.md). A file configuration
+that includes `sub_config/special_groups.yaml` enables standard group management
+without `native_management`. The sections below this M1-e section document the
+older managed opt-in, which is frozen until the Phase 6 retirement assessment.
+
+`webinfo/special_upstream_groups.json` is authoritative. It retains the v0.7.3
+array fields `slot`, `name`, `listen_port`, `custom_port_only`,
+`upstream_sources` and `owned_upstreams`. Source records contain
+`kind: group|upstream`, `plugin_tag` and optionally `upstream_tag`. Private entry
+input uses `upstreams`; persisted/output entries use `owned_upstreams` and
+`use_socks_proxy`. Settings input also accepts `use_proxy`.
+
+Every start, check and candidate compile resolves enabled private entries first,
+then enabled source entries from YAML plus typed settings. Whole-group references
+supersede individual references to that group; repeated references are deduplicated.
+Missing/disabled references produce visible warnings and are excluded. A group
+with no effective entries has no diversion rule or dedicated listener. Its
+generated placeholder upstream is unreachable through the group dispatcher.
+Referenced entries inherit resolved source proxy and bootstrap defaults.
+
+Private `use_proxy=true` requires exactly one configured `socks5_proxy` object.
+Zero objects reject with a missing-object reason; multiple objects reject with
+an ambiguity reason. No silent direct fallback is allowed. A sole object's empty
+address retains the explicit M1-f1 no-proxy state. UDP retains the ordinary
+transport rule that ignores SOCKS. References inherit the source's proxy rather
+than selecting an object again.
+
+The derived YAML has Go's schema-4 structure and bytes, except that each
+`special_upstream_N.upstreams` block carries actual native entries and unique
+runtime identities. These identities are not persisted into the group JSON.
+Generated tags are reserved; user collisions fail compilation. Active main-flow
+groups are ordered by slot and run at the existing matcher/dispatcher hooks;
+custom-port-only groups are excluded from that dispatcher. Dedicated UDP/TCP
+listeners enter the group's child sequence directly. This preserves the existing
+configuration's priority before DDNS.
+
+`GET/POST /api/v1/special-groups` and
+`DELETE /api/v1/special-groups/{slot}` expose the v0.7.3 derived view. Slot zero
+allocates the first free slot from 50. POST returns 200; DELETE returns 204.
+Invalid fields return 400; duplicate name/port or occupied sockets return 409;
+missing delete targets return 404. Omitted source/private arrays retain existing
+values; explicit empty arrays clear them. `GET /api/v1/upstream/sources` returns
+ordinary source groups sorted by plugin tag. Ordinary upstream POST refuses
+`special_upstream_N` with 400; private entries belong to the group editor.
+Capabilities enable `groups.manage` and `groups.upstreams` in this standard
+profile. Effective settings/check reports include group entries and sources.
+
+Writes compile and prebind the whole candidate before committing files. Under
+the existing management drain/input fence, derived YAML is durably replaced
+first, then authoritative group JSON (or `settings.json` for a source/settings
+change) is renamed as the commit point. A failed authority write restores old
+derived bytes; failed restoration stops the host with recovery required.
+Startup compiles from authority and regenerates YAML after listener binds, before
+serving. Check never writes. This repairs a crash between the two renames.
+Input digests refuse externally changed inputs before commit.
+
+The reference restarts after saves; native publishes the whole generation hot.
+Deleted group owners retire before removing that group's manifest, manual file
+and cache dump. Startup removes numeric orphan group artifacts. External source
+files are retained. Cache reuse follows the existing dependency closure, so
+unrelated cache owners remain; changed source dependencies invalidate affected
+group/main-flow caches.
+Failure before the authority commit keeps the old authority, derived YAML and
+generation (invalidated disk caches may be empty). After publication, a failed
+artifact cleanup is reported as committed cleanup failure and stops the host;
+the committed authority remains and startup retries orphan cleanup. It must not
+report that an already committed deletion was rolled back.
+
+The standard path does not read/write Go's `upstream_overrides.json`; old state
+that relied on that file to supply missing `owned_upstreams` must be migrated
+explicitly. The compatibility claim is for v0.7.3 state with its private entries
+present, not that older implicit migration format.
 
 ## 1. Scope / trigger
+
+The remaining sections preserve the frozen `native_management` contract;
+the M1-e standard profile and proxy rule are described above.
 
 Compiler and native runtime contract for explicit `native_management: {special_groups: true}`.
 This document describes the compiled runtime and management HTTP behavior.

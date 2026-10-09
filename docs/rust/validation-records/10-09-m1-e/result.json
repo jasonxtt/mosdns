@@ -1,0 +1,7 @@
+{
+  "dns_audit_rows_each": 12,
+  "raw_audit_different_rows": 10,
+  "classified_audit_rows": 12,
+  "render_equal_except_upstreams": true,
+  "state_bidirectional": true
+}

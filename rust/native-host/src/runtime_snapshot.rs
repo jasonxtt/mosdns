@@ -183,19 +183,60 @@ pub struct PreparedSnapshot {
     retiring_bindings: Option<BTreeSet<BindingKey>>,
 }
 
-/// What a settings apply writes at its commit point: the cache dumps the new
-/// generation invalidates (emptied first, so a crash can only lose cache), then
-/// the settings file.
+/// Invalidated cache dumps are emptied first, followed by optional derived
+/// group YAML and the authoritative settings/group state rename.
 pub(crate) struct FileCommit {
     path: std::path::PathBuf,
-    /// The settings file's bytes when the candidate was built (`None`: absent).
+    /// Authority bytes when the candidate was built (`None`: absent).
     expected: Option<Vec<u8>>,
     bytes: Vec<u8>,
     cache_dumps: Vec<std::path::PathBuf>,
+    derived: Option<DerivedFile>,
+    inputs: crate::special_groups::CandidateInputSet,
+}
+
+struct DerivedFile {
+    path: std::path::PathBuf,
+    expected: Option<Vec<u8>>,
+    bytes: Vec<u8>,
+}
+
+impl DerivedFile {
+    fn of(config: &CompiledConfig) -> Result<Option<Self>, ApplyFailure> {
+        let Some(profile) = &config.standard_groups else {
+            return Ok(None);
+        };
+        let path = profile.base.join(crate::config::standard_groups::GENERATED);
+        let expected = read_optional(&path)?;
+        Ok(Some(Self {
+            path,
+            expected,
+            bytes: profile.generated.clone(),
+        }))
+    }
+}
+
+fn read_optional(path: &std::path::Path) -> Result<Option<Vec<u8>>, ApplyFailure> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(ApplyFailure::Failed(format!("{}: {error}", path.display()))),
+    }
 }
 
 impl FileCommit {
     fn write(self) -> Result<(), ApplyFailure> {
+        for (path, expected) in &self.inputs.files {
+            if read_optional(path)?.map(|bytes| crate::special_groups::sha256(&bytes)) != *expected
+            {
+                return Err(ApplyFailure::Conflict(path.clone()));
+            }
+        }
+        if let Some(derived) = &self.derived {
+            if read_optional(&derived.path)? != derived.expected {
+                return Err(ApplyFailure::Conflict(derived.path.clone()));
+            }
+        }
         let current = match std::fs::read(&self.path) {
             Ok(bytes) => Some(bytes),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -213,8 +254,28 @@ impl FileCommit {
                 })?;
             }
         }
-        write_durably(&self.path, &self.bytes)
-            .map_err(|error| ApplyFailure::Failed(format!("{}: {error}", self.path.display())))
+        if let Some(derived) = &self.derived {
+            write_durably(&derived.path, &derived.bytes)
+                .map_err(|error| ApplyFailure::Failed(error.to_string()))?;
+        }
+        if let Err(error) = write_durably(&self.path, &self.bytes) {
+            if let Some(derived) = &self.derived {
+                let rollback = match &derived.expected {
+                    Some(bytes) => write_durably(&derived.path, bytes),
+                    None => std::fs::remove_file(&derived.path),
+                };
+                if let Err(rollback) = rollback {
+                    return Err(ApplyFailure::RecoveryRequired(format!(
+                        "state commit failed: {error}; derived rollback failed: {rollback}"
+                    )));
+                }
+            }
+            return Err(ApplyFailure::Failed(format!(
+                "{}: {error}",
+                self.path.display()
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -225,7 +286,7 @@ impl FileCommit {
 /// entry afterwards is best effort, because a failure there cannot be undone
 /// and the running generation must agree with the file that now holds the
 /// new bytes.
-fn write_durably(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_durably(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     let parent = path
         .parent()
@@ -622,6 +683,15 @@ impl RuntimeControl {
                 ));
             }
         }
+        match (&current.config.standard_groups, &config.standard_groups) {
+            (Some(old), Some(next)) if old.base == next.base => {}
+            (None, None) => {}
+            _ => {
+                return Err(AssemblyError::Runtime(
+                    "standard special-group root must remain frozen".into(),
+                ));
+            }
+        }
         if config.api != current.config.api {
             return Err(AssemblyError::Runtime("API bind must remain stable".into()));
         }
@@ -992,17 +1062,63 @@ impl RuntimeControl {
                 "this configuration was not loaded from a file".into(),
             ));
         };
+        let path = crate::config::settings::Settings::path(&reload.root_dir);
+        let expected = read_optional(&path)?;
         let config = crate::config::recompile(&reload, &settings)
             .map_err(|error| ApplyFailure::Invalid(error.to_string()))?;
-        let path = crate::config::settings::Settings::path(&reload.root_dir);
-        // The bytes the candidate was built against; the commit re-checks them.
-        let expected = std::fs::read(&path).ok();
         let commit = FileCommit {
             path,
             expected,
             bytes: settings.to_bytes(),
             cache_dumps: Vec::new(),
+            derived: DerivedFile::of(&config)?,
+            inputs: config.compile_inputs.clone(),
         };
+        self.apply_config(config, None, Some(commit)).await
+    }
+
+    pub(crate) async fn apply_groups(
+        &self,
+        groups: Vec<crate::config::standard_groups::Group>,
+    ) -> Result<u64, ApplyFailure> {
+        let current = self.view();
+        let profile = current.config.standard_groups.as_ref().ok_or_else(|| {
+            ApplyFailure::Invalid("standard special groups are unavailable".into())
+        })?;
+        let reload = current
+            .config
+            .reload
+            .as_ref()
+            .ok_or_else(|| ApplyFailure::Invalid("file configuration is required".into()))?;
+        let expected = read_optional(&profile.base.join(crate::config::standard_groups::STATE))?;
+        if expected != profile.expected_state {
+            return Err(ApplyFailure::Conflict(
+                profile.base.join(crate::config::standard_groups::STATE),
+            ));
+        }
+        let mut config = crate::config::recompile_groups(reload, &current.config.settings, &groups)
+            .map_err(|error| ApplyFailure::Invalid(error.to_string()))?;
+        let bytes = crate::config::standard_groups::state_bytes(
+            &config
+                .standard_groups
+                .as_ref()
+                .expect("candidate groups")
+                .groups,
+        );
+        let commit = FileCommit {
+            path: profile.base.join(crate::config::standard_groups::STATE),
+            expected,
+            bytes: bytes.clone(),
+            cache_dumps: Vec::new(),
+            derived: DerivedFile::of(&config)?,
+            inputs: config.compile_inputs.clone(),
+        };
+        config
+            .standard_groups
+            .as_mut()
+            .expect("candidate groups")
+            .expected_state = Some(bytes);
+        drop(current);
         self.apply_config(config, None, Some(commit)).await
     }
 
@@ -1015,6 +1131,25 @@ impl RuntimeControl {
         mut managed: Option<crate::transaction::CandidatePersistence>,
         mut files: Option<FileCommit>,
     ) -> Result<u64, ApplyFailure> {
+        let removed_group_files = {
+            let current = self.view();
+            match (&current.config.standard_groups, &config.standard_groups) {
+                (Some(old), Some(next)) => old
+                    .groups
+                    .iter()
+                    .filter(|g| !next.groups.iter().any(|n| n.slot == g.slot))
+                    .flat_map(|g| {
+                        [
+                            old.base.join(format!("srs/special_{}.json", g.slot)),
+                            old.base.join(format!("rule/special_{}.txt", g.slot)),
+                            old.base
+                                .join(format!("cache/cache_special_{}.dump", g.slot)),
+                        ]
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            }
+        };
         let cache_dump_replacements = {
             let current = self.0.current.borrow();
             CacheCatalog::invalidated_dump_paths(&current.config, &config)
@@ -1204,6 +1339,11 @@ impl RuntimeControl {
                 .map_err(|error| ApplyFailure::Failed(error.to_string()))
                 .and_then(|outcome| outcome);
             if let Err(failure) = outcome {
+                if matches!(failure, ApplyFailure::RecoveryRequired(_)) {
+                    self.enter_recovery_required();
+                    self.stop_host();
+                    return Err(failure);
+                }
                 return Err(self
                     .abort_precommit(failure, prepared, cache_gate, false)
                     .await);
@@ -1256,6 +1396,18 @@ impl RuntimeControl {
                 generation,
                 reason: error.to_string(),
             });
+        }
+        for path in removed_group_files {
+            if let Err(error) = std::fs::remove_file(&path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    self.enter_recovery_required();
+                    self.stop_host();
+                    return Err(ApplyFailure::CommittedCleanup {
+                        generation,
+                        reason: format!("{}: {error}", path.display()),
+                    });
+                }
+            }
         }
         // The retired generation is freed once the last query admitted to it has
         // finished; hand its pages back right away and again after those queries
@@ -2888,6 +3040,8 @@ mod file_commit_tests {
             expected: expected.map(<[u8]>::to_vec),
             bytes: b"new".to_vec(),
             cache_dumps: vec![dir.join("cache/a.gz")],
+            derived: None,
+            inputs: crate::special_groups::CandidateInputSet::default(),
         }
     }
 

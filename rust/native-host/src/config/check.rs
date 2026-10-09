@@ -248,6 +248,7 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
 
     let mut decoded = Decoded::default();
     let mut include_paths: Vec<PathBuf> = Vec::new();
+    let mut standard = false;
     if let Some(includes) = root.get("include") {
         let includes = expect_sequence(includes, "$.include").unwrap_or_else(|error| {
             checker.global(&error);
@@ -262,6 +263,10 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
                 }
             };
             include_paths.push(resolve_relative(&expression, base_dir));
+            if managed.is_none() && super::is_standard_include(&expression, base_dir) {
+                standard = true;
+                continue;
+            }
             if let Some(profile) = &managed {
                 if let Err(error) = reject_generated_include(profile, &expression) {
                     checker.global(&error);
@@ -331,6 +336,7 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
         config_origin: None,
         include_paths: &include_paths,
         settings: &settings,
+        standard: standard.then_some((root_dir, None)),
     };
     let mut active = vec![true; total];
     let mut seen: BTreeSet<(usize, String)> = BTreeSet::new();
@@ -356,6 +362,15 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
         ) {
             Ok(compiled) => {
                 let mut finished = report(checker, declared);
+                if let Some(profile) = &compiled.standard_groups {
+                    let raw = parse_yaml(
+                        std::str::from_utf8(&profile.generated).expect("generated UTF-8"),
+                    )?;
+                    let map =
+                        expect_map(&raw, super::standard_groups::GENERATED, "generated groups")?;
+                    finished.definitions +=
+                        expect_sequence(map.required("plugins", "generated")?, "generated")?.len();
+                }
                 finished.effective = compiled.settings_report.clone();
                 return Ok(finished);
             }

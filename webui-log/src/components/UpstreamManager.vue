@@ -400,15 +400,16 @@ async function loadData() {
 
     if (isNative.value) {
       if (!supportsOperation('upstreams.read')) { upstreamTags.value = []; upstreamConfig.value = {}; return }
-      const [tags, config, groups] = await Promise.all([
+      const [tags, config, groups, sources] = await Promise.all([
         getJSON('/api/v1/upstream/tags'),
         getJSON('/api/v1/upstream/config'),
-        supportsOperation('groups.read') ? getJSON('/api/v1/special-groups') : Promise.resolve([])
+        supportsOperation('groups.read') ? getJSON('/api/v1/special-groups') : Promise.resolve([]),
+        supportsOperation('groups.upstreams') ? getJSON('/api/v1/upstream/sources') : Promise.resolve([])
       ])
       upstreamTags.value = Array.isArray(tags) ? tags : []
       upstreamConfig.value = config && typeof config === 'object' && !Array.isArray(config) ? config : {}
       specialGroups.value = Array.isArray(groups) ? groups : []
-      upstreamSources.value = []
+      upstreamSources.value = Array.isArray(sources) ? sources : []
       globalSocks5.value = ''
       upstreamSourceMarks.value = {}
       if (settingsProxy.value) {

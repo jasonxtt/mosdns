@@ -51,7 +51,7 @@
 | 3.3 | M1-c1 `domain_output`（8）→ M1-c2 `requery`（1） | 拆为两个任务以控制单次规模；完成后 `check` 对 `config_all` 无缺口，可进行首次整链运行 |
 | 3.35 | M1-f 类型化设置层与原生配置包 `config_rust`：**M1-f1 已提交（`ed9a5f1a`）；M1-f2 已提交（`2b9d0bea`）** | 具名类型化对象 + `$tag` 引用、`webinfo/settings.json`、类型化 API 与热生效（f1）；`config_rust` 包（`file` 仓库 `0412666`）、迁移工具、两套 WebUI 页面接线（f2） |
 | 3.36 | **E2E-1 第1轮修复及同语料重跑完成，待第2轮外部审查** | exit成功发布、lazy/失败门禁、嵌套缓存标签、N1 fuel耗尽及热effective_tag已修复；用户2026-10-09批准前台256/lazy64。各8156条：语义一致3681、差异4475（Go偶然行为4471、2026-10-07批准full:偏差4，未解释0）；DNS只剩2条批准差异，3099四格正确，主缓存3812hit/entries，domain_output两边2。VM全检查通过，临时资源已清理；尚未验收/提交/关闭M1。见 [验证记录](validation-records/10-09-e2e-1/README.md) |
-| 3.4 | M1-e special_groups v0.7.3 对齐 | 原生托管生成器输出 schema-4 结构（共享 `sequence_special`），支持专用组上游引用/私有上游/无效引用排除；排在 M1-a/b/c 之后（生产当前无专用组） |
+| 3.4 | M1-e special_groups v0.7.3 对齐：已实施，VM 验证通过，待外部审查 | 标准配置下 schema-4 生成、引用/私有上游、无效引用排除、整代热生效；`native_management` 冻结。记录见 [M1-e](validation-records/10-09-m1-e/README.md)；未经外部审查不记完成 |
 | 4 | 5D 整机验收 | 单核、实际负载；先补齐 Go 基线、冻结延迟与 RSS 阈值，以 `config_all` 做正式对照、恢复、长稳 |
 | 5 | Phase 6 + 生产切换/回滚方案 | 退役脚手架，纯 Rust 构建/运行；配置包升级（C15）与回滚步骤明确；`mos-test` 验证后经用户确认替换 `mosdns` |
 | 6 | 未使用插件补齐 | 首次替换后进行，不阻塞替换 |

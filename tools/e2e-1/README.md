@@ -40,3 +40,18 @@ Classification and external review follow the task PRD and frozen contracts.
 ```sh
 cd tools/e2e-1 && python3 -m unittest test_codec.py
 ```
+# M1-e synthetic special groups
+
+`special_groups.py run --work <fresh VM directory> --go <Go binary> --native
+<native binary> --browser <absolute special_groups_browser.mjs>` creates one
+loopback-only namespace per host. It uses synthetic rules and A/AAAA mocks,
+saves two groups through HTTP, checks main-flow priority over DDNS and a
+custom-only port, compares cold/warm DNS and correlated audit routes, compares
+schema-4 bytes except only per-group upstream blocks, and imports each host's
+state into the other. Browser smoke performs Vue create/edit/delete with source
+references on native `/` and `/log`, and Go `/`. Playwright can be supplied via
+`PLAYWRIGHT_MODULE`; its browser must already be cached. No public networking is
+available inside these namespaces. Finally all owned processes and namespaces
+are stopped, and the original mosdns service identity is checked.
+
+Run tool guards on the VM with `python3 -m unittest discover -s tools/e2e-1`.

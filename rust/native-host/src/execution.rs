@@ -997,6 +997,24 @@ impl ExecutionFacts<'_> {
         self.routing_changed_since_response = false;
     }
 
+    /// A cache supplies a response with its stored label even when that label
+    /// equals an inherited mapper decision from a different sequence. Capture
+    /// it explicitly; the ordinary new-response origin check would discard it.
+    fn note_cache_response(&mut self, state: &ExecutionState) {
+        let mut routing = state.routing.clone();
+        if routing.final_sequence.is_none() {
+            routing.final_sequence = self
+                .current_origin
+                .and_then(|id| self.config.program.sequence(id))
+                .filter(|sequence| !sequence.synthetic)
+                .map(|sequence| sequence.name.clone());
+        }
+        self.response_routing = Some(routing);
+        self.last_response_generation = state.response_generation();
+        self.routing = state.routing.clone();
+        self.routing_changed_since_response = false;
+    }
+
     /// CNAME normalization changes wire bytes, while retaining the decision
     /// and supplier that produced them. Do not classify that new wire revision
     /// as a fresh response with empty routing provenance.
@@ -1878,6 +1896,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         machine
                             .state_mut()
                             .set_raw_response_with_origin(hit.response, hit.origin);
+                        facts.note_cache_response(machine.state());
                         // A hit completes the successor chain that contains the
                         // cache; the caller's later rules still run. A nested
                         // cache inside that successor therefore never runs.
@@ -6292,6 +6311,8 @@ plugins:
             effective_upstreams: Default::default(),
             yaml_defaults: Default::default(),
             reload: None,
+            standard_groups: None,
+            compile_inputs: crate::special_groups::CandidateInputSet::default(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -6407,6 +6428,8 @@ plugins:
                 effective_upstreams: Default::default(),
                 yaml_defaults: Default::default(),
                 reload: None,
+                standard_groups: None,
+                compile_inputs: crate::special_groups::CandidateInputSet::default(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -6963,6 +6986,8 @@ plugins:
             effective_upstreams: Default::default(),
             yaml_defaults: Default::default(),
             reload: None,
+            standard_groups: None,
+            compile_inputs: crate::special_groups::CandidateInputSet::default(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -7091,6 +7116,8 @@ plugins:
                 effective_upstreams: Default::default(),
                 yaml_defaults: Default::default(),
                 reload: None,
+                standard_groups: None,
+                compile_inputs: crate::special_groups::CandidateInputSet::default(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -7265,6 +7292,8 @@ plugins:
             effective_upstreams: Default::default(),
             yaml_defaults: Default::default(),
             reload: None,
+            standard_groups: None,
+            compile_inputs: crate::special_groups::CandidateInputSet::default(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
