@@ -29,6 +29,15 @@ def ports(group):
 
 async def serve(root):
     journal = (root / "mock.jsonl").open("a", buffering=1)
+    # Optional 5D latency model; absent file preserves the E2E fixture behavior.
+    delay_path = root / "mock-delays.json"
+    delays = json.loads(delay_path.read_text()) if delay_path.exists() else {}
+    if set(delays) - set(GROUPS) or any(not isinstance(v, (int, float)) or v < 0 for v in delays.values()):
+        raise ValueError("invalid mock delays")
+
+    async def delayed(wire, group, protocol):
+        await asyncio.sleep(delays.get(group, 0) / 1000)
+        return respond(wire, group, protocol)
 
     def log(value):
         value["monotonic_s"] = time.monotonic()
@@ -48,13 +57,18 @@ async def serve(root):
             self.transport = transport
 
         def datagram_received(self, wire, peer):
-            self.transport.sendto(respond(wire, self.group, "udp"), peer)
+            if delays.get(self.group, 0):
+                async def send():
+                    self.transport.sendto(await delayed(wire, self.group, "udp"), peer)
+                asyncio.create_task(send())
+            else:
+                self.transport.sendto(respond(wire, self.group, "udp"), peer)
 
     async def dns_stream(reader, writer, group, protocol):
         try:
             while True:
                 length = struct.unpack("!H", await reader.readexactly(2))[0]
-                result = respond(await reader.readexactly(length), group, protocol)
+                result = await delayed(await reader.readexactly(length), group, protocol)
                 writer.write(struct.pack("!H", len(result)) + result)
                 await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):
@@ -77,7 +91,7 @@ async def serve(root):
                     query = await reader.readexactly(int(fields[b"content-length"]))
                 else:
                     raise ValueError("unsupported DoH method")
-                result = respond(query, group, "https")
+                result = await delayed(query, group, "https")
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: " + str(len(result)).encode() + b"\r\n\r\n" + result)
                 await writer.drain()
         except (asyncio.IncompleteReadError, ConnectionError):

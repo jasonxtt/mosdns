@@ -1,0 +1,146 @@
+{
+  "stages": [
+    {
+      "stage": "warmup",
+      "rate": 100,
+      "median_latency_ms": {
+        "p50": 1.588423,
+        "p95": 13.016933,
+        "p99": 13.921503
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": true,
+      "native_cpu_us_per_correct": 324.1296518607442,
+      "go_cpu_us_per_correct": 336.1344537815126,
+      "cpu_ratio": 0.9642857142857141,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        43756,
+        43940,
+        43836
+      ],
+      "go_steady_median_kib": 190992,
+      "steady_rss_pass": true
+    },
+    {
+      "stage": "q32000",
+      "rate": 32000,
+      "median_latency_ms": {
+        "p50": 0.185296,
+        "p95": 2.505082,
+        "p99": 6.322754
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": false,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 22.636529699803056,
+      "go_cpu_us_per_correct": 23.512500000000006,
+      "cpu_ratio": 0.9627444848401084,
+      "profiling_required": false,
+      "non_overload_for_cpu": false,
+      "sustainable_each_repeat": false,
+      "native_steady_rss_kib": [
+        218316,
+        227028,
+        206496
+      ],
+      "go_steady_median_kib": 273352,
+      "steady_rss_pass": false
+    },
+    {
+      "stage": "q64000",
+      "rate": 64000,
+      "median_latency_ms": {
+        "p50": 6.077963,
+        "p95": 12.193681,
+        "p99": 15.757323
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": false,
+      "coverage_each_repeat_pass": false,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 16.754194686420544,
+      "go_cpu_us_per_correct": 19.355010837674193,
+      "cpu_ratio": 0.8656256938802015,
+      "profiling_required": false,
+      "non_overload_for_cpu": false,
+      "sustainable_each_repeat": false,
+      "native_steady_rss_kib": [
+        218372,
+        227028,
+        206496
+      ],
+      "go_steady_median_kib": 311140,
+      "steady_rss_pass": false
+    },
+    {
+      "stage": "recovery",
+      "rate": 100,
+      "median_latency_ms": {
+        "p50": 0.878479,
+        "p95": 1.559523,
+        "p99": 2.178439
+      },
+      "latency_pass": null,
+      "correctness_each_repeat_pass": true,
+      "coverage_each_repeat_pass": true,
+      "frozen_oracle_agreement_pass": false,
+      "native_cpu_us_per_correct": 220.14676450967315,
+      "go_cpu_us_per_correct": 229.99999999999923,
+      "cpu_ratio": 0.9571598456942343,
+      "profiling_required": false,
+      "non_overload_for_cpu": true,
+      "sustainable_each_repeat": true,
+      "native_steady_rss_kib": [
+        218372,
+        227028,
+        206496
+      ],
+      "go_steady_median_kib": 313252,
+      "steady_rss_pass": false
+    }
+  ],
+  "peak_rss_kib": [
+    218488,
+    227512,
+    206544
+  ],
+  "peak_rss_pass": true,
+  "tested_sustainable_capacity": 0,
+  "go_tested_sustainable_capacity": 0,
+  "capacity_ratio_report_only": null,
+  "capacity_floor_pass": null,
+  "recovery": [
+    {
+      "seed": 501,
+      "five_healthy_bins_finish_s": 5,
+      "latency_correctness_within_10s": true,
+      "context": "inspect service overload and FD traces before recovery conclusion",
+      "fd_end": 32,
+      "threads_end": 3
+    },
+    {
+      "seed": 502,
+      "five_healthy_bins_finish_s": 5,
+      "latency_correctness_within_10s": true,
+      "context": "inspect service overload and FD traces before recovery conclusion",
+      "fd_end": 32,
+      "threads_end": 3
+    },
+    {
+      "seed": 503,
+      "five_healthy_bins_finish_s": 10,
+      "latency_correctness_within_10s": true,
+      "context": "inspect service overload and FD traces before recovery conclusion",
+      "fd_end": 32,
+      "threads_end": 3
+    }
+  ],
+  "oracle_agreement_definition": "strict pre-frozen oracle plus TTL; disagreement alone does not prove a product-contract violation",
+  "query_in_flight_observability": "not exposed by pinned native HTTP/metrics API; not proven"
+}

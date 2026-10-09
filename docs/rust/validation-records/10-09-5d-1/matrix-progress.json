@@ -1,0 +1,153 @@
+{
+  "freeze_sha256": "afe441e906ab0ca0d0ffad2c5d36c854c2d61a5725b79608e70f54d6cb8c70a9",
+  "tool_hashes": {
+    "tools/5d-1/load.py": "7c8f05e004b13a2cfe390f7c90132a71460a6437513a30d52e43f0ace63c2154",
+    "tools/5d-1/run.py": "e401596154af245fd565c32a9cbc17800db4cb5987887dbbf48f949b7b1ed18b",
+    "tools/5d-1/scenario_f.py": "90be1bffa3b2a59e847613f0262a65fa362c8151ae7c191da9df77dfe94b1394",
+    "tools/e2e-1/prepare.py": "160009a015c5a718702ae4d89dfa7ceec54ecca1c8bc9781aa0dd997d183dcf3",
+    "tools/e2e-1/mock.py": "d4a1430062ea6963a44e88743d302612bd8126288d792a3d697cc1556419bd07",
+    "tools/e2e-1/dnswire.py": "26a7b5adec73c1ce1cfbd8372af418a938acff51d1f51d29f002b68208f1e554"
+  },
+  "plan": [
+    {
+      "name": "go-control-main-r1",
+      "role": "go",
+      "matrix": "main",
+      "seed": 501
+    },
+    {
+      "name": "native-main-r1",
+      "role": "native",
+      "matrix": "main",
+      "seed": 501
+    },
+    {
+      "name": "go-control-ext-r1",
+      "role": "go",
+      "matrix": "ext",
+      "seed": 501
+    },
+    {
+      "name": "native-ext-r1",
+      "role": "native",
+      "matrix": "ext",
+      "seed": 501
+    },
+    {
+      "name": "go-control-f-r1",
+      "role": "go",
+      "matrix": "f",
+      "seed": 501
+    },
+    {
+      "name": "native-f-r1",
+      "role": "native",
+      "matrix": "f",
+      "seed": 501
+    },
+    {
+      "name": "native-main-r2",
+      "role": "native",
+      "matrix": "main",
+      "seed": 502
+    },
+    {
+      "name": "go-control-main-r2",
+      "role": "go",
+      "matrix": "main",
+      "seed": 502
+    },
+    {
+      "name": "native-ext-r2",
+      "role": "native",
+      "matrix": "ext",
+      "seed": 502
+    },
+    {
+      "name": "go-control-ext-r2",
+      "role": "go",
+      "matrix": "ext",
+      "seed": 502
+    },
+    {
+      "name": "native-f-r2",
+      "role": "native",
+      "matrix": "f",
+      "seed": 502
+    },
+    {
+      "name": "go-control-f-r2",
+      "role": "go",
+      "matrix": "f",
+      "seed": 502
+    },
+    {
+      "name": "go-control-main-r3",
+      "role": "go",
+      "matrix": "main",
+      "seed": 503
+    },
+    {
+      "name": "native-main-r3",
+      "role": "native",
+      "matrix": "main",
+      "seed": 503
+    },
+    {
+      "name": "go-control-ext-r3",
+      "role": "go",
+      "matrix": "ext",
+      "seed": 503
+    },
+    {
+      "name": "native-ext-r3",
+      "role": "native",
+      "matrix": "ext",
+      "seed": 503
+    },
+    {
+      "name": "go-control-f-r3",
+      "role": "go",
+      "matrix": "f",
+      "seed": 503
+    },
+    {
+      "name": "native-f-r3",
+      "role": "native",
+      "matrix": "f",
+      "seed": 503
+    }
+  ],
+  "completed": [
+    "go-control-main-r1",
+    "native-main-r1",
+    "go-control-ext-r1",
+    "native-ext-r1",
+    "go-control-f-r1",
+    "native-f-r1",
+    "native-main-r2",
+    "go-control-main-r2",
+    "native-ext-r2",
+    "go-control-ext-r2",
+    "native-f-r2",
+    "go-control-f-r2",
+    "go-control-main-r3",
+    "native-main-r3",
+    "go-control-ext-r3",
+    "native-ext-r3",
+    "go-control-f-r3",
+    "native-f-r3"
+  ],
+  "F_schema_correction": {
+    "previous_tool_hashes": {
+      "tools/5d-1/load.py": "7c8f05e004b13a2cfe390f7c90132a71460a6437513a30d52e43f0ace63c2154",
+      "tools/5d-1/run.py": "e401596154af245fd565c32a9cbc17800db4cb5987887dbbf48f949b7b1ed18b",
+      "tools/5d-1/scenario_f.py": "366c17ddc5c6b428e844850dc4771c65727b9fd017b24f395c06913877dad1b5",
+      "tools/e2e-1/prepare.py": "160009a015c5a718702ae4d89dfa7ceec54ecca1c8bc9781aa0dd997d183dcf3",
+      "tools/e2e-1/mock.py": "d4a1430062ea6963a44e88743d302612bd8126288d792a3d697cc1556419bd07",
+      "tools/e2e-1/dnswire.py": "26a7b5adec73c1ce1cfbd8372af418a938acff51d1f51d29f002b68208f1e554"
+    },
+    "failed_attempt": "native-f-r1-startup-failure",
+    "native_formal_F_samples_before_fix": 0
+  }
+}

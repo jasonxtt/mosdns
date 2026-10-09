@@ -1,0 +1,16 @@
+{
+  "contract": "docs/rust/contracts/native-rule-providers.md:57",
+  "approved_date": "2026-10-07",
+  "prior_index": 3787,
+  "evidence_sha256": "3b224f086dfba7ea3805bbaf8a75083f74c1eb56bff3fab75d019c6b2a2549ae",
+  "go_oracle_sha256": "f9d680770bbcb3313b510bf57a86395ac67ceda8950493e221af4d924f070c3f",
+  "native_oracle_sha256": "35cc31894f3c9f2df4aa0dd3e385a5389c613858601eee5a93ba7086be65929a",
+  "corpus_index": 3787,
+  "expected_native": {
+    "type": 28,
+    "rcode": 0,
+    "answer_count": 0,
+    "authority_count": 0,
+    "additional_count": 0
+  }
+}
