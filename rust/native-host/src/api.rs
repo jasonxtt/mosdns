@@ -3657,6 +3657,25 @@ fn capabilities(
         .unwrap_or_default();
     let generation =
         runtime_snapshot.map_or(config.generation, |snapshot| snapshot.config.generation);
+    // The settings-backed upstream page carries the proxy switch (`use_proxy`)
+    // when every `aliapi` group names a plugin-level `proxy`; the managed
+    // upstream overrides do not.
+    let defaults = &config.yaml_defaults;
+    let mut unsupported_features = vec!["signed_aliapi", "quic", "http3"];
+    if !settings_upstreams(config)
+        || defaults
+            .upstreams
+            .keys()
+            .any(|group| !defaults.proxy_groups.contains(group))
+    {
+        unsupported_features.push("socks_proxy");
+    }
+    unsupported_features.extend([
+        "socket_marks",
+        "bind_to_device",
+        "positive_idle_timeout",
+        "enable_pipeline",
+    ]);
     serde_json::json!({
         "schema_version": 1,
         "runtime": "rust",
@@ -3672,16 +3691,7 @@ fn capabilities(
         },
         "upstream_protocols": protocols,
         "rule_formats": rule_formats,
-        "unsupported_features": [
-            "signed_aliapi",
-            "quic",
-            "http3",
-            "socks_proxy",
-            "socket_marks",
-            "bind_to_device",
-            "positive_idle_timeout",
-            "enable_pipeline"
-        ],
+        "unsupported_features": unsupported_features,
         "endpoints": {
             "capabilities_get": true,
             "special_groups": {"get": true, "post": enabled, "delete": enabled},

@@ -876,6 +876,34 @@ body::after {
   padding: 8px 13px;
 }
 
+.upstream-modified-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  color: var(--ink-1, var(--ink-0));
+}
+
+.upstream-modified-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.control-module .override-note {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+}
+
+.control-module .override-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 0.74rem;
+}
+
 .upstream-filter-toolbar {
   flex-wrap: nowrap;
   gap: 6px;

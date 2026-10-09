@@ -9,6 +9,10 @@ rust-version.workspace = true
 name = "mosdns"
 path = "src/main.rs"
 
+[[bin]]
+name = "mosdns-settings-migrate"
+path = "src/bin/settings_migrate.rs"
+
 [dependencies]
 fs2 = "=0.4.3"
 flate2 = "=1.1.9"

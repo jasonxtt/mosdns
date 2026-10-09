@@ -4,6 +4,7 @@ import { deleteRequest, getJSON, getText, postJSON } from '../api/http'
 import { getRuntimeCapabilities, supportsOperation, operationReason } from '../api/runtimeCapabilities'
 import { isNativeUpstreamReadOnly } from '../api/nativeManagement'
 import { openConfirm } from '../utils/confirm'
+import { isModified, nativeProxyFlag, settingsBackedProxy, settingsSources } from '../utils/nativeSettings'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { orderUpstreamGroups, upstreamAddressDisplay, upstreamGroupDisplay } from '../utils/upstreamStats'
 
@@ -35,6 +36,7 @@ const upstreamConfig = ref({})
 const upstreamSources = ref([])
 const specialGroups = ref([])
 const globalSocks5 = ref('')
+const upstreamSourceMarks = ref({})
 const specialGroupsManagerOpen = ref(false)
 const specialModalOpen = ref(false)
 const specialSaving = ref(false)
@@ -54,6 +56,8 @@ const specialSourceDraft = reactive({
 const editingCtx = ref({ group: '', index: -1, specialOwned: false })
 
 const isNative = computed(() => runtimeCapabilities.value?.kind === 'native')
+// The native runtime keeps the proxy as one named object: an entry only says whether it uses it.
+const settingsProxy = computed(() => settingsBackedProxy(runtimeCapabilities.value))
 const canManageGroups = computed(() => Boolean(
   supportsOperation('groups.manage')
 ))
@@ -136,8 +140,8 @@ const showPipeline = computed(() => ['tcp', 'dot', 'tls'].includes(protocolValue
 const showHttp3 = computed(() => ['https', 'doh', 'quic', 'doq'].includes(protocolValue.value))
 const showSocks5 = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
 const showTlsVerify = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
-const showSocksProxyToggle = computed(() => showSocks5.value && ['foreign', 'foreignecs'].includes(String(form.group || '').trim()))
-const showSocks5Input = computed(() => showSocks5.value && (!showSocksProxyToggle.value || form.use_socks_proxy))
+const showSocksProxyToggle = computed(() => showSocks5.value && (settingsProxy.value || ['foreign', 'foreignecs'].includes(String(form.group || '').trim())))
+const showSocks5Input = computed(() => !settingsProxy.value && showSocks5.value && (!showSocksProxyToggle.value || form.use_socks_proxy))
 const showForeignSocksFallbackHint = computed(() => {
   if (!showSocks5Input.value) {
     return false
@@ -406,6 +410,15 @@ async function loadData() {
       specialGroups.value = Array.isArray(groups) ? groups : []
       upstreamSources.value = []
       globalSocks5.value = ''
+      upstreamSourceMarks.value = {}
+      if (settingsProxy.value) {
+        const [overrides, effective] = await Promise.allSettled([
+          supportsOperation('system.global_overrides') ? getJSON('/api/v1/overrides') : Promise.reject(new Error('unavailable')),
+          getJSON('/api/v1/settings/effective')
+        ])
+        globalSocks5.value = overrides.status === 'fulfilled' ? String(overrides.value?.socks5 || '').trim() : ''
+        upstreamSourceMarks.value = effective.status === 'fulfilled' ? settingsSources(effective.value).upstreams : {}
+      }
       dnsRoutingMode.value = ''
       return
     }
@@ -447,6 +460,8 @@ function beginAdd() {
   resetForm()
   form.group = groupOptions.value[0] || ''
   if (isNative.value) form.protocol = protocolOptions.value[0]?.value || ''
+  // An explicit choice: a new native entry does not use the proxy unless asked.
+  if (settingsProxy.value) form.use_socks_proxy = false
   showEditor.value = true
 }
 
@@ -707,9 +722,11 @@ async function deleteSpecialGroup(group) {
 
 function buildUpstreamObject(enabledWhenSave = true) {
   const protocol = protocolValue.value
-  const targetGroupUsesSocksToggle = ['foreign', 'foreignecs'].includes(String(form.group || '').trim())
-  const useSocksProxy = protocol !== 'aliapi' && targetGroupUsesSocksToggle ? Boolean(form.use_socks_proxy) : undefined
-  const socks5Value = protocol !== 'aliapi' && (!targetGroupUsesSocksToggle || useSocksProxy)
+  const targetGroupUsesSocksToggle = settingsProxy.value || ['foreign', 'foreignecs'].includes(String(form.group || '').trim())
+  const useSocksProxy = protocol === 'aliapi' || !targetGroupUsesSocksToggle
+    ? undefined
+    : (settingsProxy.value ? nativeProxyFlag(protocol, form.use_socks_proxy) : Boolean(form.use_socks_proxy))
+  const socks5Value = protocol !== 'aliapi' && !settingsProxy.value && (!targetGroupUsesSocksToggle || useSocksProxy)
     ? String(form.socks5 || '').trim()
     : ''
   return {
@@ -882,6 +899,27 @@ async function toggleEnable(row) {
   }
 }
 
+const modifiedGroups = computed(() => Object.entries(upstreamSourceMarks.value || {})
+  .filter(([group, source]) => isModified(source) && Array.isArray(upstreamConfig.value?.[group]))
+  .map(([group]) => group))
+
+async function restoreGroup(group) {
+  resetMessage()
+  if (!canManageUpstreams.value) {
+    return
+  }
+  if (!(await openConfirm(`确定把“${groupDisplayName(group)}”的上游恢复为配置文件里的默认列表吗？`))) {
+    return
+  }
+  try {
+    await postJSON('/api/v1/upstream/config', { plugin_tag: group, upstreams: [] })
+    setSuccess('已恢复默认上游列表')
+    await loadData()
+  } catch (error) {
+    setError(`恢复默认失败: ${error.message}`)
+  }
+}
+
 function handleGlobalRefresh() {
   loadData()
 }
@@ -1016,10 +1054,15 @@ onBeforeUnmount(() => {
             <input v-model="form.dial_addr" placeholder="可选，填 IP 可免域名解析" />
 
             <label v-if="showSocksProxyToggle">使用 socks 代理</label>
-            <label v-if="showSocksProxyToggle" class="switch-inline">
-              <input v-model="form.use_socks_proxy" type="checkbox" :disabled="isNative" />
-              <span>{{ form.use_socks_proxy ? '开启' : '关闭' }}</span>
-            </label>
+            <div v-if="showSocksProxyToggle">
+              <label class="switch-inline">
+                <input v-model="form.use_socks_proxy" type="checkbox" :disabled="isNative && !settingsProxy" />
+                <span>{{ form.use_socks_proxy ? '开启' : '关闭' }}</span>
+              </label>
+              <small v-if="settingsProxy" class="muted" data-native-proxy-hint>
+                使用“系统设置 → 覆盖设置”里的 SOCKS5；{{ globalSocks5 ? '当前已设置' : '当前未设置代理地址，开启后仍直连' }}。仅 TCP/DoT/DoH 生效。
+              </small>
+            </div>
 
             <label v-if="showSocks5Input">Socks5 代理</label>
             <div v-if="showSocks5Input">
@@ -1109,6 +1152,13 @@ onBeforeUnmount(() => {
         <option v-for="group in groupOptions" :key="group" :value="group">{{ groupDisplayName(group) }}</option>
       </select>
       <button class="btn secondary" type="button" @click="toggleHideDisabled">{{ hideDisabledLabel }}</button>
+    </div>
+
+    <div v-if="modifiedGroups.length > 0" class="upstream-modified-bar" role="note" data-native-modified>
+      <span v-for="group in modifiedGroups" :key="group" class="upstream-modified-item">
+        {{ groupDisplayName(group) }}：已修改（与配置文件不同）
+        <button class="btn tiny secondary" type="button" :disabled="!canManageUpstreams" @click="restoreGroup(group)">恢复默认</button>
+      </span>
     </div>
 
     <div class="table-wrap adaptive-table-wrap upstream-adaptive-wrap">

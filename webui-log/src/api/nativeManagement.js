@@ -94,8 +94,12 @@ export function isNativeUpstreamReadOnly(upstream, capabilities) {
   if (!protocol || !supported.has(protocol)) {
     return readOnly(`协议 ${upstream.protocol || '(未指定)'} 当前不可用，已保留为只读`)
   }
+  // A runtime that does not list `socks_proxy` as unsupported carries the
+  // proxy switch of an entry (never a literal `socks5` address).
+  const proxySwitch = !(capabilities?.unsupported_features || []).includes('socks_proxy')
   const unsupportedOptions = [
-    'idle_timeout', 'enable_pipeline', 'enable_http3', 'socks5', 'use_socks_proxy',
+    'idle_timeout', 'enable_pipeline', 'enable_http3', 'socks5',
+    ...(proxySwitch ? [] : ['use_socks_proxy']),
     'so_mark', 'bind_to_device', 'max_conns', 'account_id', 'access_key_id',
     'access_key_secret', 'server_addr', 'ecs_client_ip', 'ecs_client_mask'
   ]
