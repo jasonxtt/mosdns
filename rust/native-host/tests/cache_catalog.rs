@@ -284,6 +284,47 @@ fn nested_named_caches_publish_independently_and_the_outer_hit_short_circuits() 
 }
 
 #[test]
+fn entry_and_child_caches_publish_the_response_when_exit_crosses_both() {
+    let mut plugins = named_cache("cache_outer", 64);
+    plugins.push_str(&named_cache("cache_inner", 64));
+    plugins.push_str("  - tag: child\n    type: sequence\n    args:\n      - exec: $cache_inner\n      - exec: $phase5a_forward\n      - exec: exit\n\n");
+    let yaml = catalog_yaml(
+        &plugins,
+        "      - exec: $cache_outer\n      - exec: $child\n      - exec: reject 3\n",
+    );
+    let (responses, requests, stored) = run_batch_with_store(
+        &yaml,
+        vec![query(0x2201, "exit.example"), query(0x2202, "exit.example")],
+    );
+    assert_eq!(stored, 1, "exit must publish the enclosing entry cache");
+    assert_eq!(
+        requests, 1,
+        "the warm query must short-circuit at the cache"
+    );
+    for response in responses {
+        validate_response(&response).expect("valid exit response");
+        assert_eq!(response[3] & 0x0f, 0, "exit skips the caller's reject");
+    }
+}
+
+#[test]
+fn a_response_followed_by_fuel_exhaustion_never_publishes() {
+    let mut rules = String::from("      - exec: $cache_a\n      - exec: $phase5a_forward\n");
+    rules.push_str(&"      - exec: fast_mark 1\n".repeat(270));
+    rules.push_str("      - exec: exit\n");
+    let yaml = catalog_yaml(&named_cache("cache_a", 64), &rules);
+    let (_, requests, stored) = run_batch_with_store(
+        &yaml,
+        vec![query(0x2301, "fuel.example"), query(0x2302, "fuel.example")],
+    );
+    assert_eq!(
+        stored, 0,
+        "a partial response is not a successful successor"
+    );
+    assert_eq!(requests, 2, "both requests must miss after budget failure");
+}
+
+#[test]
 fn the_same_cache_dispatched_twice_in_one_scope_answers_normally() {
     // A repeated dispatch used to fail closed. It must now build a second
     // frame, publish at both boundaries, and still answer the normal upstream
@@ -497,12 +538,9 @@ fn a_fallback_cache_target_publishes_only_after_a_natural_successor_completion()
 }
 
 #[test]
-fn a_fallback_cache_target_never_publishes_a_successor_that_exited() {
-    // The same configuration with a trailing `exit`: the successor still
-    // produces a response, but it stopped instead of completing. A cache
-    // reached through an ordinary sequence dispatch is invalidated by
-    // `MachineStep::ScopeAborted` in exactly this situation, so the direct
-    // cache target must not store anything either.
+fn a_fallback_cache_target_publishes_a_successor_that_exited() {
+    // A trailing `exit` successfully completes with the boundary response,
+    // just as it does for caches reached through ordinary sequence dispatch.
     let yaml = fallback_cache_target_yaml(true);
     let (responses, requests, stored) = run_batch_with_store(
         &yaml,
@@ -512,12 +550,12 @@ fn a_fallback_cache_target_never_publishes_a_successor_that_exited() {
         ],
     );
     assert_eq!(
-        stored, 0,
-        "an exited successor must not publish, exactly like a ScopeAborted boundary"
+        stored, 1,
+        "an exited successor must publish its boundary response"
     );
     assert_eq!(
-        requests, 2,
-        "with nothing cached each request must reach the upstream again"
+        requests, 1,
+        "the second request must use the published response"
     );
     for (index, response) in responses.iter().enumerate() {
         assert_eq!(response[3] & 0x0f, 0, "the answer itself is unaffected");
@@ -573,7 +611,7 @@ fn positive_lazy_retention_is_accepted_for_named_caches_only() {
 
 #[test]
 #[allow(clippy::too_many_lines)] // One real lifecycle scenario, matching existing HTTP proof tests.
-fn lazy_refresh_outlives_the_client_merges_followers_and_leaves_audit_unchanged() {
+fn lazy_refresh_through_exit_outlives_the_client_merges_followers_and_leaves_audit_unchanged() {
     let socket = StdUdpSocket::bind("127.0.0.1:0").unwrap();
     socket
         .set_read_timeout(Some(Duration::from_millis(10)))
@@ -616,7 +654,7 @@ fn lazy_refresh_outlives_the_client_merges_followers_and_leaves_audit_unchanged(
     );
     let yaml = catalog_yaml(
         &plugins,
-        "      - exec: $cache_a\n      - exec: $cache_b\n      - exec: $phase5a_forward\n",
+        "      - exec: $cache_a\n      - exec: $cache_b\n      - exec: $phase5a_forward\n      - exec: exit\n",
     )
     .replace("udp://127.0.0.1:15455", &format!("udp://{peer}"))
     .replace("enable_audit: false", "enable_audit: true");

@@ -84,7 +84,7 @@ Redirect consumes only its enclosing successor under the same root fuel, absolut
 
 IN matching redirect changes qname while preserving ID/qtype/class/flags/allowed OPT. Forward, cache lookup/store, hosts, query matchers and preference probes consult the current view. Preference's alternate-QTYPE wire and machine question must agree. On successful response (including successful exit), rebuild Question to the original and prepend original→target IN CNAME TTL1; preserve target chain, SOA, rcode, flags and TTLs. Every nested frame restores one layer. Missing response/error/cancel/drop cannot synthesize a CNAME success.
 
-Outer cache captures the restored original wire/key; inner cache captures target wire/key before restoration. Completion remains `Exited` through named targets, fallback/preference wrappers and redirect; resume Exit so enclosing watches get ScopeAborted. No conversion to natural completion/publication. Natural completion resumes Accept to retire the consumed enclosing scope. Its captured jump continuations have already run; Return would pop and re-execute an original continuation. The caller's outside scope may continue normally.
+Outer cache captures the restored original wire/key; inner cache captures target wire/key before restoration. Completion remains `Exited` through named targets, fallback/preference wrappers and redirect; resume Exit to skip the parent tail. Under the **2026-10-09 user-approved cache lifecycle revision**, enclosing watches now get successful ScopeComplete notifications and may publish the restored boundary response. Do not convert Exited to Completed. Natural completion resumes Accept to retire the consumed enclosing scope. Its captured jump continuations have already run; Return would pop and re-execute an original continuation. The caller's outside scope may continue normally.
 
 Supplier identity and actual historical attempts survive redirect; local/cache replacement clears current network selection. Branch collector transfers detail records only when audit capture is enabled, and transfers numeric metrics regardless. Trace selection must reject stale candidates when the selected outcome's source is Local/Cache.
 
@@ -94,11 +94,11 @@ No match or non-IN: ordinary Continue, unchanged view. Malformed query/response 
 
 ## 5. Good/Base/Bad Cases
 
-Good: a→b, peer b→d CNAME + d A yields original Question and a→b→d chain. Base: target NXDOMAIN retains its target-owned SOA and RCODE with a→b CNAME. Bad: converting exit through a named fallback target to Completed runs parent TTL and publishes outer cache; preserve Exited instead.
+Good: a→b, peer b→d CNAME + d A yields original Question and a→b→d chain. Base: target NXDOMAIN retains its target-owned SOA and RCODE with a→b CNAME. Bad: converting exit through a named fallback target to Completed runs parent TTL; preserve Exited and publish only the boundary response instead.
 
 ## 6. Tests Required
 
-`policy_wire.rs`: actual target peer question, nested negative restoration, flags/QTYPE/OPT, cache before/inside redirect and warm hits, direct fallback target and non-IN no-op, exit/outer cache abort, named fallback exit skipping parent tail, bounded self-cycle. Native execution unit test verifies error/cancel/shared fuel typed results and unchanged inherited response without CNAME decoration. Regress full native-host suite and workspace clippy/fmt remotely.
+`policy_wire.rs`: actual target peer question, nested negative restoration, flags/QTYPE/OPT, cache before/inside redirect and warm hits, direct fallback target and non-IN no-op, exit/outer cache publication, named fallback exit skipping parent tail, bounded self-cycle on the default test stack with foreground256. Native execution unit tests verify error/cancel/shared fuel typed results, unchanged inherited response without CNAME decoration, and a32-level redirected fallback whose synchronous primary wins without polling a losing supplier. Regress full native-host suite and workspace clippy/fmt remotely.
 
 ## 7. Wrong vs Correct
 

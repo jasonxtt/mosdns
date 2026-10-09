@@ -320,10 +320,11 @@ pub struct WatchToken(u64);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MachineStep {
     Dispatch(ExternalDispatch),
-    /// The watched scope finished naturally. Its successor result is publishable.
+    /// The watched scope finished successfully, naturally or through `exit`.
+    /// Its successor result is publishable before the caller resumes.
     ScopeComplete(ScopeCompletion),
-    /// The watched scope was unwound by `exit` while the machine kept running.
-    /// The owner must invalidate the matching frame and must not publish it.
+    /// The watched scope ended without a publishable successor result.
+    /// The owner must invalidate the matching frame.
     ///
     /// This is *not* how cancellation, fuel exhaustion or a terminal executor
     /// error are reported. Those stop the machine: `step`/`resume` return
@@ -969,12 +970,12 @@ impl<'a> ExecutionMachine<'a> {
                             continue;
                         }
                         self.watches.remove(index);
-                        // Only the scope that produced a natural completion made
-                        // a publishable successor result. Every other vanished
-                        // scope was unwound by `exit` or a terminal stop, and its
-                        // frame must be invalidated instead of published.
-                        let publishable = matches!(signal, ScopeSignal::Completed)
-                            && leaving_scope == Some(watch.scope);
+                        // `exit` is successful completion for every scope it
+                        // crosses. Notify each cache now, before a surviving
+                        // try caller can overwrite the response. Failures never
+                        // reach this loop and leave all frames unpublished.
+                        let publishable = matches!(signal, ScopeSignal::Exited)
+                            || leaving_scope == Some(watch.scope);
                         fired.push(PendingWatchEvent {
                             completion: ScopeCompletion {
                                 executable: watch.executable,

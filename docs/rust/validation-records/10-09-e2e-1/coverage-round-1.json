@@ -1,0 +1,52 @@
+{
+  "go": {
+    "query_errors": 0,
+    "audit_expected": 8132,
+    "audit_missing": 0,
+    "tls_mock_errors_bytes": 0,
+    "dns_events": {
+      "domestic": 6376,
+      "nocnfake": 637,
+      "foreign": 24,
+      "cnfake": 2,
+      "foreignecs": 2
+    },
+    "socks_ports": {
+      "15012": 2,
+      "15022": 1
+    },
+    "unexpected_socks": 0,
+    "ecs_groups": {
+      "foreignecs": 2
+    },
+    "subscription_direct_audit_rows": 6060,
+    "subscription_proxy_audit_rows": 1768,
+    "client_direct_audit_rows": 36
+  },
+  "native": {
+    "query_errors": 0,
+    "audit_expected": 8132,
+    "audit_missing": 0,
+    "tls_mock_errors_bytes": 0,
+    "dns_events": {
+      "domestic": 12536,
+      "nocnfake": 1274,
+      "foreign": 15,
+      "foreignecs": 2,
+      "cnfake": 1
+    },
+    "socks_ports": {
+      "15012": 14,
+      "15022": 1
+    },
+    "unexpected_socks": 0,
+    "ecs_groups": {
+      "foreignecs": 2
+    },
+    "subscription_direct_audit_rows": 6060,
+    "subscription_proxy_audit_rows": 1768,
+    "client_direct_audit_rows": 36
+  },
+  "ecs_identical": true,
+  "domestic_marker_in_production_si_set": true
+}

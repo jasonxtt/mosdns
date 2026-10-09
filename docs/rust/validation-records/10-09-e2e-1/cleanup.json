@@ -1,0 +1,24 @@
+{
+  "checked_at_utc": "2026-10-09T03:38:20.800454+00:00",
+  "processes_exited": true,
+  "namespaces_deleted": [
+    "e2e1-1229506-go",
+    "e2e1-1229506-native",
+    "e2e1-1229569-go",
+    "e2e1-1229569-native",
+    "e2e1-1246041-go",
+    "e2e1-1246041-native",
+    "e2e1-1254180-go",
+    "e2e1-1254180-native"
+  ],
+  "owned_running_processes": 0,
+  "owned_namespaces_remaining": 0,
+  "vm_task_directory_removed": "/root/e2e1-r2-20261009",
+  "original_service_unchanged": true,
+  "original_service": {
+    "MainPID": 827437,
+    "ActiveState": "active"
+  },
+  "private_archive_exported": true,
+  "private_archive_sha256": "7193028474b430aa3d4d48ec5f2ebb649cfc0f55b10c38caf68a1d6c80d9b2e8"
+}
