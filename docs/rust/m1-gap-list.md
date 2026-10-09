@@ -90,11 +90,23 @@ M1-0 之前的读法如下：
 `/api/v1/upstream/{tags,config,runtime}`、`/api/v1/overrides`、`/api/v1/domain-generation` 在非托管模式下由设置层提供。契约见 [native-settings](contracts/native-settings.md)，记录见
 [validation-records/10-08-m1-f1](validation-records/10-08-m1-f1/README.md)。
 
-**M1-f2 已完成（`10-09-rust-native-m1-f2-config-rust`，待规划会话确认与提交）**：原生配置包 `config_rust`（在 `file` 仓库 `mosdns/config/config_rust/`，**未提交**，附 `README-rust.md` 差异说明与等价性论证）、
+**M1-f2 已完成（`2b9d0bea`）**：原生配置包 `config_rust`（在 `file` 仓库 `mosdns/config/config_rust/`，配置包基线 `0412666`，附 `README-rust.md` 差异说明与等价性论证）、
 一次性迁移工具 `mosdns-settings-migrate`（`native-host` 内独立二进制，逻辑在 `settings_migrate.rs`，复现 Go 的 `use_socks_proxy` 推断与 `foreign`/`foreignecs` 全局代理回退，无法映射项写入报告并以退出码 1 提示）、
 WebUI 两套 shell 的设置页接线（上游页代理开关、覆盖页立即生效与“已修改/恢复默认”、替换规则面板在原生下隐藏；Go 路径不变）。
 附带的 Rust 改动：`socks5_proxy` 的 `addr` 可为空（= 不使用代理，用户 2026-10-09 决定）；设置版上游列表不再返回 `use_proxy` 字段；`unsupported_features` 在设置版上游页下不再列 `socks_proxy`；`check` 的 aliapi `EFFECTIVE` 值对真正走代理的条目加 ` [proxy]` 标记。
-记录见 [validation-records/10-09-m1-f2](validation-records/10-09-m1-f2/README.md)。**仍待**：首次整链运行与 Go 差分（E2E-1）；托管模式下的上游覆盖（M1-e）。
+记录见 [validation-records/10-09-m1-f2](validation-records/10-09-m1-f2/README.md)。**仍待**：E2E-1 验收；托管模式下的上游覆盖（M1-e）。
+
+**E2E-1 第 1 轮修复与重跑完成，待第 2 轮外部审查（2026-10-09）**：首轮 FINAL: FAIL，
+撤回“缓存/热映射已批准偏差”结论。exit 成功发布与应答所属标签已修复，lazy 同规则，
+错误/取消/截止/fuel/无效应答不发布。四格诊断证明 N1 为 fuel64 耗尽；用户 2026-10-09
+批准前台256、lazy64，补循环/深链默认栈与 wire/审计回归。热标签重推暴露的899条投影缺陷亦修复。
+同一语料各8156条：语义字段一致3681、差异4475（Go偶然行为4471、批准full:偏差4，
+仅引用2026-10-07决定；未解释差异0）。DNS只剩2条批准AAAA差异，3099四格均cnfake。
+原生cache_all恢复3812hit/3812entries，Go3813/3813，差一个批准提前空答；domain_output两边2。
+逐路径TTL与映射供应组比对已补，TTL违规0、查询错误/预期审计缺失0。VM fmt、严格clippy、
+全workspace1462passed/0failed/4既有ignored、config_rust check零缺口通过。
+自有进程、netns和VM目录已清理，原服务身份不变；未提交、未关闭M1，等待外部Claude第2轮。
+见 [E2E-1 验证记录](validation-records/10-09-e2e-1/README.md)。
 
 ### M1-g 缓存放置规则与 ECS（**M1-b1 任务已处理**；被 M1-b1 暴露，用户 2026-10-08 决定）
 

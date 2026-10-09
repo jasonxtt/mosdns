@@ -1,0 +1,99 @@
+{
+  "rows_per_runtime": 8156,
+  "raw_equal": 3679,
+  "raw_different": 4477,
+  "different_fields": {
+    "domain_set": 2257,
+    "final_sequence": 4287,
+    "effective_tag": 1460,
+    "answers": 5,
+    "final_upstream": 3820,
+    "marker_group": 5
+  },
+  "native_marker_paths": {
+    "53:domestic": 6374,
+    "53:nocnfake": 1274,
+    "53:foreign": 12,
+    "2222:domestic": 4,
+    "3066:domestic": 4,
+    "3077:domestic": 4,
+    "3099:domestic": 3,
+    "3111:domestic": 4,
+    "3333:foreign": 4,
+    "4444:foreignecs": 4,
+    "7777:domestic": 4,
+    "8888:domestic": 4,
+    "3099:cnfake": 1
+  },
+  "latencies_ms": {
+    "go": {
+      "1": {
+        "p50": 0.235594,
+        "p95": 0.353175,
+        "p99": 0.4544
+      },
+      "2": {
+        "p50": 0.067489,
+        "p95": 0.144859,
+        "p99": 0.246156
+      }
+    },
+    "native": {
+      "1": {
+        "p50": 0.261762,
+        "p95": 0.398771,
+        "p99": 0.531746
+      },
+      "2": {
+        "p50": 0.211048,
+        "p95": 0.353167,
+        "p99": 0.439729
+      }
+    }
+  },
+  "resources": {
+    "go": [
+      {
+        "rss_kib": 154992,
+        "cpu_s": 0.59
+      },
+      {
+        "rss_kib": 140648,
+        "cpu_s": 1.47
+      },
+      {
+        "rss_kib": 146564,
+        "cpu_s": 2.19
+      }
+    ],
+    "native": [
+      {
+        "rss_kib": 42352,
+        "cpu_s": 0.36
+      },
+      {
+        "rss_kib": 47764,
+        "cpu_s": 1.39
+      },
+      {
+        "rss_kib": 53556,
+        "cpu_s": 2.68
+      }
+    ]
+  },
+  "verdict": "native_defect_pending_external_review",
+  "classification_counts": {
+    "go_incidental": 424,
+    "approved_deviation": 4050,
+    "native_defect": 3
+  },
+  "reason_counts_nonexclusive": {
+    "G1_tag_order": 801,
+    "G2_actual_sequence_versus_missing_go_hint": 237,
+    "A1_full_case_insensitive": 4,
+    "G3_supplier_entry_versus_missing_go_hint": 4,
+    "A2_live_overlay_and_cache_publication": 1449,
+    "N1_3099_realip_instead_of_cnfake": 3,
+    "A3_exit_unwound_cache_not_published": 4045
+  }
+}

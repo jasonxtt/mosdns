@@ -1,0 +1,373 @@
+{
+  "evidence_round": "round_2_remediation_final_run3",
+  "native_base_and_head": "2b9d0beafc13589a408a09b5ac97856af1677312",
+  "native_includes_uncommitted_fixes": true,
+  "native_binary_sha256": "da327acd9464f20537470874f2c33529e785fe360ac0bb501f5dd605945192c0",
+  "go_reference_commit": "75f2667703c83952e86833852440e07c63f33311",
+  "go_binary_sha256": "02ad7202d2689c0cb58e4cd672cc8eff7cd5a0ae7e67b7479717ff9840a98e9a",
+  "config_package_commit": "0412666b9648a1f52d831e43d7817abd7a5ab556",
+  "rows_per_runtime": 8156,
+  "semantic_equal": 3681,
+  "semantic_different": 4475,
+  "different_fields": {
+    "domain_set": 810,
+    "final_sequence": 4286,
+    "effective_tag": 8,
+    "answers": 2,
+    "final_upstream_group": 3819,
+    "marker_group": 2
+  },
+  "raw_final_upstream_differences_diagnostic_only": 3821,
+  "ttl_policies": {
+    "go": {
+      "mock_max_300:valid": 7686,
+      "no_records:valid": 454,
+      "rewrite_5:valid": 12,
+      "mock_max_5:valid": 4
+    },
+    "native": {
+      "mock_max_300:valid": 7684,
+      "no_records:valid": 456,
+      "rewrite_5:valid": 12,
+      "mock_max_5:valid": 4
+    }
+  },
+  "native_marker_paths": {
+    "53:domestic": 6374,
+    "53:nocnfake": 1274,
+    "53:foreign": 12,
+    "2222:domestic": 4,
+    "3066:domestic": 4,
+    "3077:domestic": 4,
+    "3099:cnfake": 4,
+    "3111:domestic": 4,
+    "3333:foreign": 4,
+    "4444:foreignecs": 4,
+    "7777:domestic": 4,
+    "8888:domestic": 4
+  },
+  "latencies_ms": {
+    "go": {
+      "1": {
+        "p50": 0.281692,
+        "p95": 0.432351,
+        "p99": 0.645135
+      },
+      "2": {
+        "p50": 0.111593,
+        "p95": 0.194363,
+        "p99": 0.279926
+      }
+    },
+    "native": {
+      "1": {
+        "p50": 0.297466,
+        "p95": 0.421224,
+        "p99": 0.528973
+      },
+      "2": {
+        "p50": 0.094418,
+        "p95": 0.185703,
+        "p99": 0.301738
+      }
+    }
+  },
+  "resources": {
+    "go": [
+      {
+        "rss_kib": 161124,
+        "cpu_s": 0.63
+      },
+      {
+        "rss_kib": 175764,
+        "cpu_s": 1.68
+      },
+      {
+        "rss_kib": 202796,
+        "cpu_s": 2.73
+      }
+    ],
+    "native": [
+      {
+        "rss_kib": 42356,
+        "cpu_s": 0.41
+      },
+      {
+        "rss_kib": 53060,
+        "cpu_s": 1.55
+      },
+      {
+        "rss_kib": 55984,
+        "cpu_s": 2.68
+      }
+    ]
+  },
+  "verdict": "external_review_required",
+  "classification_counts": {
+    "go_incidental": 4471,
+    "approved_deviation": 4
+  },
+  "reason_counts_nonexclusive": {
+    "G1_tag_order": 806,
+    "G2_missing_go_sequence_hint": 4285,
+    "A1_full_case_insensitive_user_2026-10-07": 4,
+    "G3_missing_go_supplier_hint": 3818
+  },
+  "corpus_sha256": "a17ef5136f82adf08f701b5990c99354c9436be6e578ecf1c26e8a263dee2ab4",
+  "approved_deviation_decision": {
+    "A1_full_case_insensitive": "Explicit user decision 2026-10-07; native-rule-providers.md:57"
+  },
+  "classification_evidence": {
+    "G1_tag_order": "Same tag sets; external round1 accepted display order as incidental. Pinned Go mapper merges hot+static, not shadowing.",
+    "G2_missing_go_sequence_hint": "Pinned Go cache.go:402-440 restores response/domain_set then returns, leaving sequence hints empty. Other differing fields are classified independently, including A1.",
+    "G3_missing_go_supplier_hint": "Pinned Go cache.go:402-440 does not restore upstream hint; native response-origin supplier matches actual mock wire."
+  },
+  "cache_metrics": {
+    "go": {
+      "cache_all": {
+        "hit_total": 3813,
+        "lazy_hit_total": 0,
+        "query_total": 7626,
+        "size_current": 3813
+      },
+      "cache_all_noleak": {
+        "hit_total": 0,
+        "lazy_hit_total": 0,
+        "query_total": 0,
+        "size_current": 0
+      },
+      "cache_cn": {
+        "hit_total": 42,
+        "lazy_hit_total": 0,
+        "query_total": 3230,
+        "size_current": 3188
+      },
+      "cache_cnmihomo": {
+        "hit_total": 2,
+        "lazy_hit_total": 0,
+        "query_total": 4,
+        "size_current": 2
+      },
+      "cache_google": {
+        "hit_total": 2,
+        "lazy_hit_total": 0,
+        "query_total": 6,
+        "size_current": 4
+      },
+      "cache_google_node": {
+        "hit_total": 2,
+        "lazy_hit_total": 0,
+        "query_total": 4,
+        "size_current": 2
+      },
+      "cache_node": {
+        "hit_total": 0,
+        "lazy_hit_total": 0,
+        "query_total": 0,
+        "size_current": 0
+      }
+    },
+    "native": {
+      "cache_all": {
+        "query_total": 7624,
+        "hit_total": 3812,
+        "lazy_hit_total": 0,
+        "size_current": 3812
+      },
+      "cache_all_noleak": {
+        "query_total": 0,
+        "hit_total": 0,
+        "lazy_hit_total": 0,
+        "size_current": 0
+      },
+      "cache_cn": {
+        "query_total": 3229,
+        "hit_total": 42,
+        "lazy_hit_total": 0,
+        "size_current": 3187
+      },
+      "cache_google": {
+        "query_total": 6,
+        "hit_total": 2,
+        "lazy_hit_total": 0,
+        "size_current": 4
+      },
+      "cache_google_node": {
+        "query_total": 4,
+        "hit_total": 2,
+        "lazy_hit_total": 0,
+        "size_current": 2
+      },
+      "cache_node": {
+        "query_total": 0,
+        "hit_total": 0,
+        "lazy_hit_total": 0,
+        "size_current": 0
+      },
+      "cache_cnmihomo": {
+        "query_total": 4,
+        "hit_total": 2,
+        "lazy_hit_total": 0,
+        "size_current": 2
+      }
+    }
+  },
+  "domain_output_probe_counts": {
+    "go": 2,
+    "native": 2
+  },
+  "n1_four_cells": [
+    {
+      "role": "go",
+      "pass": 1,
+      "index": 4066,
+      "qtype": 1,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        5
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": true,
+      "selected_peer_group": null,
+      "final_sequence": "sequence_local_fake_clashmi",
+      "final_upstream_group": "cnfake",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "go",
+      "pass": 1,
+      "index": 4067,
+      "qtype": 28,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        5
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": true,
+      "selected_peer_group": null,
+      "final_sequence": "sequence_local_fake_clashmi",
+      "final_upstream_group": "cnfake",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "go",
+      "pass": 2,
+      "index": 4066,
+      "qtype": 1,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        3
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": false,
+      "selected_peer_group": null,
+      "final_sequence": null,
+      "final_upstream_group": "",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "go",
+      "pass": 2,
+      "index": 4067,
+      "qtype": 28,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        3
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": false,
+      "selected_peer_group": null,
+      "final_sequence": null,
+      "final_upstream_group": "",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "native",
+      "pass": 1,
+      "index": 4066,
+      "qtype": 1,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        5
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": true,
+      "selected_peer_group": "cnfake",
+      "final_sequence": "sequence_local_fake_clashmi",
+      "final_upstream_group": "cnfake",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "native",
+      "pass": 1,
+      "index": 4067,
+      "qtype": 28,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        5
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": true,
+      "selected_peer_group": "cnfake",
+      "final_sequence": "sequence_local_fake_clashmi",
+      "final_upstream_group": "cnfake",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "native",
+      "pass": 2,
+      "index": 4066,
+      "qtype": 1,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        3
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": false,
+      "selected_peer_group": "cnfake",
+      "final_sequence": "sequence_local_fake_clashmi",
+      "final_upstream_group": "cnfake",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    },
+    {
+      "role": "native",
+      "pass": 2,
+      "index": 4067,
+      "qtype": 28,
+      "wire_marker": [
+        "cnfake"
+      ],
+      "ttls": [
+        3
+      ],
+      "ttl_valid": true,
+      "fresh_upstream": false,
+      "selected_peer_group": "cnfake",
+      "final_sequence": "sequence_local_fake_clashmi",
+      "final_upstream_group": "cnfake",
+      "domain_set": "clashmi国内",
+      "effective_tag": "clashmi国内"
+    }
+  ]
+}

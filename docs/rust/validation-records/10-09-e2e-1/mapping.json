@@ -1,0 +1,65 @@
+{
+  "groups": {
+    "domestic": {
+      "ports": {
+        "udp": 15000,
+        "tcp": 15000,
+        "tls": 15001,
+        "https": 15002
+      },
+      "answers": [
+        "223.5.5.101",
+        "2400:3200::101"
+      ]
+    },
+    "foreign": {
+      "ports": {
+        "udp": 15010,
+        "tcp": 15010,
+        "tls": 15011,
+        "https": 15012
+      },
+      "answers": [
+        "203.0.113.20",
+        "2001:db8:2::20"
+      ]
+    },
+    "foreignecs": {
+      "ports": {
+        "udp": 15020,
+        "tcp": 15020,
+        "tls": 15021,
+        "https": 15022
+      },
+      "answers": [
+        "203.0.113.30",
+        "2001:db8:3::30"
+      ]
+    },
+    "cnfake": {
+      "ports": {
+        "udp": 15030,
+        "tcp": 15030,
+        "tls": 15031,
+        "https": 15032
+      },
+      "answers": [
+        "30.0.0.10",
+        "2400::10"
+      ]
+    },
+    "nocnfake": {
+      "ports": {
+        "udp": 15040,
+        "tcp": 15040,
+        "tls": 15041,
+        "https": 15042
+      },
+      "answers": [
+        "28.0.0.10",
+        "2001:2::10"
+      ]
+    }
+  },
+  "normalization": "Enabled entry tags map to their group; google-foreignecs maps to foreignecs; raw alias table retained privately."
+}

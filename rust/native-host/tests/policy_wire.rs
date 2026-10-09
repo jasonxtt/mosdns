@@ -415,7 +415,7 @@ fn cache_before_and_inside_redirect_owns_correct_wire_and_key() {
     }
 }
 #[test]
-fn redirect_exit_decorates_response_but_never_publishes_outer_cache() {
+fn redirect_exit_decorates_response_and_publishes_outer_cache() {
     let host = assembly_extra(
         "      - exec: $stored\n      - exec: $rewrite\n      - exec: $local\n      - exec: exit",
         "['target.example 192.0.2.1']",
@@ -432,7 +432,7 @@ fn redirect_exit_decorates_response_but_never_publishes_outer_cache() {
             .unwrap()
             .lookup(&original)
             .unwrap()
-            .is_none()
+            .is_some()
     );
 }
 #[test]
@@ -511,7 +511,7 @@ fn redirect_non_in_is_noop_and_direct_fallback_redirect_uses_current_target() {
 }
 
 #[test]
-fn redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail() {
+fn redirect_exit_through_named_fallback_target_publishes_and_skips_parent_tail() {
     let host = assembly_extra(
         "      - exec: $stored\n      - exec: $choice\n      - exec: ttl 42\n      - exec: accept",
         "['target.example 192.0.2.1']",
@@ -528,7 +528,7 @@ fn redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail
             .unwrap()
             .lookup(&original)
             .unwrap()
-            .is_none()
+            .is_some()
     );
 }
 

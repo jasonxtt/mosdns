@@ -165,3 +165,53 @@ normal exchange return to account for canceled legs. Correct: one versioned
 projection consumes checkpoint-visible terminal slots, shared by metrics and
 audit, with distinct async drain evidence. Future incompatible shape changes
 need a new schema version and explicit reader migration.
+
+## Effective route label fallback (E2E-1 correction, 2026-10-09)
+
+### 1. Scope / Trigger
+
+Warm cache rows can retain domain_set while final_upstream is empty or names a
+supplier entry. Preserve the maintained audit projection; do not interpret an
+entry label as a canonical route group or show every matching tag as a decision.
+
+### 2. Signatures
+
+`compute_effective_tag(domain_set, final_upstream, matched_group,
+final_sequence) -> String` feeds the existing v2 `effective_tag` field. No API
+schema, route or configuration argument changes.
+
+### 3. Contracts
+
+Existing special/single-decision/no-V/memory priorities remain. Canonical route
+groups retain direct/proxy priority. If those rules choose no core, select the
+first domain_set tag belonging to 白名单/订阅直连补充/订阅直连/灰名单/订阅代理补充/
+订阅代理/CN fakeip filter/!CN fakeip filter, preserving 记忆无V4/记忆无V6 prefixes.
+If none qualifies, retain the deduplicated user labels. Reference: pinned Go
+75f26677 coremain/audit.go, computeEffectiveTag's allowed-tag fallback.
+
+### 4. Validation / Error Matrix
+
+Empty/unmatched label -> unmatched_rule. Named entry/absent hint -> fallback,
+not an error. Known group -> existing route-specific priority. Unknown user
+label -> preserved. No DNS mutation, mapper learning, cache key or response
+owner change.
+
+### 5. Good / Base / Bad Cases
+
+Good: cached 白名单|订阅代理 with entry ali-entry -> 白名单. Base: reverse input
+order with no group -> 订阅代理. Bad: flatten the first case to the whole tag
+string, or drop the no-V prefix while selecting the core.
+
+### 6. Tests Required
+
+`cached_entry_hints_keep_the_first_effective_route_label_and_no_v_flags` checks
+absent/named hints, both tag orders, no-V prefix, known domestic priority and
+unknown-label retention. Re-derive warm E2E effective_tag differences against
+stored domain_set/order and the same wire supplier; do not approve them merely
+because an implementation contract existed.
+
+### 7. Wrong vs Correct
+
+Wrong: a named cache supplier bypasses all priorities and returns every tag.
+Correct: select the established fallback decision, retaining no-V flags and
+unknown user labels when no core matches.

@@ -12,7 +12,7 @@ ECS key isolation and whole-runtime cutover remain outside this delivered scope.
 
 `CompiledConfig.caches` indexes named and private quick stores by `CacheId`.
 `PendingStore` captures owner generation; tokenized `WatchToken` publication
-belongs to its own successor's natural completion. `SuccessorRecipe` owns a
+belongs to its own successor's successful completion (natural or `exit`). `SuccessorRecipe` owns a
 state/scope copy and binds an independent `ExecutionControl`.
 
 `NativeCacheAdapter::{dump,import_dump,save,flush}` use the one native core store.
@@ -34,6 +34,22 @@ Detached Lazy refresh: owner singleflight key, 256 nonblocking slots/no queue,
 5 seconds, new shared root fuel64. Capture before stale response assignment.
 Nested background Lazy is inline miss under that same root. No client audit,
 admission or foreground cache counts; real upstream attempts still count.
+The separate foreground root is256 by the user's **2026-10-09** N1 decision
+(see `rust-migration.md`); this does not increase refresh work or replenish
+nested branch budgets.
+
+User decision **2026-10-09**, external review round 1 confirmed directly by the
+user: `exit` crossing a cache successor is successful completion, aligned with
+Go's entry-handler semantics. Publish the response present at that boundary,
+before a surviving `try` caller resumes or overwrites it, for both watched
+caches and direct fallback cache targets. Lazy refresh follows the same rule.
+An enclosing cache stores the committed response's domain_set even if an inner
+completion cleared the parent's routing candidate; a later response replacement
+uses its own metadata. The warm hit must restore the cold label, not retain a
+newly learned mapper label because the stored label was accidentally empty.
+Absent/invalid responses, executor errors, cancellation, deadline expiry or fuel
+exhaustion never publish. The earlier exit-unwound prohibition was an implementation
+choice, not an approved product-visible deviation.
 
 Management is owner-owned and serialized, not cancelled with the HTTP caller.
 Import fully stages/validates before one generation-changing merge. Dirty revision
@@ -78,14 +94,17 @@ Keep Go DNS section markers and metadata lines for the existing Vue parser.
 Good: a gated upstream refresh completes after clients leave; one follower task;
 source state stays independent; restart preserves domain_set and original age.
 Base: named stores isolate, quick callsites remain private, nested publication
-returns to the enclosing successor and direct fallback exit never publishes.
+returns to the enclosing successor; entry, child and direct fallback caches
+publish successful `exit` responses at their own boundary.
+Nested caches preserve the response label in both owners and on a warm outer hit.
 Bad: old-generation response after flush/import; corrupted last entry/CRC partially
 merges; management disconnect cancels rename; successful flush resurrects on restart.
 
 ## 6. Required behavior tests
 
 `cache_catalog` covers real nested DNS, direct fallback exit, owner drain and
-refresh fuel. `cache_lifecycle` covers escaped keys/DO/OPT, wall rollback, full
+refresh fuel. Native execution tests cover nested exit domain_set restoration
+and the cold/warm A/AAAA cnfake cells. `cache_lifecycle` covers escaped keys/DO/OPT, wall rollback, full
 import/transaction races and real Go v2 fixture. `cache_http` drives actual DNS,
 HTTP routing/metrics/body cap/restart, encoded labels, and SIGTERM/exit2.
 `cache.rs` persistence tests cover periodic/final/error aggregation and postcommit
@@ -95,6 +114,10 @@ Vue `tests/cacheInventory.test.mjs` covers fallback/schema/missing metric/partia
 failure labels; actual browser proof must use live owners and actual DNS text.
 
 ## 7. Wrong vs correct
+
+Wrong: outer publication copies an empty parent routing candidate after the
+inner boundary. Correct: it stores the metadata committed to the unchanged
+response; later replacement still discards stale child provenance.
 
 Wrong: "durable-first flush saves the old snapshot, then clears memory."
 Correct: atomic replacement with the **empty** snapshot is the external commit;

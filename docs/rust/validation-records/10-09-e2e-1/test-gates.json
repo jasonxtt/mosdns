@@ -1,0 +1,11 @@
+{
+  "workspace_completed_suites": 95,
+  "passed": 1462,
+  "failed": 0,
+  "ignored": 4,
+  "fmt_exit": 0,
+  "strict_clippy_exit": 0,
+  "workspace_exit": 0,
+  "config_rust_check_exit": 0,
+  "tool_tests_passed": 8
+}

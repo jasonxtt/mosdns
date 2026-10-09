@@ -1636,10 +1636,10 @@ mod slice3_control_tests {
     }
 
     #[test]
-    fn an_exited_scope_aborts_only_its_own_watch_and_the_surviving_scope_keeps_its_token() {
+    fn an_exited_scope_completes_its_own_watch_and_the_surviving_scope_keeps_its_token() {
         // main(cache, try(child)) with child(cache, exit). Two watches are armed
         // for the *same* executable in two scopes; only the child scope exits.
-        // The exit must invalidate exactly the child's watch, and the surviving
+        // The exit must complete exactly the child's watch, and the surviving
         // root watch must still be reported later with its own token.
         let program = ProgramSpec::new(
             vec![
@@ -1695,17 +1695,17 @@ mod slice3_control_tests {
         assert_ne!(root_token, child_token, "each watch has its own identity");
         assert_eq!(machine.armed_watch_count(), 2);
 
-        // The child scope exits. Only its watch may be aborted.
+        // The child scope exits. Only its watch completes at this boundary.
         let step = machine
             .resume(child_dispatch.executable(), Ok(ExecutorOutcome::Continue))
             .expect("exit resume");
-        let MachineStep::ScopeAborted(aborted) = step else {
-            panic!("an exited scope must abort, not complete: {step:?}");
+        let MachineStep::ScopeComplete(aborted) = step else {
+            panic!("an exited scope must complete successfully: {step:?}");
         };
         assert_eq!(
             aborted.token(),
             child_token,
-            "the aborted notification belongs to the exited scope's own watch"
+            "the completion belongs to the exited scope's own watch"
         );
         assert_eq!(aborted.executable(), child_dispatch.executable());
         assert_eq!(
@@ -1717,7 +1717,7 @@ mod slice3_control_tests {
         // The surviving root boundary is still reported, with the root token.
         let step = machine
             .resume_scope_completion(child_token)
-            .expect("abort resume");
+            .expect("completion resume");
         assert!(
             !matches!(step, MachineStep::ScopeAborted(_)),
             "the root scope has not stopped running yet: {step:?}"
@@ -1734,7 +1734,7 @@ mod slice3_control_tests {
         assert_eq!(
             completion.token(),
             root_token,
-            "the publishable boundary must be the root watch, never the exited one"
+            "the later boundary must belong to the surviving root watch"
         );
     }
 
@@ -1805,15 +1805,15 @@ mod slice3_control_tests {
         let mut step = machine
             .resume(second.executable(), Ok(ExecutorOutcome::Continue))
             .expect("exit resume");
-        let mut aborted = 0_usize;
-        while let MachineStep::ScopeAborted(completion) = step {
-            aborted += 1;
+        let mut completed = 0_usize;
+        while let MachineStep::ScopeComplete(completion) = step {
+            completed += 1;
             step = machine
                 .resume_scope_completion(completion.token())
-                .expect("abort resume");
+                .expect("completion resume");
         }
         assert_eq!(
-            aborted, 2,
+            completed, 2,
             "both unwound scopes must be reported, or a watch would be orphaned"
         );
         assert_eq!(machine.armed_watch_count(), 0, "no watch may survive");
@@ -1919,7 +1919,7 @@ mod slice3_control_tests {
     }
 
     #[test]
-    fn a_watch_dropped_by_exit_never_reports_a_publishable_completion() {
+    fn a_watch_crossed_by_exit_reports_a_publishable_completion() {
         let program = ProgramSpec::new(
             vec![
                 SequenceSpec::new(
@@ -1960,8 +1960,8 @@ mod slice3_control_tests {
             .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
             .expect("resume");
         assert!(
-            !matches!(step, MachineStep::ScopeComplete(_)),
-            "an exited scope must not report a publishable completion: {step:?}"
+            matches!(step, MachineStep::ScopeComplete(_)),
+            "an exited scope must report a successful completion: {step:?}"
         );
         assert_eq!(machine.armed_watch_count(), 0, "the dead watch was dropped");
     }

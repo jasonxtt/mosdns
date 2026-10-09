@@ -495,6 +495,18 @@ Go, cgo, plugin registries, listeners, upstreams, or network I/O.
   `Cancelled > BudgetExceeded > ordinary matcher/executor error > Exit`.
   `try` converts only `Exit` into normal continuation; all other errors
   propagate, and caller-owned state remains observable on every result.
+- User decision **2026-10-09**, E2E-1 N1 four-cell diagnosis: native foreground
+  requests use one shared root of **256** dispatches; detached lazy refresh
+  retains its independent **64**. This supersedes the earlier host limit64
+  in Phase5B's archived PRD. Cold A exhausted64 at the cnfake sequence entry;
+  cold AAAA exhausted64 just before the cnfake forward. `REQUEST_FUEL` and
+  `REFRESH_FUEL` in native-host `execution.rs` select those roots; nested
+  `try`, fallback, redirect and requery never replenish them. Cancellation,
+  absolute deadlines and `BudgetExceeded` cycle termination remain unchanged.
+  Deep native policy futures are polled through query-owned heap continuations
+  so the finite dispatch budget is reached before Rust stack overflow. Their
+  ancestry order preserves synchronous primary-first selection; deferred weak
+  entries do not retain cancelled/dropped branches. No new task or fuel root.
 
 ### 4. Validation & Error Matrix
 
@@ -541,6 +553,10 @@ Go, cgo, plugin registries, listeners, upstreams, or network I/O.
   cancellation priority, caller-owned state after every completion/error, and
   no ABI/live-wiring surface. Run the Rust workspace gates and the unchanged
   Go default/race/vet/build plus `CGO_ENABLED=0` gates.
+- E2E-1 regressions assert cnfake wire, supplier, sequence, upstream group,
+  domain_set and cache origin in A/AAAA × cold/warm; a foreground `goto`
+  cycle still terminates without forwarding/publication. Refresh tests retain
+  the independent64 root, including fuel exhaustion without publication.
 
 ### 7. Wrong vs Correct
 

@@ -1,8 +1,10 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use mosdns_dns_core::{
@@ -31,7 +33,10 @@ use crate::observer::{
 };
 use crate::rewrite::RewriteEnd;
 
-const DEFAULT_FUEL: u64 = 64;
+// E2E-1's real 3099 cold route exceeds 64 dispatches. User decision 2026-10-09:
+// front requests get 256; detached refresh retains its independent 64 limit.
+const REQUEST_FUEL: u64 = 256;
+const REFRESH_FUEL: u64 = 64;
 const SERVFAIL: u8 = 2;
 const REFUSED: u8 = 5;
 
@@ -138,7 +143,7 @@ impl RefreshEnvironment {
                 observer: environment.observer.clone(),
             };
             let control = ExecutionControl::with_shared_budget(
-                RootFuelHandle::new(DEFAULT_FUEL),
+                RootFuelHandle::new(REFRESH_FUEL),
                 CancellationToken::new(),
             );
             let Ok(machine) = recipe.bind(&environment.config.program, control) else {
@@ -157,9 +162,10 @@ impl RefreshEnvironment {
                 refresh_environment: None,
                 allow_empty_response: false,
                 branch_id: None,
+                polls: Rc::default(),
             };
             let result = drive_branch(machine, context, None).await;
-            if result.completed_naturally()
+            if result.completed_successfully()
                 && !cancellation.is_cancelled()
                 && Instant::now() < deadline
             {
@@ -234,6 +240,7 @@ struct BranchContext<'a, E: ExchangeExecutor + ?Sized> {
     refresh_environment: Option<Rc<RefreshEnvironment>>,
     allow_empty_response: bool,
     branch_id: Option<usize>,
+    polls: Rc<BranchPollQueue<'a>>,
 }
 
 impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
@@ -251,6 +258,7 @@ impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
             refresh_environment: self.refresh_environment.clone(),
             allow_empty_response: self.allow_empty_response,
             branch_id: self.branch_id,
+            polls: self.polls.clone(),
         }
     }
 }
@@ -631,9 +639,8 @@ struct BranchOutcome {
     error: Option<ExecutionError>,
     /// How the branch machine reached its terminal state.
     ///
-    /// A branch that stopped by `exit` still carries whatever response it had
-    /// already produced, but it did not complete naturally, so an owner must not
-    /// treat that response as a successor result. `None` means the branch did
+    /// A branch that stopped by `exit` successfully completed with the response
+    /// present at its boundary. `None` means the branch did
     /// not reach a terminal completion at all (it failed or was abandoned).
     completion: Option<ExecutionCompletion>,
 }
@@ -661,15 +668,10 @@ impl BranchOutcome {
         self.error.is_none() && !matches!(self.state.response, MachineResponseState::None)
     }
 
-    /// True only when the branch reached its terminal state by completing
-    /// naturally, which is the sole condition under which its response is a
-    /// publishable successor result.
-    ///
-    /// This mirrors [`MachineStep::ScopeComplete`] versus
-    /// [`MachineStep::ScopeAborted`] on the boundary path: an `exit` carries the
-    /// response it had, but it is not a completion.
-    fn completed_naturally(&self) -> bool {
-        matches!(self.completion, Some(ExecutionCompletion::Completed))
+    /// Natural completion and `exit` are successful successor boundaries.
+    /// Errors and abandoned branches have no terminal completion.
+    fn completed_successfully(&self) -> bool {
+        self.error.is_none() && self.completion.is_some()
     }
 }
 
@@ -1385,7 +1387,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         .admission_deadline
         .unwrap_or_else(|| Instant::now() + options.request_deadline);
     let root_control = ExecutionControl::with_shared_budget(
-        RootFuelHandle::new(DEFAULT_FUEL),
+        RootFuelHandle::new(REQUEST_FUEL),
         CancellationToken::new(),
     );
     let mut machine = match mosdns_sequence_core::ExecutionMachine::new(
@@ -1434,7 +1436,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 return result_from_state(&machine, &header, &question, facts);
             }
             MachineStep::ScopeComplete(completion) => {
-                // The cache's enclosing scope finished naturally. This is the
+                // The cache's enclosing scope completed successfully. This is the
                 // successor completion point: the response now in state is
                 // what that successor produced, before the caller's remaining
                 // rules can rewrite it.
@@ -1443,6 +1445,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     &mut pending_stores,
                     completion.token(),
                     &machine,
+                    facts
+                        .response_routing
+                        .as_ref()
+                        .and_then(|routing| routing.domain_set.as_deref())
+                        .unwrap_or(""),
                     request_shutdown.is_cancelled(),
                     publication_deadline,
                 );
@@ -1465,8 +1472,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 };
             }
             MachineStep::ScopeAborted(completion) => {
-                // The watched scope was unwound by `exit`. Its frame is
-                // invalidated here and must never publish, and it must not
+                // An unpublishable boundary invalidates its own frame; it must not
                 // survive to be consumed by a later, unrelated boundary.
                 // Cancellation, exhausted fuel and terminal executor errors do
                 // not reach this arm: they fail the machine drive, and every
@@ -1588,6 +1594,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             refresh_environment: options.refresh_environment.clone(),
                             allow_empty_response: true,
                             branch_id: Some(0),
+                            polls: Rc::default(),
                         };
                         let successor = match machine.fork_successor(CancellationToken::new()) {
                             Ok(successor) => successor,
@@ -1677,6 +1684,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         refresh_environment: options.refresh_environment.clone(),
                         allow_empty_response: false,
                         branch_id: Some(0),
+                        polls: Rc::default(),
                     };
                     let successor = match machine.fork_successor(CancellationToken::new()) {
                         Ok(successor) => successor,
@@ -1763,6 +1771,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         refresh_environment: options.refresh_environment.clone(),
                         allow_empty_response: false,
                         branch_id: Some(0),
+                        polls: Rc::default(),
                     };
                     let successor = match machine.fork_successor(CancellationToken::new()) {
                         Ok(successor) => successor,
@@ -2106,6 +2115,7 @@ fn publish_frame(
     pending_stores: &mut Vec<PendingFrame>,
     watch: WatchToken,
     machine: &ExecutionMachine<'_>,
+    response_domain_set: &str,
     canceled: bool,
     publication_deadline: Option<Instant>,
 ) {
@@ -2127,15 +2137,18 @@ fn publish_frame(
             MachineResponseState::Raw(wire) => wire.as_bytes(),
             MachineResponseState::None | MachineResponseState::Synthesized(_) => &[],
         },
-        machine.state().routing.domain_set.as_deref().unwrap_or(""),
+        // A completed child clears the parent's routing candidate. Its
+        // committed response label still belongs to an unchanged wire and
+        // must reach an enclosing cache, including stacked exit completions.
+        response_domain_set,
         machine.state().response_origin().cloned(),
     );
 }
 
 /// Invalidates the frame armed by one watch without publishing it.
 ///
-/// This is reached only from the `MachineStep::ScopeAborted` arm, i.e. when a
-/// scope was unwound by `exit`. A machine that fails on cancellation, an
+/// This is reached only from the `MachineStep::ScopeAborted` arm. A machine
+/// that fails on cancellation, an
 /// exhausted budget or a terminal executor error never gets here: the drive
 /// returns `Err` and the owner's frame vector is dropped unpublished when the
 /// request returns.
@@ -2145,12 +2158,145 @@ fn abandon_frame(pending_stores: &mut Vec<PendingFrame>, watch: WatchToken) {
     }
 }
 
+// Boxed async recursion still recursively polls on the Rust stack. Keep deep
+// branch work on the owning query's heap and poll it from the outer boundary.
+// Lexicographic ancestry preserves synchronous primary-before-secondary order;
+// weak queue entries cannot retain a branch dropped by its policy/caller.
+#[derive(Default)]
+struct BranchPollQueue<'a> {
+    depth: Cell<usize>,
+    next: Cell<u64>,
+    active: RefCell<Vec<u64>>,
+    pending: RefCell<BTreeMap<Vec<u64>, Weak<BranchPoll<'a>>>>,
+}
+
+struct BranchPoll<'a> {
+    order: Vec<u64>,
+    future: RefCell<Option<Pin<Box<dyn Future<Output = BranchOutcome> + 'a>>>>,
+    result: RefCell<Option<BranchOutcome>>,
+    queued: Cell<bool>,
+}
+
+struct BranchPollGuard<'a, 'b> {
+    queue: &'b BranchPollQueue<'a>,
+    previous: Vec<u64>,
+}
+
+impl Drop for BranchPollGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.queue.depth.set(self.queue.depth.get() - 1);
+        *self.queue.active.borrow_mut() = std::mem::take(&mut self.previous);
+    }
+}
+
+impl<'a> BranchPollQueue<'a> {
+    fn defer(&self, task: &Rc<BranchPoll<'a>>) {
+        if !task.queued.replace(true) {
+            self.pending
+                .borrow_mut()
+                .insert(task.order.clone(), Rc::downgrade(task));
+        }
+    }
+
+    fn poll_task(&self, task: &BranchPoll<'a>, cx: &mut Context<'_>) {
+        if task.result.borrow().is_some() {
+            return;
+        }
+        self.depth.set(self.depth.get() + 1);
+        let guard = BranchPollGuard {
+            queue: self,
+            previous: std::mem::replace(&mut *self.active.borrow_mut(), task.order.clone()),
+        };
+        let result = task
+            .future
+            .borrow_mut()
+            .as_mut()
+            .expect("unfinished branch")
+            .as_mut()
+            .poll(cx);
+        drop(guard);
+        if let Poll::Ready(result) = result {
+            task.future.borrow_mut().take();
+            *task.result.borrow_mut() = Some(result);
+        }
+    }
+
+    fn pump(&self, cx: &mut Context<'_>) {
+        // One logical continuation per outer poll. The caller then gets the
+        // first chance to consume it and cancel/drop a losing sibling.
+        loop {
+            let next = self.pending.borrow_mut().pop_first();
+            let Some((_, task)) = next else { return };
+            let Some(task) = task.upgrade() else { continue };
+            task.queued.set(false);
+            self.poll_task(&task, cx);
+            cx.waker().wake_by_ref();
+            return;
+        }
+    }
+}
+
+fn poll_branch<'a>(
+    queue: Rc<BranchPollQueue<'a>>,
+    future: impl Future<Output = BranchOutcome> + 'a,
+) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
+    let mut order = queue.active.borrow().clone();
+    let next = queue.next.get();
+    queue
+        .next
+        .set(next.checked_add(1).expect("branch order capacity"));
+    order.push(next);
+    let task = Rc::new(BranchPoll {
+        order,
+        future: RefCell::new(Some(Box::pin(future))),
+        result: RefCell::new(None),
+        queued: Cell::new(false),
+    });
+    Box::pin(std::future::poll_fn(move |cx| {
+        let (earlier, descendant) = queue
+            .pending
+            .borrow()
+            .first_key_value()
+            .map(|(order, _)| (order < &task.order, order.starts_with(&task.order)))
+            .unwrap_or((false, false));
+        if !task.queued.get() {
+            if earlier {
+                queue.defer(&task);
+            } else if task.result.borrow().is_none() {
+                if queue.depth.get() >= 16 {
+                    // An active ancestor must not repeatedly jump ahead of
+                    // the descendant already waiting to make progress.
+                    if !descendant {
+                        queue.defer(&task);
+                    }
+                } else {
+                    queue.poll_task(&task, cx);
+                }
+            }
+        }
+        if queue.depth.get() == 0 {
+            queue.pump(cx);
+        }
+        if task.queued.get() {
+            Poll::Pending
+        } else {
+            task.result
+                .borrow_mut()
+                .take()
+                .map_or(Poll::Pending, Poll::Ready)
+        }
+    }))
+}
+
 fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
     machine: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
     source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    Box::pin(drive_branch_inner(machine, context, source))
+    poll_branch(
+        context.polls.clone(),
+        drive_branch_inner(machine, context, source),
+    )
 }
 
 async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
@@ -2175,13 +2321,9 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
         }
         match step {
             MachineStep::Complete(completion) => {
-                // `Exited` is reported as a successful *branch* result, because
-                // the fallback/preference driver must still see the response the
-                // branch produced. It is not a natural completion, so the
-                // terminal state is carried through unchanged on every arm here
-                // and each publication site checks `completed_naturally()`
-                // before storing anything. Never synthesise `Completed` on this
-                // path: an empty-response branch that exited is still an exit.
+                // Preserve the completion kind for the fallback/preference
+                // driver. Both natural completion and `exit` may publish the
+                // boundary response; an absent response still fails below.
                 if matches!(machine.state().response, MachineResponseState::None)
                     && !context.allow_empty_response
                 {
@@ -2204,6 +2346,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     &mut pending_stores,
                     completion.token(),
                     &machine,
+                    machine.state().routing.domain_set.as_deref().unwrap_or(""),
                     context.root_cancellation.is_cancelled(),
                     publication_deadline,
                 );
@@ -2215,8 +2358,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                 };
             }
             MachineStep::ScopeAborted(completion) => {
-                // An `exit`-unwound scope must invalidate its frame instead of
-                // leaving it to be consumed by whichever boundary finishes next.
+                // An unpublishable boundary must invalidate its own frame.
                 // A machine error never reaches this arm; it returns early and
                 // the branch's frames drop unpublished with the local vec.
                 abandon_frame(&mut pending_stores, completion.token());
@@ -2648,7 +2790,7 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
     context: BranchContext<'a, E>,
     source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    Box::pin(async move {
+    poll_branch(context.polls.clone(), async move {
         match target {
             NativeTarget::Sequence(sequence) => {
                 let control = successor.control().fork_child(CancellationToken::new());
@@ -2891,13 +3033,10 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                     }
                     let pending_store = store.begin_store(context.raw()).ok().flatten();
                     let result = drive_branch(successor, context.clone(), source).await;
-                    // Only a natural completion is a publishable successor
-                    // result. A successor that produced a response and then
-                    // exited must drop its token, exactly as the boundary path
-                    // does when it receives `MachineStep::ScopeAborted` instead
-                    // of `MachineStep::ScopeComplete`.
+                    // Use the same successful boundary rule as watched caches,
+                    // including `exit`, with cancellation/deadline safeguards.
                     if result.is_success()
-                        && result.completed_naturally()
+                        && result.completed_successfully()
                         && !context.root_cancellation.is_cancelled()
                         && Instant::now() < context.deadline
                     {
@@ -3062,7 +3201,7 @@ fn run_query_policy<'a, E: ExchangeExecutor + ?Sized>(
     source: Option<ResponseSource>,
     target: ScopedQueryPolicy,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    Box::pin(async move {
+    poll_branch(context.polls.clone(), async move {
         let original_state = successor.state().clone();
         let view = match match &target {
             ScopedQueryPolicy::Redirect(target) => context.view.redirect(target),
@@ -3189,7 +3328,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
     context: BranchContext<'a, E>,
     source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    Box::pin(async move {
+    poll_branch(context.polls.clone(), async move {
         let started = Instant::now();
         let remaining = context.deadline.saturating_duration_since(started);
         let threshold = policy.threshold.min(remaining);
@@ -3474,7 +3613,7 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
     context: BranchContext<'a, E>,
     source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    Box::pin(async move {
+    poll_branch(context.polls.clone(), async move {
         let preferred_qtype = match policy.family {
             crate::config::PreferenceFamily::Ipv4 => 1,
             crate::config::PreferenceFamily::Ipv6 => 28,
@@ -4358,6 +4497,24 @@ fn compute_effective_tag(
     if let Some(tag) = candidates.iter().find(|candidate| tags.contains(candidate)) {
         return join_effective_tags(&no_v, tag);
     }
+    // Cache-origin hints may name an entry rather than a route group. With no
+    // classifiable route, keep the first recognized decision in domain_set,
+    // including no-V flags, as the maintained audit projection does.
+    if let Some(tag) = tags.iter().find(|tag| {
+        matches!(
+            **tag,
+            "白名单"
+                | "订阅直连补充"
+                | "订阅直连"
+                | "灰名单"
+                | "订阅代理补充"
+                | "订阅代理"
+                | "CN fakeip filter"
+                | "!CN fakeip filter"
+        )
+    }) {
+        return join_effective_tags(&no_v, tag);
+    }
     tags.join("|")
 }
 
@@ -4582,6 +4739,60 @@ mod tests {
         calls: Rc<Cell<u32>>,
         response: Vec<u8>,
         fail: bool,
+    }
+
+    struct CnfakeExchange {
+        domestic: ExecutableId,
+        calls: RefCell<Vec<(ExecutableId, u16)>>,
+    }
+
+    impl ExchangeExecutor for CnfakeExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            query: &'a [u8],
+            _deadline: Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            let (header, question) = parse_query(query).expect("fixture query");
+            self.calls.borrow_mut().push((executable, question.qtype));
+            let domestic = executable == self.domestic;
+            let mut wire = response_for_qtype(
+                query,
+                question.qtype,
+                if domestic {
+                    [223, 5, 5, 101]
+                } else {
+                    [30, 0, 0, 10]
+                },
+            );
+            if question.qtype == 28 {
+                let address: std::net::Ipv6Addr = if domestic {
+                    "2400:3200::101"
+                } else {
+                    "2400::10"
+                }
+                .parse()
+                .expect("fixture address");
+                let offset = wire.len() - 16;
+                wire[offset..].copy_from_slice(&address.octets());
+            }
+            let wire = mosdns_dns_core::replace_response_ttls(&wire, 300).expect("fixture TTL");
+            Box::pin(async move {
+                Ok(ExchangeResponse::new(
+                    wire,
+                    header.id,
+                    header.id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
+        }
     }
 
     struct PolicyExchange {
@@ -5052,6 +5263,311 @@ mod tests {
         query.extend_from_slice(&qtype.to_be_bytes());
         query.extend_from_slice(&[0, 1]);
         query
+    }
+
+    #[test]
+    fn cnfake_wrapper_keeps_supplier_wire_and_audit_consistent_in_all_four_cells() {
+        // Minimal 3099 shape: try a cached domestic route, then replace its
+        // response with cached cnfake and TTL5. The unmatched prefilters model
+        // the real production path's dispatch cost, which exceeds root fuel64.
+        let prefilters = "      - matches: qtype 16\n        exec: accept\n".repeat(55);
+        let yaml = format!(
+            r#"log: {{level: error}}
+plugins:
+  - tag: cache_all
+    type: cache
+    args: {{size: 64}}
+  - tag: cache_cnmihomo
+    type: cache
+    args: {{size: 64}}
+  - tag: domestic
+    type: forward
+    args: {{upstreams: [{{addr: 'udp://127.0.0.1:15000'}}]}}
+  - tag: cnfake
+    type: forward
+    args: {{upstreams: [{{addr: 'udp://127.0.0.1:15030'}}]}}
+  - tag: route
+    type: sequence
+    args:
+      - exec: fast_mark 2
+      - exec: $cache_all
+{prefilters}      - exec: $domestic
+      - exec: exit
+  - tag: sequence_local_fake_clashmi
+    type: sequence
+    args:
+      - exec: $cache_cnmihomo
+      - exec: flow_setter sequence=sequence_local_fake_clashmi upstream=cnfake
+      - exec: $cnfake
+      - exec: ttl 5
+  - tag: main
+    type: sequence
+    args:
+      - exec: try $route
+      - matches: 'resp_ip 28.0.0.0/8 2001:2::/64'
+        exec: exit
+      - matches: '!resp_ip 0.0.0.0/0 2000::/3'
+        exec: exit
+      - exec:
+          - $sequence_local_fake_clashmi
+          - tag_setter clashmi国内
+          - exit
+  - tag: listener
+    type: udp_server
+    args: {{entry: main, listen: '127.0.0.1:3099', enable_audit: true}}
+"#
+        );
+        let clock = CacheTestClock::new(100);
+        let assembly = crate::HostAssembly::with_options(
+            compile_yaml(&yaml).expect("minimal 3099 config"),
+            HostOptions::default().with_cache_clock(Rc::new(clock.clone())),
+        )
+        .expect("assembly");
+        let config = assembly.config();
+        let domestic = config
+            .forwards
+            .iter()
+            .find(|f| f.tag == "domestic")
+            .unwrap()
+            .executable;
+        let cnfake = config
+            .forwards
+            .iter()
+            .find(|f| f.tag == "cnfake")
+            .unwrap()
+            .executable;
+        let exchange = CnfakeExchange {
+            domestic,
+            calls: RefCell::new(Vec::new()),
+        };
+        for pass in 0..2 {
+            if pass == 1 {
+                clock.advance(1);
+            }
+            for qtype in [1, 28] {
+                let raw = query_type(qtype + pass * 100, "n1.example", qtype);
+                let (header, question) = parse_query(&raw).unwrap();
+                let result = assembly.block_on(execute_request_with_observation(
+                    ExecutionRequest {
+                        client: Default::default(),
+                        config,
+                        cache: assembly.cache(),
+                        options: &HostOptions::default(),
+                        raw: &raw,
+                        header,
+                        question,
+                        switch_seed: Default::default(),
+                    },
+                    &exchange,
+                    TransportCancellation::new(),
+                    &mut ExecutionCheckpoint::new(true),
+                ));
+                let expected: std::net::IpAddr = if qtype == 1 { "30.0.0.10" } else { "2400::10" }
+                    .parse()
+                    .unwrap();
+                assert_eq!(
+                    mosdns_dns_core::observe_answer_addresses(&result.response_wire).unwrap(),
+                    vec![expected],
+                    "pass={pass} qtype={qtype}"
+                );
+                assert_eq!(result.failure_provenance, None);
+                assert_eq!(
+                    result.final_sequence.as_deref(),
+                    Some("sequence_local_fake_clashmi")
+                );
+                assert_eq!(result.final_upstream.as_deref(), Some("cnfake"));
+                assert_eq!(result.domain_set.as_deref(), Some("clashmi国内"));
+                let hit = assembly
+                    .cache()
+                    .get(CacheId(1))
+                    .unwrap()
+                    .lookup_entry(&raw)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    hit.origin.as_ref().unwrap().identity.as_ref(),
+                    "cnfake",
+                    "the cached wire must retain its supplier owner"
+                );
+                assert!(
+                    matches!(&result.response, ResponseState::Dns { source, .. } if if pass == 0 { *source == ResponseSource::Upstream("cnfake".into()) } else { *source == ResponseSource::Cache })
+                );
+                assert_eq!(
+                    mosdns_dns_core::observe_response_ttl(&result.response_wire)
+                        .unwrap()
+                        .minimal_ttl,
+                    5 - u32::from(pass)
+                );
+            }
+        }
+        assert_eq!(
+            exchange.calls.borrow().as_slice(),
+            &[(domestic, 1), (cnfake, 1), (domestic, 28), (cnfake, 28)],
+            "warm cells must use both cache owners"
+        );
+    }
+
+    #[test]
+    fn exit_publishes_response_labels_to_both_nested_caches() {
+        let config = compile_yaml(
+            r#"log: {level: error}
+plugins:
+  - tag: outer
+    type: cache
+    args: {size: 16}
+  - tag: inner
+    type: cache
+    args: {size: 16}
+  - tag: forward
+    type: forward
+    args: {upstreams: [{addr: '127.0.0.1:15000'}]}
+  - tag: child
+    type: sequence
+    args:
+      - exec: $inner
+      - exec: tag_setter 白名单
+      - exec: $forward
+      - exec: exit
+  - tag: main
+    type: sequence
+    args:
+      - exec: tag_setter 记忆直连
+      - exec: $outer
+      - exec: $child
+  - tag: listener
+    type: udp_server
+    args: {entry: main, listen: '127.0.0.1:53'}
+"#,
+        )
+        .unwrap();
+        let clock = CacheTestClock::new(100);
+        let assembly = crate::HostAssembly::with_options(
+            config,
+            HostOptions::default().with_cache_clock(Rc::new(clock)),
+        )
+        .unwrap();
+        let raw = query(98);
+        let exchange = MockExchange {
+            calls: Rc::new(Cell::new(0)),
+            response: response(&raw),
+            fail: false,
+        };
+        for _ in 0..2 {
+            let (header, question) = parse_query(&raw).unwrap();
+            let result = assembly.block_on(execute_request_with_observation(
+                ExecutionRequest {
+                    client: Default::default(),
+                    config: assembly.config(),
+                    cache: assembly.cache(),
+                    options: &HostOptions::default(),
+                    raw: &raw,
+                    header,
+                    question,
+                    switch_seed: Default::default(),
+                },
+                &exchange,
+                TransportCancellation::new(),
+                &mut ExecutionCheckpoint::new(true),
+            ));
+            assert_eq!(result.domain_set.as_deref(), Some("白名单"));
+            for id in [CacheId(0), CacheId(1)] {
+                assert_eq!(
+                    assembly
+                        .cache()
+                        .get(id)
+                        .unwrap()
+                        .lookup_entry(&raw)
+                        .unwrap()
+                        .unwrap()
+                        .domain_set,
+                    "白名单"
+                );
+            }
+        }
+        assert_eq!(
+            exchange.calls.get(),
+            1,
+            "warm hit restores the cold response label"
+        );
+    }
+
+    #[test]
+    fn deep_fallback_keeps_primary_priority_without_polling_a_losing_supplier() {
+        let mut yaml = String::from(
+            "log: {level: error}\nplugins:\n  - tag: primary\n    type: forward\n    args: {upstreams: [{addr: '127.0.0.1:15000'}]}\n  - tag: secondary\n    type: forward\n    args: {upstreams: [{addr: '127.0.0.1:15010'}]}\n  - tag: rewrite\n    type: redirect\n    args: {rules: ['original.example original.example']}\n",
+        );
+        for index in 0..32 {
+            let next = if index == 31 {
+                "$primary".to_owned()
+            } else {
+                format!("goto $deep{}", index + 1)
+            };
+            yaml.push_str(&format!("  - tag: deep{index}\n    type: sequence\n    args:\n      - exec: $rewrite\n      - exec: {next}\n"));
+        }
+        yaml.push_str("  - tag: choice\n    type: fallback\n    args: {primary: '$deep0', secondary: '$secondary', threshold: 0}\n  - tag: main\n    type: sequence\n    args:\n      - exec: $choice\n  - tag: listener\n    type: udp_server\n    args: {entry: main, listen: '127.0.0.1:53'}\n");
+        let config = compile_yaml(&yaml).unwrap();
+        let primary = config
+            .forwards
+            .iter()
+            .find(|f| f.tag == "primary")
+            .unwrap()
+            .executable;
+        let secondary = config
+            .forwards
+            .iter()
+            .find(|f| f.tag == "secondary")
+            .unwrap()
+            .executable;
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let exchange = PerExecutableExchange {
+            calls: calls.clone(),
+            answers: vec![(primary, [192, 0, 2, 71]), (secondary, [192, 0, 2, 81])],
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).unwrap();
+        let result = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &query_name(97, "original.example"),
+            &exchange,
+        );
+        assert_eq!(result.failure_provenance, None);
+        assert_eq!(
+            mosdns_dns_core::observe_answer_addresses(&result.response_wire).unwrap(),
+            vec![std::net::IpAddr::V4("192.0.2.71".parse().unwrap())]
+        );
+        assert_eq!(
+            calls.borrow().as_slice(),
+            &[primary],
+            "deep synchronous work must retain primary-first selection"
+        );
+        assert_eq!(result.upstream_attempts.len(), 1);
+    }
+
+    #[test]
+    fn foreground_cycle_still_exhausts_one_finite_root_without_forwarding() {
+        let config = compile_yaml(
+            "log: {level: error}\nplugins:\n  - tag: unused\n    type: forward\n    args: {upstreams: [{addr: '127.0.0.1:15030'}]}\n  - tag: main\n    type: sequence\n    args:\n      - exec: goto $main\n  - tag: listener\n    type: udp_server\n    args: {entry: main, listen: '127.0.0.1:3099'}\n",
+        )
+        .unwrap();
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).unwrap();
+        let calls = Rc::new(Cell::new(0));
+        let result = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &query(99),
+            &MockExchange {
+                calls: calls.clone(),
+                response: Vec::new(),
+                fail: false,
+            },
+        );
+        validate_response(&result.response_wire).unwrap();
+        assert_eq!(result.response_wire[3] & 0x0f, super::SERVFAIL);
+        assert!(result.failure_provenance.is_some());
+        assert_eq!(calls.get(), 0);
+        assert!(cache.is_empty());
     }
 
     fn execute_observed<E: ExchangeExecutor + ?Sized>(
@@ -7718,6 +8234,34 @@ plugins:
     }
 
     #[test]
+    fn cached_entry_hints_keep_the_first_effective_route_label_and_no_v_flags() {
+        for upstream in [None, Some("ali-entry")] {
+            assert_eq!(
+                compute_effective_tag("白名单|订阅代理", upstream, None, None),
+                "白名单"
+            );
+            assert_eq!(
+                compute_effective_tag("订阅代理|白名单", upstream, None, None),
+                "订阅代理"
+            );
+            assert_eq!(
+                compute_effective_tag("记忆无V6|白名单|订阅直连", upstream, None, None),
+                "记忆无V6|白名单"
+            );
+        }
+        assert_eq!(
+            compute_effective_tag("订阅代理|白名单", Some("domestic"), None, None),
+            "白名单",
+            "a known group keeps route-specific priority"
+        );
+        assert_eq!(
+            compute_effective_tag("foo|bar", None, None, None),
+            "foo|bar",
+            "unknown user labels remain intact"
+        );
+    }
+
+    #[test]
     fn effective_tag_normalization_keeps_special_and_memory_precedence() {
         assert_eq!(
             compute_effective_tag(
@@ -7954,6 +8498,7 @@ plugins:
             refresh_environment: None,
             allow_empty_response: false,
             branch_id: None,
+            polls: Rc::default(),
         };
         let outcome = fallback_failure(&context, ExecutionState::new(header, question));
 
@@ -8032,6 +8577,7 @@ plugins:
                 refresh_environment: None,
                 allow_empty_response: true,
                 branch_id: None,
+                polls: Rc::default(),
             };
             let result = futures_like_block_on(super::run_query_policy(
                 successor,
