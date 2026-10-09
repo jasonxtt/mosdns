@@ -330,6 +330,9 @@ pub(crate) struct YamlDefaults {
     pub(crate) upstreams: BTreeMap<String, Vec<UpstreamEntry>>,
     /// The `enabled` of every `domain_output`.
     pub(crate) generation: BTreeMap<String, bool>,
+    /// The `aliapi` groups that name a plugin-level `proxy`: only their
+    /// entries can say `use_proxy`.
+    pub(crate) proxy_groups: std::collections::BTreeSet<String>,
 }
 
 /// What [`apply`] found: the report, the effective upstream lists in the UI
@@ -516,13 +519,20 @@ pub(super) fn apply(
             Some(value) => (value.addr.clone(), SETTINGS),
             None => (yaml, YAML),
         };
-        if addr.is_empty() {
+        // An empty proxy address means "no proxy": the reference's empty global
+        // `socks5` (the shipped default) is the same state.
+        if addr.is_empty() && kind != "socks5_proxy" {
             return Err(ConfigError::new(
                 format!("{path}.addr"),
                 "addr must be specified",
             ));
         }
-        validate(&addr).map_err(|reason| {
+        let checked = if addr.is_empty() {
+            Ok(())
+        } else {
+            validate(&addr)
+        };
+        checked.map_err(|reason| {
             if source == SETTINGS {
                 settings_error(&format!("{}.{tag}", section_name(kind)), reason.clone())
             } else {
@@ -548,14 +558,19 @@ pub(super) fn apply(
 
     for plugin in definitions.iter_mut() {
         match plugin.kind.as_str() {
-            "aliapi" => aliapi(
-                plugin,
-                settings,
-                &objects,
-                &mut report,
-                &mut upstreams,
-                &mut defaults.upstreams,
-            )?,
+            "aliapi" => {
+                if args_mut(plugin).is_some_and(|args| args.get("proxy").is_some()) {
+                    defaults.proxy_groups.insert(plugin.tag.clone());
+                }
+                aliapi(
+                    plugin,
+                    settings,
+                    &objects,
+                    &mut report,
+                    &mut upstreams,
+                    &mut defaults.upstreams,
+                )?;
+            }
             "sd_set_light" | "si_set" | "adguard_rule" => {
                 let path = format!("{}.args", plugin.source_path);
                 if let Some(args) = args_mut(plugin) {
@@ -811,10 +826,23 @@ fn resolve_items(
         }
         let name = string_arg(item, "tag").unwrap_or_default();
         let addr = string_arg(item, "addr").unwrap_or_default();
-        summary.push(if name.is_empty() {
-            addr.clone()
+        // `[proxy]` marks an entry that really connects through a proxy
+        // address (UDP never does).
+        let through = (!string_arg(item, "socks5").unwrap_or_default().is_empty()
+            || !proxies.plugin_socks5.is_empty())
+            && !addr.starts_with("udp://")
+            && addr.contains("://");
+        let mark = if through { " [proxy]" } else { "" };
+        let dial = string_arg(item, "dial_addr").unwrap_or_default();
+        let dial = if dial.is_empty() {
+            String::new()
         } else {
-            format!("{name}={addr}")
+            format!(" dial={dial}")
+        };
+        summary.push(if name.is_empty() {
+            format!("{addr}{dial}{mark}")
+        } else {
+            format!("{name}={addr}{dial}{mark}")
         });
         let proxied = own_proxy.is_some() || uses || literal || !proxies.plugin_socks5.is_empty();
         entries.push(raw_to_entry(item, proxied));

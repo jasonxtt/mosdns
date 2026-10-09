@@ -72,6 +72,8 @@ fn failure(error: ApplyFailure) -> Reply {
 fn entry_json(entry: &UpstreamEntry) -> serde_json::Value {
     let mut value = serde_json::to_value(entry).unwrap_or_default();
     if let Some(map) = value.as_object_mut() {
+        // The page's field is the reference name, `use_socks_proxy`.
+        map.remove("use_proxy");
         map.insert(
             "use_socks_proxy".to_owned(),
             serde_json::Value::Bool(entry.proxy_switch()),

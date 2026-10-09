@@ -88,7 +88,13 @@ M1-0 之前的读法如下：
 **M1-f1 已完成后端（`10-08-rust-native-m1-f1-typed-settings`）**：`socks5_proxy`/`ecs_address` 对象与 `$tag` 引用、`aliapi` 的 `proxy`/`use_proxy`、规则源 `proxy`、quick `ecs $ref`、
 `domain_output` 的 `enabled`；`webinfo/settings.json`（版本 1，只存差异）；生效配置函数、`check` 的 `EFFECTIVE` 输出与 `GET /api/v1/settings/effective`；设置变更经整代发布热生效（失败保留旧配置）；
 `/api/v1/upstream/{tags,config,runtime}`、`/api/v1/overrides`、`/api/v1/domain-generation` 在非托管模式下由设置层提供。契约见 [native-settings](contracts/native-settings.md)，记录见
-[validation-records/10-08-m1-f1](validation-records/10-08-m1-f1/README.md)。**仍待 M1-f2**：`config_rust` 配置包、WebUI 页面接线（重启提示等）、首次整链运行；托管模式下的上游覆盖留给 M1-e。
+[validation-records/10-08-m1-f1](validation-records/10-08-m1-f1/README.md)。
+
+**M1-f2 已完成（`10-09-rust-native-m1-f2-config-rust`，待规划会话确认与提交）**：原生配置包 `config_rust`（在 `file` 仓库 `mosdns/config/config_rust/`，**未提交**，附 `README-rust.md` 差异说明与等价性论证）、
+一次性迁移工具 `mosdns-settings-migrate`（`native-host` 内独立二进制，逻辑在 `settings_migrate.rs`，复现 Go 的 `use_socks_proxy` 推断与 `foreign`/`foreignecs` 全局代理回退，无法映射项写入报告并以退出码 1 提示）、
+WebUI 两套 shell 的设置页接线（上游页代理开关、覆盖页立即生效与“已修改/恢复默认”、替换规则面板在原生下隐藏；Go 路径不变）。
+附带的 Rust 改动：`socks5_proxy` 的 `addr` 可为空（= 不使用代理，用户 2026-10-09 决定）；设置版上游列表不再返回 `use_proxy` 字段；`unsupported_features` 在设置版上游页下不再列 `socks_proxy`；`check` 的 aliapi `EFFECTIVE` 值对真正走代理的条目加 ` [proxy]` 标记。
+记录见 [validation-records/10-09-m1-f2](validation-records/10-09-m1-f2/README.md)。**仍待**：首次整链运行与 Go 差分（E2E-1）；托管模式下的上游覆盖（M1-e）。
 
 ### M1-g 缓存放置规则与 ECS（**M1-b1 任务已处理**；被 M1-b1 暴露，用户 2026-10-08 决定）
 

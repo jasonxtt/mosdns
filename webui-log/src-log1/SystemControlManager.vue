@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../src/api/http'
 import UpstreamManager from '../src/components/UpstreamManager.vue'
 import { openConfirm } from '../src/utils/confirm'
+import { NATIVE_REPLACEMENTS_NOTE, settingsSources } from '../src/utils/nativeSettings'
 import SystemAuditCapacityPanel from '../src/components/system/SystemAuditCapacityPanel.vue'
 import SystemAppearancePanel from '../src/components/system/SystemAppearancePanel.vue'
 import SystemConfigManagePanel from '../src/components/system/SystemConfigManagePanel.vue'
@@ -80,6 +81,10 @@ const overrides = reactive({
   ecs: '',
   replacements: [],
 })
+// Native runtime: where each value comes from ({socks5, ecs}: 'yaml' | 'settings') and the saved values.
+const overrideSources = reactive({ socks5: '', ecs: '' })
+const overridesSaved = reactive({ socks5: '', ecs: '' })
+const nativeRuntime = computed(() => capabilityState.value?.kind === 'native')
 
 const switchLoading = reactive({})
 const switchStates = reactive({})
@@ -830,6 +835,18 @@ async function loadOverrides() {
   const data = await getJSON('/api/v1/overrides')
   overrides.socks5 = String(data?.socks5 || '')
   overrides.ecs = String(data?.ecs || '')
+  overridesSaved.socks5 = overrides.socks5
+  overridesSaved.ecs = overrides.ecs
+  if (nativeRuntime.value) {
+    try {
+      const marks = settingsSources(await getJSON('/api/v1/settings/effective'))
+      overrideSources.socks5 = marks.socks5
+      overrideSources.ecs = marks.ecs
+    } catch {
+      overrideSources.socks5 = ''
+      overrideSources.ecs = ''
+    }
+  }
   const source = Array.isArray(data?.replacements) ? data.replacements : []
   overrides.replacements = source.map((item) => ({
     original: String(item?.original || ''),
@@ -852,11 +869,42 @@ function removeReplacement(index) {
   overrides.replacements.splice(index, 1)
 }
 
+async function restoreOverride(field) {
+  if (!supportsOperation('system.global_overrides') || !nativeRuntime.value) return
+  clearMessage()
+  applyingOverrides.value = true
+  try {
+    // An empty value returns that field to the configuration file's value.
+    await postJSON('/api/v1/overrides', {
+      socks5: field === 'socks5' ? '' : overridesSaved.socks5,
+      ecs: field === 'ecs' ? '' : overridesSaved.ecs,
+      replacements: [],
+    })
+    setSuccess('已恢复为配置文件里的值')
+    await loadOverrides()
+  } catch (error) {
+    setError(`恢复默认失败: ${error.message}`)
+  } finally {
+    applyingOverrides.value = false
+  }
+}
+
 async function saveOverrides() {
   if (!supportsOperation('system.global_overrides')) return
   clearMessage()
   applyingOverrides.value = true
   try {
+    if (nativeRuntime.value) {
+      // Applied at once; replacements do not exist here.
+      await postJSON('/api/v1/overrides', {
+        socks5: String(overrides.socks5 || '').trim(),
+        ecs: String(overrides.ecs || '').trim(),
+        replacements: [],
+      })
+      setSuccess('覆盖配置已保存并立即生效')
+      await loadOverrides()
+      return
+    }
     const replacements = overrides.replacements
       .map((rule) => ({
         original: String(rule.original || '').trim(),
@@ -1892,8 +1940,11 @@ onBeforeUnmount(() => {
 <SystemOverridesPanel
           :applying-overrides="applyingOverrides"
           :overrides="overrides"
+          :native="nativeRuntime"
+          :sources="overrideSources"
           @load-overrides="loadOverrides"
           @save-overrides="saveOverrides"
+          @restore-override="restoreOverride"
         />
 </CapabilityBoundary>
 
@@ -1905,7 +1956,8 @@ onBeforeUnmount(() => {
 </CapabilityBoundary>
       </div>
 
-      <div class="log1-module-toggle-row log1-module-toggle-row-center">
+      <p v-if="nativeRuntime && supportsOperation('system.global_overrides')" class="muted" data-native-replacements-note>{{ NATIVE_REPLACEMENTS_NOTE }}</p>
+      <div v-if="!nativeRuntime" class="log1-module-toggle-row log1-module-toggle-row-center">
         <button
           class="log1-module-toggle log1-module-toggle-compact"
           :class="{ active: expandedAdvanced.replacementRules }"
@@ -1919,7 +1971,7 @@ onBeforeUnmount(() => {
 
       <CapabilityBoundary operation="system.global_overrides">
 <SystemReplacementRulesPanel
-        v-if="expandedAdvanced.replacementRules"
+        v-if="expandedAdvanced.replacementRules && !nativeRuntime"
         :applying-overrides="applyingOverrides"
         :overrides="overrides"
         @load-overrides="loadOverrides"

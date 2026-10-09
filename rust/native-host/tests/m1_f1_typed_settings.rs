@@ -460,7 +460,7 @@ fn references_overlay_and_sources_are_reported_and_resolved() {
     );
     let aliapi = find("aliapi");
     assert_eq!(aliapi.source, "settings");
-    assert_eq!(aliapi.value, "x=tcp://127.0.0.1:5353");
+    assert_eq!(aliapi.value, "x=tcp://127.0.0.1:5353 [proxy]");
     let definition = config
         .forward_definitions
         .iter()
@@ -1009,6 +1009,16 @@ fn the_capability_matrix_lists_what_the_configuration_can_do() {
         }
         assert_eq!(operations["groups.upstreams"]["supported"], false);
         assert_eq!(capabilities["endpoints"]["upstream"]["config_post"], true);
+        let unsupported = capabilities["unsupported_features"].as_array().unwrap();
+        assert!(
+            !unsupported.iter().any(|name| name == "socks_proxy"),
+            "the settings-backed page carries the proxy switch: {unsupported:?}"
+        );
+        assert!(
+            unsupported
+                .iter()
+                .any(|name| name == "so_mark" || name == "socket_marks")
+        );
         shutdown.cancel();
         task.await.unwrap();
     });
@@ -1034,6 +1044,30 @@ fn the_capability_matrix_lists_what_the_configuration_can_do() {
         ] {
             assert_eq!(operations[id]["supported"], false, "{id}");
         }
+        let unsupported = capabilities["unsupported_features"].as_array().unwrap();
+        assert!(unsupported.iter().any(|name| name == "socks_proxy"));
+        shutdown.cancel();
+        task.await.unwrap();
+    });
+    // A group without a plugin-level proxy cannot take `use_proxy`: the page
+    // is not offered the switch.
+    let noproxy = Tree::new("capabilities-noproxy");
+    let ports = self::ports();
+    config(
+        &noproxy,
+        &ports,
+        &objects("127.0.0.1:9", &udp_entries(&first)).replace("      proxy: $main_proxy\n", ""),
+    );
+    let host = self::host(&noproxy);
+    host.block_on(async {
+        let (shutdown, task) = serve(&host).await;
+        let capabilities = json(&api(ports.api, "GET", "/api/v1/capabilities", "").await.body);
+        assert_eq!(
+            capabilities["ui_operations"]["upstreams.manage"]["supported"],
+            true
+        );
+        let unsupported = capabilities["unsupported_features"].as_array().unwrap();
+        assert!(unsupported.iter().any(|name| name == "socks_proxy"));
         shutdown.cancel();
         task.await.unwrap();
     });
@@ -1054,7 +1088,7 @@ fn the_fixture_in_the_new_syntax_checks_clean_with_effective_values_and_sources(
         "EFFECTIVE socks5_proxy main_proxy addr=192.0.2.9:7890 source=settings",
         "EFFECTIVE ecs_address client_ecs addr=2001:db8:ec5::1 source=yaml",
         "EFFECTIVE aliapi domestic upstreams=ali=udp://223.6.6.6 source=settings",
-        "EFFECTIVE aliapi foreign upstreams=cf=tcp://1.1.1.1, g=tls://dns.google, direct=udp://9.9.9.9 source=yaml",
+        "EFFECTIVE aliapi foreign upstreams=cf=tcp://1.1.1.1 [proxy], g=tls://dns.google dial=8.8.8.8 [proxy], direct=udp://9.9.9.9 source=yaml",
         "EFFECTIVE domain_output my_realiplist enabled=false source=settings",
     ] {
         assert!(text.contains(line), "{line}\n{text}");
@@ -1254,6 +1288,10 @@ fn only_differences_are_stored() {
     host.block_on(async {
         let (shutdown, task) = serve(&host).await;
         let original = api(ports.api, "GET", "/api/v1/upstream/config", "").await.body;
+        // The page's entry shape: the reference field names only.
+        let first = &json(&original)["foreign"][0];
+        assert!(first.get("use_proxy").is_none(), "{first}");
+        assert!(first["use_socks_proxy"].is_boolean(), "{first}");
         let changed = format!(
             r#"{{"plugin_tag":"foreign","upstreams":[{{"tag":"b","enabled":true,"protocol":"udp","addr":"127.0.0.1:{}"}}]}}"#,
             second.port
@@ -1388,4 +1426,66 @@ fn managed_mode_does_not_serve_the_settings_routes() {
         shutdown.cancel();
         task.await.unwrap();
     });
+}
+
+#[test]
+fn an_empty_proxy_address_means_no_proxy() {
+    let tree = Tree::new("empty-proxy");
+    let ports = ports();
+    let stub = Stub::start(1, Duration::ZERO);
+    config(
+        &tree,
+        &ports,
+        &objects(
+            "",
+            &format!(
+                "        - {{tag: a, addr: \"tcp://127.0.0.1:{}\", use_proxy: true}}",
+                stub.port
+            ),
+        ),
+    );
+    let compiled = compile(&tree).expect("an empty proxy address compiles");
+    let proxy = compiled
+        .settings_report()
+        .iter()
+        .find(|item| item.kind == "socks5_proxy")
+        .unwrap()
+        .clone();
+    assert_eq!((proxy.value.as_str(), proxy.source), ("", "yaml"));
+    let definition = compiled
+        .forward_definitions
+        .iter()
+        .find(|definition| definition.tag == "foreign")
+        .unwrap();
+    assert_eq!(
+        definition.entries[0].target.socks5.as_deref().unwrap_or(""),
+        ""
+    );
+    // A settings entry may fill it in, and may go back to empty.
+    tree.write(
+        "webinfo/settings.json",
+        r#"{"version":1,"proxies":{"main_proxy":{"addr":"127.0.0.1:9"}}}"#,
+    );
+    let compiled = compile(&tree).unwrap();
+    let proxy = compiled
+        .settings_report()
+        .iter()
+        .find(|item| item.kind == "socks5_proxy")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (proxy.value.as_str(), proxy.source),
+        ("127.0.0.1:9", "settings")
+    );
+    tree.write(
+        "webinfo/settings.json",
+        r#"{"version":1,"proxies":{"main_proxy":{"addr":""}}}"#,
+    );
+    assert!(compile(&tree).is_ok());
+    // A bad address is still refused; the other object kind still needs one.
+    tree.write(
+        "webinfo/settings.json",
+        r#"{"version":1,"proxies":{"main_proxy":{"addr":"nope"}}}"#,
+    );
+    assert!(compile(&tree).err().unwrap().contains("host:port"));
 }

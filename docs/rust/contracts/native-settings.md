@@ -9,10 +9,11 @@ both, and hot apply of a change. The reference host's `upstream_overrides.json`,
 
 ```yaml
 - tag: main_proxy
-  type: socks5_proxy        # args.addr: host:port, nonzero port, no authentication
+  type: socks5_proxy        # args.addr: host:port, nonzero port, no authentication; empty or absent = no proxy (M1-f2)
 - tag: client_ecs
   type: ecs_address         # args.addr: an IP, optionally /mask (the mask is ignored, as in quick `ecs`)
 ```
+An empty `socks5_proxy` address is the "no proxy" state (the reference's empty global `socks5`): everything that references it connects directly, `use_proxy: true` included, and the overrides page shows `socks5: ""`. `ecs_address` always needs an address.
 Both are non-executable (`exec: $main_proxy` is an error). References are `$tag` strings; an unknown tag or a tag of the wrong kind is a load error naming the YAML path.
 
 - `aliapi`: plugin `proxy: $main_proxy` is the default proxy of entries that say `use_proxy: true` (default false); an entry may instead say `proxy: $other`. `use_proxy` without a plugin
@@ -66,6 +67,18 @@ query uses the new one. The candidate compile runs on the DNS thread (its cost w
   master switch; the four others are the `domain_output` plugins tagged `my_realiplist`, `my_fakeiplist`, `my_nov4list`, `my_nov6list` (the WebUI is bound to these tags). A list whose switch went from
   on to off (every list when the master goes off) is flushed after the apply; if a flush fails the answer is 500 `settings were applied, but flushing failed: ...` (the settings stay applied).
 - Capabilities: `upstreams.manage` (an `aliapi` exists, file-backed), `system.global_overrides` (a `socks5_proxy` or `ecs_address`), `system.domain_generation` (a `domain_output`).
+
+## Migration from the reference override files (M1-f2)
+
+`mosdns-settings-migrate --from <reference dir> [-d <root>] -c <config> --out <dir>` reads `config_overrides.json`, `upstream_overrides.json` and `domain_generation_settings.json`
+(in `webinfo/`, `state/` or the directory itself), compiles the native configuration to get the YAML defaults, and writes `settings.json` (differences only) and `migration-report.txt` to `--out`.
+It never changes its inputs or the native root. Exit code 0: everything mapped; 1: the report lists items that need a person (enabled signed-API entries, `so_mark`/`bind_to_device`/pipeline/HTTP3/QUIC/idle-timeout entries,
+an entry's own `socks5` that differs from the global one, `replacements`, tags the configuration does not have, an enabled entry without a tag); 2: usage, I/O, parse or the migrated settings do not load.
+The reference's rules are reproduced: `use_socks_proxy` unset means "TCP-class protocol and (own address or a `foreign`/`foreignecs` group)"; only those two groups fall back to the global address; UDP never uses a proxy.
+They become explicit `use_proxy` values. A repeated upstream tag in a later group is renamed `<tag>-<group>` (upstream tags are unique here) and reported.
+
+The GET entries of the settings-backed upstream page carry the reference field `use_socks_proxy` only (no `use_proxy`); `unsupported_features` omits `socks_proxy` there.
+`check` marks an `aliapi` entry that really connects through a proxy address with ` [proxy]` in its `EFFECTIVE` value.
 
 ## Known differences from the reference
 

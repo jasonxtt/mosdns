@@ -29,6 +29,8 @@ mod rule_download;
 mod rule_sources;
 mod runtime_snapshot;
 mod settings_api;
+#[doc(hidden)]
+pub mod settings_migrate;
 mod special_groups;
 mod static_ui;
 mod switch;

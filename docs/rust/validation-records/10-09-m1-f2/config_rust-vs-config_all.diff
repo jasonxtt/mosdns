@@ -1,0 +1,168 @@
+Only in config_all: .DS_Store
+diff --color -ru config_all/config_custom.yaml config_rust/config_custom.yaml
+--- config_all/config_custom.yaml	2026-08-13 23:52:25
++++ config_rust/config_custom.yaml	2026-10-09 00:27:43
+@@ -8,6 +8,7 @@
+ 
+ #子配置，不要调整顺序
+ include:
++  - "sub_config/settings.yaml"                  #可调整项对象（代理、ECS），原生版新增
+   - "sub_config/adguard.yaml"                   #Adguard插件
+   - "sub_config/domain_output.yaml"             #域名规则生成输出插件定义
+   - "sub_config/rule_set.yaml"                  #数据插件定义
+diff --color -ru config_all/sub_config/adguard.yaml config_rust/sub_config/adguard.yaml
+--- config_all/sub_config/adguard.yaml	2026-08-13 23:52:25
++++ config_rust/sub_config/adguard.yaml	2026-10-09 00:27:43
+@@ -3,4 +3,4 @@
+     type: adguard_rule
+     args:
+       dir: "adguard/"
+-      socks5: ""
+\ No newline at end of file
++      proxy: $main_proxy
+\ No newline at end of file
+diff --color -ru config_all/sub_config/forward_1.yaml config_rust/sub_config/forward_1.yaml
+--- config_all/sub_config/forward_1.yaml	2026-08-13 23:52:25
++++ config_rust/sub_config/forward_1.yaml	2026-10-09 00:28:11
+@@ -5,16 +5,20 @@
+     type: aliapi
+     args:
+       concurrent: 1
++      proxy: $main_proxy                        #本组条目可用 use_proxy: true 选择走代理（默认都不走）
+       upstreams:
+-        - addr: "udp://127.0.0.1:7874"
++        - tag: sing-box
++          addr: "udp://127.0.0.1:6666"
+ 
+ #向mihomo请求国内的fakeip
+   - tag: cnfake
+     type: aliapi
+     args:
+       concurrent: 1
++      proxy: $main_proxy                        #本组条目可用 use_proxy: true 选择走代理（默认都不走）
+       upstreams:
+-        - addr: "udp://127.0.0.1:1053"
++        - tag: cnfake
++          addr: "udp://127.0.0.1:1053"
+ 
+ #缓存序列-国内域名realip
+   - tag: sequence_local_exit
+diff --color -ru config_all/sub_config/forward_local.yaml config_rust/sub_config/forward_local.yaml
+--- config_all/sub_config/forward_local.yaml	2026-08-13 23:52:25
++++ config_rust/sub_config/forward_local.yaml	2026-10-09 00:27:43
+@@ -3,8 +3,13 @@
+   - tag: domestic
+     type: aliapi
+     args:
+-      concurrent: 3
++      concurrent: 2                             #与 Go 默认包等效：webinfo/upstream_overrides.json 启用 2 个上游，Go 按启用数重算为 2；原生不重算，见 README-rust.md
++      proxy: $main_proxy                        #本组条目可用 use_proxy: true 选择走代理（默认都不走）
+       upstreams:
+-        - addr: "223.5.5.5"
+-        - addr: "223.6.6.6"
+-        - addr: "114.114.114.114"
++        - tag: 阿里UDP
++          addr: "udp://223.5.5.5"
++        - tag: 阿里DOH
++          addr: "https://dns.alidns.com/dns-query"
++          dial_addr: "223.5.5.5"
++        #已预置但默认停用的上游（WebUI 上游页可重新启用，保存后写入 webinfo/settings.json）：
++        #阿里TCP tcp://223.5.5.5 / 阿里DOT tls://223.5.5.5 / 运营商 udp://114.114.114.114
+diff --color -ru config_all/sub_config/forward_nocn.yaml config_rust/sub_config/forward_nocn.yaml
+--- config_all/sub_config/forward_nocn.yaml	2026-08-13 23:52:25
++++ config_rust/sub_config/forward_nocn.yaml	2026-10-09 00:27:43
+@@ -5,12 +5,15 @@
+     type: aliapi
+     args:
+       concurrent: 2
++      proxy: $main_proxy                        #main_proxy 地址为空时直连；填写后下面 use_proxy: true 的条目经它连接
+       upstreams:
+-        - addr: "https://1.1.1.1/dns-query"
+-          socks5: ""
+-        - addr: "https://8.8.8.8/dns-query"
+-          socks5: ""
+-          upstream_query_timeout: 1000
++        - tag: google
++          addr: "https://dns.google/dns-query"
++          dial_addr: "8.8.8.8"
++          use_proxy: true
++        - tag: cloudflare
++          addr: "https://1.1.1.1/dns-query"
++          use_proxy: true
+ 
+ #国内域名 内部使用
+   - tag: sequence_google_in
+diff --color -ru config_all/sub_config/forward_nocn_ecs.yaml config_rust/sub_config/forward_nocn_ecs.yaml
+--- config_all/sub_config/forward_nocn_ecs.yaml	2026-08-13 23:52:25
++++ config_rust/sub_config/forward_nocn_ecs.yaml	2026-10-09 00:29:15
+@@ -5,14 +5,17 @@
+     type: aliapi
+     args:
+       concurrent: 1
++      proxy: $main_proxy
+       upstreams:
+-        - addr: "https://8.8.8.8/dns-query"
+-          socks5: "127.0.0.1:7891"
++        - tag: google-foreignecs                #原生要求上游标签全局唯一，foreign 组已占用 google
++          addr: "https://dns.google/dns-query"
++          dial_addr: "8.8.8.8"
++          use_proxy: true
+ 
+   - tag: sequence_google_node
+     type: sequence
+     args:
+-      - exec: ecs 2408:8888::8
++      - exec: ecs $client_ecs
+       - exec: $cache_google_node                    #定义: sub_config/cache.yaml:44
+       - exec: flow_setter sequence=sequence_google_node upstream=foreignecs
+       - exec: $foreignecs                           #定义: sub_config/forward_nocn_ecs.yaml:4
+diff --color -ru config_all/sub_config/rule_set.yaml config_rust/sub_config/rule_set.yaml
+--- config_all/sub_config/rule_set.yaml	2026-08-13 23:52:25
++++ config_rust/sub_config/rule_set.yaml	2026-10-09 00:27:43
+@@ -18,14 +18,14 @@
+   - tag: cusnocn
+     type: sd_set_light    
+     args:
+-      socks5: "" 
++      proxy: $main_proxy 
+       local_config: "srs/cusnocn.json" 
+ 
+ #自定义国内域名列表
+   - tag: cuscn
+     type: sd_set_light    
+     args:
+-      socks5: "" 
++      proxy: $main_proxy 
+       local_config: "srs/cuscn.json" 
+ 
+ #生成的realip规则
+@@ -81,14 +81,14 @@
+   - tag: geosite_cn
+     type: sd_set_light    
+     args:
+-      socks5: "" 
++      proxy: $main_proxy 
+       local_config: "srs/geositecn.json" 
+ 
+ #中国IP列表
+   - tag: geoip_cn
+     type: si_set    
+     args:
+-      socks5: "" 
++      proxy: $main_proxy 
+       local_config: "srs/geoipcn.json" 
+ 
+ #需要代理的客户端IP列表
+@@ -102,7 +102,7 @@
+   - tag: geosite_no_cn
+     type: sd_set_light    
+     args:
+-      socks5: "" 
++      proxy: $main_proxy 
+       local_config: "srs/geositenocn.json" 
+ 
+ #自定义白名单域名列表
+Only in config_rust/sub_config: settings.yaml
+Only in config_all/webinfo: .DS_Store
+Only in config_all/webinfo: config_overrides.json
+Only in config_all/webinfo: upstream_overrides.json
