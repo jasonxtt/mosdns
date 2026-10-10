@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::cache::{CacheAdapterError, CacheCatalog, CacheClock};
 use mosdns_dns_core::parse_query;
-use mosdns_upstream_core::secure::{DohUpstream, DotUpstream};
+use mosdns_upstream_core::secure::DotUpstream;
 use mosdns_upstream_core::{
     AddressFamily, BootstrapEndpoint, BootstrapResolver, DohEndpoint, DohReuseOwner, DotEndpoint,
     Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, ResolutionMode, ResolutionPolicy,
@@ -859,7 +859,6 @@ enum ForwardOwner {
     },
     Doh {
         reuse: DohReuseOwner,
-        fallback: DohUpstream,
     },
 }
 
@@ -908,22 +907,14 @@ impl ForwardOwner {
                     result => result,
                 }
             }
-            Self::Doh { reuse, fallback } => {
-                // Keep secure busy admission identical to the plain TCP rule:
-                // no retry is permitted after any request-side effect.
-                let result = reuse
+            Self::Doh { reuse } => {
+                // DoH owns bounded stream/pool admission, including waits.
+                // Busy must not escape into TLS-per-request fallback.
+                reuse
                     .exchange(request, context.clone())
                     .await
                     .map(secure_response)
-                    .map_err(secure_error);
-                match result {
-                    Err(UpstreamError::Backpressure(SideEffectState::NotSent)) => fallback
-                        .exchange(request, context)
-                        .await
-                        .map(secure_response)
-                        .map_err(secure_error),
-                    result => result,
-                }
+                    .map_err(secure_error)
             }
         }
     }
@@ -939,8 +930,8 @@ impl ForwardOwner {
             Self::Dot { reuse, fallback } => {
                 let _ = tokio::join!(reuse.close(), fallback.close());
             }
-            Self::Doh { reuse, fallback } => {
-                let _ = tokio::join!(reuse.close(), fallback.close());
+            Self::Doh { reuse } => {
+                let _ = reuse.close().await;
             }
         }
     }
@@ -1711,10 +1702,8 @@ fn build_owner(
                 endpoint = endpoint.with_socks5(route);
             }
             let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
-            let fallback = DohUpstream::new(endpoint.clone(), policy.clone())
-                .map_err(|error| error.to_string())?;
             let reuse = DohReuseOwner::new(endpoint, policy).map_err(|error| error.to_string())?;
-            Ok(ForwardOwner::Doh { reuse, fallback })
+            Ok(ForwardOwner::Doh { reuse })
         }
     }
 }

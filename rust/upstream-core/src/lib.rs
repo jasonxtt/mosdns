@@ -25,8 +25,9 @@ pub use resolver::{
 // pool error plus the confirmed task-local bound constants. No existing item
 // changes and nothing else is re-exported from the module.
 pub use reuse::{
-    DohReuseOwner, IDLE_TIMEOUT, MAX_IDLE_PER_KEY, MAX_IDLE_TOTAL, MAX_PENDING_PER_CONNECTION,
-    PoolError, ReuseKey, ReuseOwner, SecureKey, SecureKind, SecureReuseOwner,
+    DohReuseOwner, DohReuseStats, IDLE_TIMEOUT, MAX_DOH_CALLS, MAX_DOH_CONNECTIONS,
+    MAX_DOH_STREAMS, MAX_IDLE_PER_KEY, MAX_IDLE_TOTAL, MAX_PENDING_PER_CONNECTION, PoolError,
+    ReuseKey, ReuseOwner, SecureKey, SecureKind, SecureReuseOwner,
 };
 pub use secure::{
     DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,

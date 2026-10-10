@@ -77,6 +77,16 @@ python3 -m unittest discover -s tools/e2e-1
 Do not publish private corpus/oracle/requests/mock logs/full metrics/configs.
 Public summaries use only numeric statistics, hashes and source identities.
 
+5D-fix-A uses `fix_a_matrix.py --root ... --freeze-record ...`: F followed by
+normal20/100/500, three Go/native pairs in G/N,N/G,G/N order, original timing
+and byte-identical frozen JSON. It pins tools, binaries and both oracles before
+the first sample and retains every attempt; no automatic retry/resume.
+`approved_cells.py` prospectively extends only the exact462 cells accepted by
+the user after the 5D-1 Claude review. It checks all three prior probes against
+the immutable ASCII uppercase `full:` no-v4/no-v6 rules; candidate replies are
+not an input. The earlier single approved AAAA cell remains pinned. Unchanged
+cells and Go oracle keep their original strict full-section comparison.
+
 Scenario F (user frozen2026-10-09) adds `--scenario-f --rates 100` to run.py.
 In disposable roots only, it adds an identical reserved-suffix foreign branch
 after `$top_domains` (after the production outer cache), before A/AAAA routing;

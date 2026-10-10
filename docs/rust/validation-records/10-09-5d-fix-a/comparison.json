@@ -1,0 +1,146 @@
+[
+  {
+    "scenario": "f",
+    "stage": "q100",
+    "native_median_ms": {
+      "p95": 84.016579,
+      "p99": 84.914983
+    },
+    "ceilings_ms": {
+      "p95": 92.401,
+      "p99": 93.339
+    },
+    "latency_pass": {
+      "p95": true,
+      "p99": true
+    },
+    "correctness_each_repeat_pass": true,
+    "coverage_each_repeat_pass": true,
+    "wrong_dns": 0,
+    "cpu_go_median_us": 392.0000000000001,
+    "cpu_native_us": [
+      336.00000000000006,
+      416.0,
+      464.0000000000001
+    ],
+    "profiling_triggered_repetitions": [],
+    "rss_native_kib": [
+      56040,
+      58364,
+      55820
+    ],
+    "rss_go_kib": [
+      184092,
+      193832,
+      187492
+    ]
+  },
+  {
+    "scenario": "normal",
+    "stage": "q20",
+    "native_median_ms": {
+      "p95": 13.109176,
+      "p99": 13.793982
+    },
+    "ceilings_ms": {
+      "p95": 14.025,
+      "p99": 15.168
+    },
+    "latency_pass": {
+      "p95": true,
+      "p99": true
+    },
+    "correctness_each_repeat_pass": true,
+    "coverage_each_repeat_pass": true,
+    "wrong_dns": 0,
+    "cpu_go_median_us": 379.9999999999999,
+    "cpu_native_us": [
+      439.99999999999994,
+      419.99999999999994,
+      340.00000000000006
+    ],
+    "profiling_triggered_repetitions": [],
+    "rss_native_kib": [
+      44880,
+      44652,
+      44588
+    ],
+    "rss_go_kib": [
+      197276,
+      199212,
+      178656
+    ]
+  },
+  {
+    "scenario": "normal",
+    "stage": "q100",
+    "native_median_ms": {
+      "p95": 11.995798,
+      "p99": 13.060359
+    },
+    "ceilings_ms": {
+      "p95": 13.853,
+      "p99": 15.006
+    },
+    "latency_pass": {
+      "p95": true,
+      "p99": true
+    },
+    "correctness_each_repeat_pass": true,
+    "coverage_each_repeat_pass": true,
+    "wrong_dns": 0,
+    "cpu_go_median_us": 252.00000000000006,
+    "cpu_native_us": [
+      288.0,
+      212.0,
+      200.0
+    ],
+    "profiling_triggered_repetitions": [],
+    "rss_native_kib": [
+      47116,
+      47220,
+      47260
+    ],
+    "rss_go_kib": [
+      199352,
+      203808,
+      180872
+    ]
+  },
+  {
+    "scenario": "normal",
+    "stage": "q500",
+    "native_median_ms": {
+      "p95": 11.163289,
+      "p99": 12.495924
+    },
+    "ceilings_ms": {
+      "p95": 12.333,
+      "p99": 13.866
+    },
+    "latency_pass": {
+      "p95": true,
+      "p99": true
+    },
+    "correctness_each_repeat_pass": true,
+    "coverage_each_repeat_pass": true,
+    "wrong_dns": 0,
+    "cpu_go_median_us": 137.6,
+    "cpu_native_us": [
+      146.41171293703496,
+      99.20000000000002,
+      138.4
+    ],
+    "profiling_triggered_repetitions": [],
+    "rss_native_kib": [
+      58820,
+      58536,
+      58896
+    ],
+    "rss_go_kib": [
+      201956,
+      207984,
+      167004
+    ]
+  }
+]
