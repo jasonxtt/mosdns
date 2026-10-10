@@ -809,7 +809,7 @@ async fn serve_doh_h2(
     let _ = connection.accept().await;
 }
 
-async fn serve_doh_h2_busy(
+async fn serve_doh_h2_concurrent(
     listener: std::net::TcpListener,
     config: std::sync::Arc<rustls::ServerConfig>,
     first_arrived: std::sync::Arc<tokio::sync::Notify>,
@@ -828,7 +828,7 @@ async fn serve_doh_h2_busy(
     let Some(Ok((first_request, mut first_respond))) = first_connection.accept().await else {
         panic!("first DoH H2 request was not received")
     };
-    let _first_target = first_request
+    let first_target = first_request
         .uri()
         .path_and_query()
         .unwrap()
@@ -836,13 +836,14 @@ async fn serve_doh_h2_busy(
         .to_owned();
     first_arrived.notify_one();
 
-    let (stream, _) = listener.accept().await.unwrap();
-    let tls = TlsAcceptor::from(config).accept(stream).await.unwrap();
-    let mut second_connection = server::handshake(tls).await.unwrap();
-    let Some(Ok((_second_request, mut second_respond))) = second_connection.accept().await else {
+    let next = tokio::select! {
+        request = first_connection.accept() => request,
+        unexpected = listener.accept() => panic!("h2 concurrency must reuse the authenticated connection: {unexpected:?}"),
+    };
+    let Some(Ok((second_request, mut second_respond))) = next else {
         panic!("second DoH H2 request was not received")
     };
-    let response = answer_ip(query(), [192, 0, 2, 61]);
+    let response = answer_ip(doh_query(&first_target), [192, 0, 2, 61]);
     let head = http::Response::builder()
         .status(200)
         .header("content-type", "application/dns-message")
@@ -851,7 +852,10 @@ async fn serve_doh_h2_busy(
     let mut send = first_respond.send_response(head, false).unwrap();
     send.send_data(Bytes::from(response), true).unwrap();
 
-    let response = answer_ip(query(), [192, 0, 2, 60]);
+    let response = answer_ip(
+        doh_query(second_request.uri().path_and_query().unwrap().as_str()),
+        [192, 0, 2, 60],
+    );
     let head = http::Response::builder()
         .status(200)
         .header("content-type", "application/dns-message")
@@ -859,7 +863,7 @@ async fn serve_doh_h2_busy(
         .unwrap();
     let mut send = second_respond.send_response(head, false).unwrap();
     send.send_data(Bytes::from(response), true).unwrap();
-    let _ = tokio::join!(first_connection.accept(), second_connection.accept());
+    let _ = first_connection.accept().await;
 }
 
 #[test]
@@ -926,7 +930,7 @@ fn native_secure_forwarding_proves_dot_and_doh_h1_h2_with_synthetic_ca() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh() {
+fn secure_concurrency_preserves_dot_fresh_h1_pool_and_h2_streams() {
     use mosdns_native_host::{HostAssembly, HostOptions};
     use mosdns_upstream_core::TransportCancellation;
     use std::time::{Duration, Instant};
@@ -961,7 +965,7 @@ fn secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh() {
                     config,
                     first_arrived.clone(),
                 )),
-                "h2" => tokio::task::spawn_local(serve_doh_h2_busy(
+                "h2" => tokio::task::spawn_local(serve_doh_h2_concurrent(
                     listener,
                     config,
                     first_arrived.clone(),
@@ -994,8 +998,6 @@ fn secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh() {
                 "protocol={protocol}, second={:?}",
                 second.as_ref().err()
             );
-            fixture_task.await.unwrap();
-
             let bound = host.bind_host().await.unwrap();
             let shutdown = TransportCancellation::new();
             let service = tokio::task::spawn_local(bound.serve(shutdown.clone()));
@@ -1004,6 +1006,12 @@ fn secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh() {
                 .await
                 .expect("secure owner close must drain")
                 .unwrap()
+                .unwrap();
+            // H2 stays pooled after either exchange; close the parent before
+            // waiting for the peer's connection driver to finish.
+            tokio::time::timeout(Duration::from_secs(3), fixture_task)
+                .await
+                .expect("secure peer must exit after owner drain")
                 .unwrap();
         });
     }

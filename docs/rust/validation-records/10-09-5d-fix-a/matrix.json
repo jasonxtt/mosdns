@@ -1,0 +1,237 @@
+{
+  "freeze_sha256": "afe441e906ab0ca0d0ffad2c5d36c854c2d61a5725b79608e70f54d6cb8c70a9",
+  "hashes": {
+    "/root/5dfixa-20261009/source/tools/5d-1/load.py": "7c8f05e004b13a2cfe390f7c90132a71460a6437513a30d52e43f0ace63c2154",
+    "/root/5dfixa-20261009/source/tools/5d-1/run.py": "e401596154af245fd565c32a9cbc17800db4cb5987887dbbf48f949b7b1ed18b",
+    "/root/5dfixa-20261009/source/tools/5d-1/scenario_f.py": "90be1bffa3b2a59e847613f0262a65fa362c8151ae7c191da9df77dfe94b1394",
+    "/root/5dfixa-20261009/source/tools/5d-1/fix_a_matrix.py": "7968a2bfd420cd634090fd9fe27c1f9519233ab7e2524dd6b7c98a3ee0377a1d",
+    "/root/5dfixa-20261009/source/tools/e2e-1/prepare.py": "160009a015c5a718702ae4d89dfa7ceec54ecca1c8bc9781aa0dd997d183dcf3",
+    "/root/5dfixa-20261009/source/tools/e2e-1/mock.py": "d4a1430062ea6963a44e88743d302612bd8126288d792a3d697cc1556419bd07",
+    "/root/5dfixa-20261009/source/tools/e2e-1/dnswire.py": "26a7b5adec73c1ce1cfbd8372af418a938acff51d1f51d29f002b68208f1e554",
+    "/root/5dfixa-20261009/mosdns-go": "eeb89923453d955d4783f380ca203ac64ee387fa5e2ff50dee8bd6b3b05591fc",
+    "/root/5dfixa-20261009/mosdns-native": "663662a0951dd9be0e2e763acf15fa363b88afa261eb81b5ec78596098ef4a3d",
+    "/root/5dfixa-20261009/prepared-final/weighted-corpus.json": "ed509c7dbfd0038f38b58b03dd37614296fa8170a8058f7af0a01828a18f1080",
+    "/root/5dfixa-20261009/prepared-final/oracle.json": "f9d680770bbcb3313b510bf57a86395ac67ceda8950493e221af4d924f070c3f",
+    "/root/5dfixa-20261009/prepared-final/native-oracle.json": "4c5321f4eddae70dd4e0dc9ede3baa9b25eee0110228ebce587237bdf25fd957"
+  },
+  "plan": [
+    {
+      "name": "go-f-r1",
+      "role": "go",
+      "scenario": "f",
+      "seed": 501
+    },
+    {
+      "name": "native-f-r1",
+      "role": "native",
+      "scenario": "f",
+      "seed": 501
+    },
+    {
+      "name": "go-normal-r1",
+      "role": "go",
+      "scenario": "normal",
+      "seed": 501
+    },
+    {
+      "name": "native-normal-r1",
+      "role": "native",
+      "scenario": "normal",
+      "seed": 501
+    },
+    {
+      "name": "native-f-r2",
+      "role": "native",
+      "scenario": "f",
+      "seed": 502
+    },
+    {
+      "name": "go-f-r2",
+      "role": "go",
+      "scenario": "f",
+      "seed": 502
+    },
+    {
+      "name": "native-normal-r2",
+      "role": "native",
+      "scenario": "normal",
+      "seed": 502
+    },
+    {
+      "name": "go-normal-r2",
+      "role": "go",
+      "scenario": "normal",
+      "seed": 502
+    },
+    {
+      "name": "go-f-r3",
+      "role": "go",
+      "scenario": "f",
+      "seed": 503
+    },
+    {
+      "name": "native-f-r3",
+      "role": "native",
+      "scenario": "f",
+      "seed": 503
+    },
+    {
+      "name": "go-normal-r3",
+      "role": "go",
+      "scenario": "normal",
+      "seed": 503
+    },
+    {
+      "name": "native-normal-r3",
+      "role": "native",
+      "scenario": "normal",
+      "seed": 503
+    }
+  ],
+  "attempts": [
+    {
+      "name": "go-f-r1",
+      "role": "go",
+      "scenario": "f",
+      "seed": 501,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-f-r1",
+      "role": "native",
+      "scenario": "f",
+      "seed": 501,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-normal-r1",
+      "role": "go",
+      "scenario": "normal",
+      "seed": 501,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-normal-r1",
+      "role": "native",
+      "scenario": "normal",
+      "seed": 501,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-f-r2",
+      "role": "native",
+      "scenario": "f",
+      "seed": 502,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-f-r2",
+      "role": "go",
+      "scenario": "f",
+      "seed": 502,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-normal-r2",
+      "role": "native",
+      "scenario": "normal",
+      "seed": 502,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-normal-r2",
+      "role": "go",
+      "scenario": "normal",
+      "seed": 502,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-f-r3",
+      "role": "go",
+      "scenario": "f",
+      "seed": 503,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-f-r3",
+      "role": "native",
+      "scenario": "f",
+      "seed": 503,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-normal-r3",
+      "role": "go",
+      "scenario": "normal",
+      "seed": 503,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-normal-r3",
+      "role": "native",
+      "scenario": "normal",
+      "seed": 503,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    }
+  ]
+}

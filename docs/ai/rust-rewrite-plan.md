@@ -111,6 +111,8 @@ YAML 受支持子集 -> 配置校验/插件注册 -> UDP/TCP listener
 
 连接复用、数据布局和有界调度也能在 Go 中实现；Rust 重写的收益必须与合理配置的 Go 基线比较。库选型、线程模型和并发数字不在总规划中提前锁死。
 
+2026-10-09：依据 5D-1 的 F 握手与延迟结果，用户批准 5D-fix-A 修订 DoH 串行策略：h2 独立 stream、HTTP/1.1 有界复用池、期限内等待与单请求取消隔离。具体上限和生命周期见 [DoH 并发契约](../rust/contracts/rust-migration.md#scenario-native-doh-bounded-concurrent-reuse-2026-10-09-revision)。TCP/DoT 并发改造仍为后续项；实现与复测须经外部审查，不代表整机门禁通过。
+
 ## 3. ABI 与工程规则
 
 以下约定继续约束**已经存在或确有必要维护的过渡 Go/Rust 边界**，但不是 Phase 3B+ 新模块必须创建 ABI 的授权。Phase 3B 起默认使用纯 Rust crate 边界：

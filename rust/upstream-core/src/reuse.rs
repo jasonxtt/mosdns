@@ -7,15 +7,14 @@
 //!
 //! ## What reuse is, and is not
 //!
-//! Reuse means "keep one idle connection for a key so the next sequential
-//! exchange on that key does not pay connect (and TLS handshake) again". It is
-//! deliberately **serial per connection**: a reused connection carries at most
-//! one outstanding query, so concurrency across callers comes from having
-//! several connections rather than from multiplexing one.
+//! TCP/DoT keep their settled serial-per-connection policy. DoH policy was
+//! revised 2026-10-09 after the accepted 5D-1 slow-upstream measurements:
+//! [`DohReuseOwner`] uses a bounded HTTP/1.1 pool and concurrent HTTP/2 streams.
+//! Busy DoH admission waits within the original deadline instead of opening a
+//! disposable TLS connection for every request.
 //!
-//! There is no pending map, no response-reordering buffer, and no ID
-//! demultiplexing. Those belong to a separate task that must first establish an
-//! unambiguous correlation policy without rewriting DNS IDs.
+//! There is no DNS-ID pending map or rewriting. HTTP/2 correlates responses by
+//! its independent stream; HTTP/1.1 remains exclusive on each leased socket.
 //!
 //! ## Not in this module
 //!
@@ -32,9 +31,7 @@ use tokio::net::TcpStream;
 
 #[cfg(test)]
 use crate::CommitPause;
-use crate::secure::{
-    DohEndpoint, DotEndpoint, SecureError, SecureResponse, ServerIdentity, TlsPolicy,
-};
+use crate::secure::{DotEndpoint, SecureError, SecureResponse, ServerIdentity, TlsPolicy};
 use crate::{
     CloseCompletion, CloseResult, CloseTransition, Endpoint, ExchangeContext, ExchangeControl,
     ExchangeRequest, ExchangeResponse, Lifecycle, LifecycleState, RequestError, SideEffectState,
@@ -75,7 +72,7 @@ pub const IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Concurrent outstanding queries on one reused connection.
 ///
-/// Fixed at one: serial per connection is the settled policy, not a default.
+/// Fixed at one for plain TCP/DoT; DoH has separate pool/stream bounds.
 pub const MAX_PENDING_PER_CONNECTION: usize = 1;
 
 /// The injected time source, so idle expiry is deterministic under test.
@@ -1338,778 +1335,9 @@ impl Drop for SecureLeaseGuard {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Secure reuse owner (DoH)
-// ---------------------------------------------------------------------------
-
-/// Owns the reusable, authenticated `DoH` session for one endpoint.
-///
-/// ## Identity and protocol are part of the session
-///
-/// A pooled `DoH` session completed a TLS handshake against one service URL
-/// identity, negotiated one HTTP version, and sent requests to one authority and
-/// path. The reuse key therefore carries the numeric dial, the service identity,
-/// the authority, the TLS-policy discriminant, and the negotiated protocol, so a
-/// session established for one service is never handed to another. Because the
-/// owner holds exactly one endpoint, the key is fixed for its lifetime.
-///
-/// A checkout compares that key **without** the negotiated protocol, because the
-/// retained session itself is the authority on which protocol it speaks. It
-/// re-stamps the key with the protocol the session actually negotiated when it
-/// returns the session to the pool. A mismatch can therefore only cause a miss,
-/// which is the safe direction: an HTTP/1.1 session can never serve a request
-/// expecting HTTP/2 or the reverse.
-///
-/// ## Both negotiated protocols are pooled
-///
-/// A session is retained and reused whichever HTTP version it negotiated.
-/// HTTP/1.1 retains its `SendRequest` sender plus its connection driver.
-/// HTTP/2 retains the sender, the driver, **and** the crate-internal
-/// `H2ScopeLease` whose executor Hyper dispatches its children to.
-///
-/// Two details make the HTTP/2 case work:
-///
-/// * The pooled scope holds **no owner registration** and **no caller token**.
-///   Holding a registration for the session's whole life would keep the owner
-///   permanently non-drained so `close()` could never converge, and capturing the
-///   opening request's caller token would tie the long-lived driver to that one
-///   caller — cancelling it later would abort the driver and break every
-///   subsequent reuse.
-/// * There is no between-exchange settle step. The connection driver is itself a
-///   tracked child that lives as long as the session is usable, so the tracked
-///   child count never reaches zero while the session remains reusable; the scope
-///   is sealed, and its children aborted, only when the session is dropped or
-///   discarded.
-///
-/// Reuse on a retained HTTP/2 session is an ordinary new stream on the same
-/// connection, so the accept count stays at one.
-///
-/// ## Serial, one deadline, and close
-///
-/// One session carries at most one outstanding exchange
-/// ([`MAX_PENDING_PER_CONNECTION`]); there is no pending map and no
-/// demultiplexing. Every exchange uses the caller's original absolute deadline
-/// unchanged, and `close()` drops the idle session and drains registrations.
-pub struct DohReuseOwner {
-    endpoint: DohEndpoint,
-    tls: TlsPolicy,
-    lifecycle: Arc<Lifecycle>,
-    cancellation: TransportCancellation,
-    inner: Arc<Mutex<DohPoolInner>>,
-    clock: Arc<dyn Clock>,
-    /// Deterministic parking seam immediately before this owner's pooled-response
-    /// commit gate. Compiled for tests only; see [`CommitPause`].
-    #[cfg(test)]
-    commit_pause: Mutex<Option<Arc<CommitPause>>>,
-}
-
-impl fmt::Debug for DohReuseOwner {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DohReuseOwner")
-            .field("endpoint", &self.endpoint)
-            .finish_non_exhaustive()
-    }
-}
-
-/// The `DoH` owner's short-lock state.
-///
-/// The idle entry stores the session and the key it was established under, so a
-/// reuse can verify the negotiated protocol matches before handing it out.
-struct DohPoolInner {
-    idle: Option<(ReuseKey, crate::secure::PooledDohSession)>,
-    idle_since: Instant,
-    leased: usize,
-    closed: bool,
-    /// Every HTTP/2 scope the owner must still drain.
-    ///
-    /// This is a **list**, and it is the single mechanism that makes the drain
-    /// recoverable. Two things go wrong with a single slot:
-    ///
-    /// * A scope that is about to be drained must be published **before** any
-    ///   cancellable await, or an abort during that await drops the only handle.
-    /// * A stale scope and an incoming scope can both need draining, which one
-    ///   slot cannot represent.
-    ///
-    /// So each scope is published synchronously the moment it becomes the
-    /// owner's responsibility, and removed only after it has actually been
-    /// drained. An aborted attempt therefore leaves its scope in the list, and a
-    /// later `close()` still finds it.
-    scopes: Vec<crate::secure::H2DrainHandle>,
-    /// The idle session currently being torn down by `close()`.
-    ///
-    /// It stays **in shared state** for the whole teardown rather than being
-    /// moved into the caller that started it. Closing a session is not a single
-    /// instant: there is a real window between taking ownership of it and the
-    /// point where it has actually been dropped. If a caller held it locally
-    /// across that window, a concurrent `close()` would find `idle == None`,
-    /// finish its sweep, and report `Closed` while the connection was still
-    /// alive — and if that caller were aborted, the session would be dropped
-    /// with no record and no waiter, so a later `close()` could not even know it
-    /// existed. Keeping it here makes the in-progress teardown visible to every
-    /// concurrent closer and recoverable after an abort.
-    closing: Option<crate::secure::PooledDohSession>,
-    /// Set once the session in [`Self::closing`] has been fully dropped.
-    ///
-    /// `shutdown()` consumes the session, so completion is *defined* as that
-    /// having happened, not as "some caller reached this line". Only when this is
-    /// true may a `close()` report `Closed`: a session still held anywhere means
-    /// the connection may still be alive, which is exactly what PRD A4 / design
-    /// §4 forbid close from overlooking.
-    session_closed: bool,
-    /// Whether the pooled teardown has fully finished (session dropped, children
-    /// drained).
-    teardown_complete: bool,
-}
-
-impl fmt::Debug for DohPoolInner {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DohPoolInner")
-            .field("has_idle", &self.idle.is_some())
-            .field("leased", &self.leased)
-            .field("closed", &self.closed)
-            .field("registered_scopes", &self.scopes.len())
-            .field("teardown_complete", &self.teardown_complete)
-            .finish()
-    }
-}
-
-impl DohReuseOwner {
-    /// Creates an owner for one validated `DoH` endpoint and policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SecureError::TlsConfig`] when the policy cannot produce a usable
-    /// client configuration.
-    pub fn new(endpoint: DohEndpoint, tls: TlsPolicy) -> Result<Self, SecureError> {
-        tls.client_config()?;
-        Ok(Self {
-            endpoint,
-            tls,
-            lifecycle: Arc::new(Lifecycle::new()),
-            cancellation: TransportCancellation::new(),
-            inner: Arc::new(Mutex::new(DohPoolInner {
-                idle: None,
-                idle_since: Instant::now(),
-                leased: 0,
-                closed: false,
-                scopes: Vec::new(),
-                closing: None,
-                session_closed: false,
-                teardown_complete: false,
-            })),
-            clock: Arc::new(SystemClock),
-            #[cfg(test)]
-            commit_pause: Mutex::new(None),
-        })
-    }
-
-    /// Installs an injected clock so idle expiry is deterministic under test.
-    #[must_use]
-    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
-        self.clock = clock;
-        self
-    }
-
-    /// The endpoint this owner reuses sessions for.
-    #[must_use]
-    pub const fn endpoint(&self) -> &DohEndpoint {
-        &self.endpoint
-    }
-
-    /// The owner lifecycle state.
-    #[must_use]
-    pub fn lifecycle_state(&self) -> LifecycleState {
-        self.lifecycle.state()
-    }
-
-    /// Whether an idle authenticated session is retained.
-    #[must_use]
-    pub fn idle_connections(&self) -> usize {
-        usize::from(self.doh_lock().idle.is_some())
-    }
-
-    /// The number of in-flight exchanges registered with the lifecycle.
-    #[must_use]
-    pub fn in_flight_exchanges(&self) -> usize {
-        self.lifecycle.in_flight()
-    }
-
-    fn doh_lock(&self) -> std::sync::MutexGuard<'_, DohPoolInner> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    /// Begins owner shutdown and cancels owned work.
-    ///
-    /// The retained session is deliberately **not** dropped here. Dropping can
-    /// only seal and abort an HTTP/2 scope; it cannot wait for the tracked
-    /// children to finish, and `begin_close` is synchronous. The session is
-    /// therefore left in place for [`Self::close`], which awaits its explicit
-    /// teardown. Lease admission is already refused once the lifecycle leaves
-    /// `Open`, so a session parked here can never be handed out again.
-    #[must_use]
-    pub fn begin_close(&self) -> CloseTransition {
-        let transition = self.lifecycle.begin_close();
-        if transition == CloseTransition::BeganClosing {
-            self.cancellation.cancel();
-        }
-        transition
-    }
-
-    /// Begins close, drains every leased session, then completes shutdown.
-    ///
-    /// Close does not merely drop the retained session: a pooled HTTP/2 session
-    /// owns tracked child futures, and the design requires that no tracked child
-    /// outlives its connection and that close returns `Closed` only after
-    /// draining has finished.
-    ///
-    /// The teardown runs **inline in a live caller**, which `design.md` §3
-    /// requires ("No detached task, no background reaper runtime"). It is made
-    /// recoverable, not uncancellable:
-    ///
-    /// * The scope registry and the idle session are **shared state**, and the
-    ///   teardown never removes a scope from the registry until its children have
-    ///   actually drained. So if this caller is aborted mid-drain, nothing is
-    ///   lost: the scopes are still registered and the `idle` session is still
-    ///   parked.
-    /// * There is no ownership claim to get stuck. Every caller drains, so a
-    ///   later `close()` after an aborted one simply drains again — idempotently —
-    ///   and a caller that raced ahead observes the children still draining. That
-    ///   is how an aborted caller is recovered without any state that could be
-    ///   left permanently "in progress".
-    pub async fn close(&self) -> CloseResult {
-        match self.begin_close() {
-            CloseTransition::AlreadyClosed => return CloseResult::AlreadyClosed,
-            CloseTransition::BeganClosing | CloseTransition::AlreadyClosing => {}
-        }
-        self.lifecycle.drain().await;
-
-        // The *session* cannot be drained idempotently by every caller the way a
-        // scope can, and it must not be moved into a caller across an await: that
-        // is precisely the window this fixes. So it is parked in shared state,
-        // and teardown is split into steps that leave it there until it is
-        // actually dropped:
-        //
-        //   A. move `idle` -> `closing`, synchronously under one lock;
-        //   B. await the session's HTTP/2 scope drain, if it has one (no-op for
-        //      HTTP/1.1, so A->C is then an atomic synchronous sequence);
-        //   C. drop the session and record `session_closed`, synchronously.
-        //
-        // Completion is defined by C having happened, not by any caller reaching
-        // a line, so a caller aborted anywhere leaves `closing` populated and
-        // `session_closed` false and the next `close()` redoes the same work.
-        // Every caller performs all three steps — there is no owner to wait on,
-        // so there is nothing that can be left permanently claimed.
-        if self.doh_lock().teardown_complete {
-            return self.complete_close();
-        }
-
-        // A. Park the session in shared state, never in a caller-local.
-        {
-            let mut inner = self.doh_lock();
-            if inner.closing.is_none() && !inner.session_closed {
-                inner.closing = inner.idle.take().map(|(_key, session)| session);
-            }
-        }
-
-        // B. Drain the parked session's own HTTP/2 scope, if it has one. The
-        // handle is cloned out, so the session stays in shared state throughout;
-        // HTTP/1.1 has no scope, making A and C adjacent synchronous steps.
-        let token = {
-            let inner = self.doh_lock();
-            if inner.session_closed {
-                None
-            } else {
-                inner
-                    .closing
-                    .as_ref()
-                    .and_then(crate::secure::PooledDohSession::h2_drain_handle)
-            }
-        };
-        if let Some(token) = token {
-            token.finish().await;
-        }
-
-        // C. Drop the session — this is the actual close of the connection — and
-        // record it. Synchronous under the lock, so no window exists between the
-        // session becoming unowned and it being gone.
-        {
-            let mut inner = self.doh_lock();
-            if !inner.session_closed {
-                inner.closing = None;
-                inner.session_closed = true;
-            }
-        }
-
-        // Drain every remaining registered scope, including ones an abandoned
-        // attempt left behind. Nothing is forgotten until it has actually
-        // drained, so an abort here strands nothing.
-        self.drain_stale_scopes(None).await;
-
-        self.doh_lock().teardown_complete = true;
-        self.complete_close()
-    }
-
-    /// Finalizes the lifecycle once the shared teardown has finished.
-    fn complete_close(&self) -> CloseResult {
-        self.doh_lock().closed = true;
-        match self.lifecycle.finish_close() {
-            CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
-            CloseCompletion::NotClosing | CloseCompletion::InFlight => CloseResult::AlreadyClosing,
-        }
-    }
-
-    /// Claims the single serial slot.
-    fn admit_lease(&self) -> Option<DohLeaseGuard> {
-        let mut inner = self.doh_lock();
-        if inner.closed || self.lifecycle.state() != LifecycleState::Open {
-            return None;
-        }
-        if inner.leased >= MAX_PENDING_PER_CONNECTION {
-            return None;
-        }
-        inner.leased += 1;
-        Some(DohLeaseGuard {
-            inner: Arc::clone(&self.inner),
-        })
-    }
-
-    /// Publishes a session's HTTP/2 scope as the owner's responsibility.
-    ///
-    /// Called the moment a session with a scope is established, and again when a
-    /// retained session is checked out, so the scope is registered **before** the
-    /// attempt can be aborted. An HTTP/1.1 session has no scope and publishes
-    /// nothing, but the stale scopes already in the list still get drained by the
-    /// first await point (see [`Self::drain_stale_scopes`]).
-    ///
-    /// Registration is **idempotent by scope identity**. A long-lived reusable
-    /// session is published again on every checkout, and `release` deliberately
-    /// keeps its entry, so pushing unconditionally would grow the registry without
-    /// bound over the session's lifetime. Re-publishing the same scope is a no-op;
-    /// distinct scopes — a stale one and an incoming one — still coexist, because
-    /// the check is `is_same_scope` rather than "is the list non-empty".
-    fn publish_scope(&self, handle: Option<crate::secure::H2DrainHandle>) {
-        let Some(handle) = handle else {
-            return;
-        };
-        let mut inner = self.doh_lock();
-        if inner
-            .scopes
-            .iter()
-            .any(|parked| parked.is_same_scope(&handle))
-        {
-            return;
-        }
-        inner.scopes.push(handle);
-    }
-
-    /// Removes a scope from the registry once it has actually drained.
-    ///
-    /// Retained sessions keep their entry deliberately: `close()` must drain an
-    /// idle session's children too, and a concurrent `close()` arriving after
-    /// another caller took the idle session still has to wait for those children —
-    /// the registry is how it sees them.
-    fn forget_scope(&self, handle: &crate::secure::H2DrainHandle) {
-        let mut inner = self.doh_lock();
-        inner.scopes.retain(|parked| !parked.is_same_scope(handle));
-    }
-
-    /// Whether any scope is currently registered.
-    #[cfg(test)]
-    fn registered_scope_count(&self) -> usize {
-        self.doh_lock().scopes.len()
-    }
-
-    /// Drains every registered scope except `keep`.
-    ///
-    /// This is the recoverable sweep that replaced the earlier single-slot drain
-    /// step. Every scope is already published, so an abort during this await
-    /// leaves the whole list intact for the next attempt or for `close()` — the
-    /// method never has to take anything out of shared state to make progress.
-    ///
-    /// Each entry is drained through a clone and removed from the registry only
-    /// after its children have actually finished, so the registry is never
-    /// momentarily missing a scope that still needs draining.
-    async fn drain_stale_scopes(&self, keep: Option<&crate::secure::H2DrainHandle>) {
-        // Snapshot under the lock, then drain without holding it: the drain
-        // awaits, and the registry must stay reachable to `close()` meanwhile.
-        let stale: Vec<crate::secure::H2DrainHandle> = {
-            let inner = self.doh_lock();
-            inner
-                .scopes
-                .iter()
-                .filter(|parked| keep.is_none_or(|keep| !parked.is_same_scope(keep)))
-                .cloned()
-                .collect()
-        };
-        for handle in stale {
-            handle.finish().await;
-            // Only now is it safe to forget it: its children have drained.
-            self.forget_scope(&handle);
-        }
-    }
-
-    /// Takes a live idle session serving the same service as `base`.
-    ///
-    /// The comparison deliberately covers the numeric dial, the transport, and
-    /// the whole secure key (kind, identity, authority, TLS-policy discriminant)
-    /// but **not** the negotiated protocol: the connection's protocol is a
-    /// property of the connection, and the retained session itself is the
-    /// authority on which protocol it speaks. A session established for a
-    /// different service can therefore never be handed out.
-    async fn checkout_live(&self, base: &ReuseKey) -> Option<crate::secure::PooledDohSession> {
-        let (stored_key, mut session) = {
-            let mut inner = self.doh_lock();
-            inner.idle.take()?
-        };
-        // Publish the scope *before* any await. From here the scope is the
-        // owner's responsibility, so an abort in any branch below leaves it
-        // registered and `close()` can still drain it. These branches used to
-        // await `session.shutdown()` with nothing registered, which lost the
-        // scope on cancellation.
-        self.publish_scope(session.h2_drain_handle());
-
-        let idle_since = self.doh_lock().idle_since;
-        if self.clock.now().saturating_duration_since(idle_since) >= IDLE_TIMEOUT {
-            return None;
-        }
-        let same_service = stored_key.dial == base.dial
-            && stored_key.transport == base.transport
-            && stored_key.secure == base.secure;
-        if !same_service || session.is_closed() {
-            return None;
-        }
-        // The scope is now being leased to this attempt; drain any *other*
-        // registered scope (an abandoned one) before proceeding. The awaited
-        // session's own scope is kept.
-        self.drain_stale_scopes(session.h2_drain_handle().as_ref())
-            .await;
-        Some(session)
-    }
-
-    /// Retains a completed session for a later exchange.
-    ///
-    /// Both HTTP/1.1 and HTTP/2 sessions are retained. A pooled HTTP/2 session
-    /// owns its own child-tracking scope and holds no owner registration, so
-    /// retaining it does not prevent `close()` from draining.
-    ///
-    /// On retention the session's scope **stays registered**. The retained
-    /// session owns its scope, but `close()` and any concurrent exchange still
-    /// have to be able to see and drain it, and the registry is how they do — so
-    /// the entry is intentionally kept. Removing it here would make an idle
-    /// session's children invisible to a `close()` that arrives after another
-    /// caller took the session, which is exactly the window this registry exists
-    /// to close. A session that is **not** retained keeps its entry for the same
-    /// reason.
-    async fn release(&self, key: ReuseKey, session: crate::secure::PooledDohSession) {
-        let now = self.clock.now();
-        let mut session = Some(session);
-        let discard = {
-            let mut inner = self.doh_lock();
-            if inner.leased > 0 {
-                inner.leased -= 1;
-            }
-            if inner.closed || self.lifecycle.state() != LifecycleState::Open {
-                true
-            } else {
-                inner.idle = Some((
-                    key,
-                    session
-                        .take()
-                        .expect("the session is present before retention"),
-                ));
-                inner.idle_since = now;
-                false
-            }
-        };
-        if discard {
-            session
-                .take()
-                .expect("the discarded session is present")
-                .shutdown()
-                .await;
-        }
-    }
-
-    /// The final commit linearization point for one pooled `DoH` response.
-    ///
-    /// A pooled session validates its response but does not own an owner
-    /// lifecycle, so the owner must apply the same commit the fresh DoH path
-    /// applies ([`Lifecycle::commit_final_response`]) **before** the session is
-    /// returned to the pool. Without it, an owner close, caller cancellation, or
-    /// deadline landing between response validation and the owner's return would
-    /// let a pooled exchange report success where a fresh one would fail — the
-    /// exact window the final-commit contract exists to close.
-    ///
-    /// The request has already been sent by this point, so the side effect is
-    /// `Sent`. On failure the caller must **discard** the session rather than
-    /// re-pool it, because the response was never committed.
-    fn commit_pooled_response(
-        &self,
-        control: &ExchangeControl,
-        deadline: Instant,
-    ) -> Result<(), SecureError> {
-        self.lifecycle
-            .commit_final_response(
-                &control.caller_cancellation(),
-                deadline,
-                SideEffectState::Sent,
-            )
-            .map_err(SecureError::from)
-    }
-
-    /// The live tracked-child count of the retained session's HTTP/2 scope, or
-    /// `None` when nothing is retained. Test-only.
-    #[cfg(test)]
-    fn active_children_for_test(&self) -> Option<usize> {
-        let inner = self.doh_lock();
-        let (_key, session) = inner.idle.as_ref()?;
-        session.active_children_for_test()
-    }
-
-    /// Installs a teardown barrier on a registered scope.
-    ///
-    /// `index` selects which registry entry, so a test can park the scope an
-    /// aborted attempt left behind. Returns `false` when no such entry exists.
-    /// Test-only.
-    #[cfg(test)]
-    fn install_teardown_pause_on_scope_for_test(
-        &self,
-        index: usize,
-        pause: Arc<crate::secure::H2TeardownPause>,
-    ) -> bool {
-        let inner = self.doh_lock();
-        let Some(handle) = inner.scopes.get(index) else {
-            return false;
-        };
-        handle.install_teardown_pause(pause);
-        true
-    }
-
-    /// The live tracked-child count of a registered scope, if any.
-    #[cfg(test)]
-    fn scope_children_for_test(&self, index: usize) -> Option<usize> {
-        let inner = self.doh_lock();
-        inner
-            .scopes
-            .get(index)
-            .map(|handle| handle.active_children())
-    }
-
-    /// Installs a teardown barrier on the retained session's HTTP/2 scope.
-    ///
-    /// Returns `false` when no session is retained or the retained one is
-    /// HTTP/1.1 (which has no tracked children). Test-only.
-    #[cfg(test)]
-    fn install_teardown_pause_for_test(&self, pause: Arc<crate::secure::H2TeardownPause>) -> bool {
-        let inner = self.doh_lock();
-        let Some((_key, session)) = inner.idle.as_ref() else {
-            return false;
-        };
-        session.install_teardown_pause_for_test(pause).is_some()
-    }
-
-    #[cfg(test)]
-    fn install_commit_pause(&self, pause: Arc<CommitPause>) {
-        *self
-            .commit_pause
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pause);
-    }
-
-    #[cfg(test)]
-    async fn reach_commit_gate(&self) {
-        let pause = self
-            .commit_pause
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some(pause) = pause {
-            pause.pause().await;
-        }
-    }
-
-    /// Runs one authenticated `DoH` exchange, reusing an idle session.
-    ///
-    /// # Errors
-    ///
-    /// Returns the existing typed [`SecureError`] for every transport outcome.
-    pub async fn exchange(
-        &self,
-        request: ExchangeRequest<'_>,
-        context: ExchangeContext,
-    ) -> Result<SecureResponse, SecureError> {
-        let _in_flight = self.lifecycle.register()?;
-        let control = ExchangeControl::new(context, self.cancellation.clone());
-        let deadline = control.context().deadline();
-
-        control.check_at(Instant::now(), SideEffectState::NotSent)?;
-
-        // The request target is built from the endpoint's own path and the
-        // caller's query, exactly as the fresh path does, so reuse cannot change
-        // the requested URL.
-        let target = self.endpoint.get_request_target(request)?;
-        let authority = self.endpoint.authority();
-        let request_id = request.request_id();
-
-        let lease = self
-            .admit_lease()
-            .ok_or_else(|| SecureError::from(UpstreamError::from(PoolError::Busy)))?;
-
-        // Lookup is by the key *without* a negotiated protocol. A stored entry
-        // always carries the protocol its session actually negotiated, so this
-        // can only miss — the safe direction, because the session's own protocol
-        // is what decides whether it may serve this request.
-        if let Some(session) = self.checkout_live(&self.service_key()?).await {
-            let negotiated = session.protocol_name().to_owned();
-            match session
-                .exchange(&target, &authority, request_id, &control, deadline)
-                .await
-            {
-                Ok((response, session)) => {
-                    // Commit before re-pooling: a close/cancel/deadline that
-                    // landed during the exchange must still fail this response,
-                    // and a failed commit must never leave the session reusable.
-                    #[cfg(test)]
-                    self.reach_commit_gate().await;
-                    if let Err(error) = self.commit_pooled_response(&control, deadline) {
-                        session.shutdown().await;
-                        drop(lease);
-                        return Err(error);
-                    }
-                    self.release(self.confirmed_key(&negotiated)?, session)
-                        .await;
-                    drop(lease);
-                    return Ok(response);
-                }
-                Err(outcome) => {
-                    if !outcome.rebuildable {
-                        if let Some(session) = outcome.session {
-                            session.shutdown().await;
-                        }
-                        drop(lease);
-                        return Err(outcome.error);
-                    }
-                    if let Some(session) = outcome.session {
-                        session.shutdown().await;
-                    }
-                }
-            }
-        }
-
-        // Dial and authenticate a fresh session. This is either the first
-        // exchange or the single permitted replacement.
-        // Only the owner token is handed over: the session is retained across
-        // exchanges, so it must not be bound to this caller's cancellation. The
-        // `control` below still carries this exchange's caller token.
-        let session = crate::secure::PooledDohSession::connect(
-            &self.endpoint,
-            &self.tls,
-            self.cancellation.clone(),
-            &control,
-            deadline,
-        )
-        .await?;
-
-        // Publish this session's scope *before* the attempt can be aborted, then
-        // drain any other registered scope. Publishing first is what makes the
-        // window safe: an aborted attempt drops the session, whose synchronous
-        // `Drop` can only seal and abort, and this registry entry is what lets
-        // `close()` still await the tracked children.
-        //
-        // Publishing is synchronous and the drain is skipped when nothing else is
-        // registered, so a normal reuse performs no await here at all.
-        self.publish_scope(session.h2_drain_handle());
-        let own = session.h2_drain_handle();
-        self.drain_stale_scopes(own.as_ref()).await;
-
-        // Connect/handshake are an async wake: re-apply the control before the
-        // request. No DNS byte has been sent, so this is `NotSent`.
-        control.check_at(Instant::now(), SideEffectState::NotSent)?;
-
-        let negotiated = session.protocol_name().to_owned();
-        match session
-            .exchange(&target, &authority, request_id, &control, deadline)
-            .await
-        {
-            Ok((response, session)) => {
-                // Same commit as the reused path: the first pooled exchange has
-                // exactly the same final-commit obligation.
-                #[cfg(test)]
-                self.reach_commit_gate().await;
-                if let Err(error) = self.commit_pooled_response(&control, deadline) {
-                    session.shutdown().await;
-                    drop(lease);
-                    return Err(error);
-                }
-                self.release(self.confirmed_key(&negotiated)?, session)
-                    .await;
-                drop(lease);
-                Ok(response)
-            }
-            Err(outcome) => {
-                if let Some(session) = outcome.session {
-                    session.shutdown().await;
-                }
-                drop(lease);
-                Err(outcome.error)
-            }
-        }
-    }
-
-    /// The service key: dial, identity, authority, and policy, with no
-    /// negotiated protocol.
-    ///
-    /// This is what a lookup compares against; the negotiated protocol is a
-    /// property of the retained session, not of the request.
-    fn service_key(&self) -> Result<ReuseKey, SecureError> {
-        ReuseKey::plain_secure_endpoint(
-            self.endpoint.dial(),
-            SecureKey::from_policy(
-                SecureKind::Doh,
-                self.endpoint.identity().as_str(),
-                Some(&self.endpoint.authority()),
-                &self.tls,
-            ),
-        )
-        .map_err(SecureError::from)
-    }
-
-    /// The key confirmed with the protocol a session actually negotiated.
-    fn confirmed_key(&self, negotiated: &str) -> Result<ReuseKey, SecureError> {
-        Ok(ReuseKey::plain_secure_endpoint(
-            self.endpoint.dial(),
-            SecureKey::from_policy(
-                SecureKind::Doh,
-                self.endpoint.identity().as_str(),
-                Some(&self.endpoint.authority()),
-                &self.tls,
-            ),
-        )
-        .map_err(SecureError::from)?
-        .with_negotiated_protocol(Some(negotiated.to_owned())))
-    }
-}
-
-/// RAII lease over one outstanding `DoH` exchange.
-struct DohLeaseGuard {
-    inner: Arc<Mutex<DohPoolInner>>,
-}
-
-impl Drop for DohLeaseGuard {
-    fn drop(&mut self) {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if inner.leased > 0 {
-            inner.leased -= 1;
-        }
-    }
-}
+// DoH policy is revised independently of the unchanged TCP/DoT serial owners.
+mod doh;
+pub use doh::{DohReuseOwner, DohReuseStats, MAX_DOH_CALLS, MAX_DOH_CONNECTIONS, MAX_DOH_STREAMS};
 
 #[cfg(test)]
 mod tests {
@@ -3187,17 +2415,18 @@ mod tests {
     /// children would lose the waiter `close()` relies on.
     ///
     /// Sequence: one successful exchange retains a session; a second exchange is
-    /// aborted in flight, leaving its still-running children and a registered
-    /// scope; a third exchange then starts. The new attempt sweeps the stale scope
-    /// before it proceeds.
+    /// aborted in flight, preserving its shared session under the revised h2
+    /// policy; idle expiration then retires the connection. A third exchange
+    /// sweeps that genuinely retired scope before replacement.
     ///
-    /// The stale scope here is genuinely abandoned — the aborted attempt took the
-    /// idle session, so its scope was never retained and nothing else owns it. A
+    /// The stale scope here is genuinely retired by the injected idle timeout;
+    /// request cancellation alone deliberately leaves a shared h2 session live. A
     /// *retained* session keeps its registry entry, so the sweep must skip the
     /// scope it is about to reuse; the two normal reuse tests in `reuse_doh` pin
     /// that.
     #[test]
     fn a_new_attempt_drains_the_stale_attempt_handle_before_replacing_it() {
+        let clock = ManualClock::new();
         let identity = commit_identity();
         // `hold_open` keeps the served connection alive after the first stream,
         // which is what leaves the aborted attempt's children genuinely live.
@@ -3205,8 +2434,11 @@ mod tests {
         let endpoint =
             crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
                 .expect("doh endpoint");
-        let owner =
-            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+        let owner = Arc::new(
+            DohReuseOwner::new(endpoint, commit_policy(&identity))
+                .expect("owner")
+                .with_clock(clock.clone()),
+        );
 
         with_runtime(async {
             // 1. Establish and retain a session.
@@ -3240,7 +2472,9 @@ mod tests {
             inflight.abort();
             let _ = inflight.await;
 
-            // Park the stale handle, so the drain it needs is observable.
+            clock.advance(IDLE_TIMEOUT.as_secs() + 1);
+            // Retire by real idle expiry, not by cancellation of one stream.
+            // Park its handle, so the drain it needs is observable.
             let pause = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
                 owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&pause)),
@@ -3292,13 +2526,13 @@ mod tests {
                 outcome.is_ok(),
                 "the exchange after the recovery must succeed, got {outcome:?}"
             );
-            // The aborted attempt had already taken the idle session, so the
+            // Idle expiration retired the retained session, so the
             // next exchange legitimately dials its own connection. The point of
             // this test is that it *proceeded* only after the stale scope drained.
             assert_eq!(
                 peer.accepts(),
                 2,
-                "the aborted session is gone, so the next exchange dials fresh"
+                "the expired session is gone, so the next exchange dials fresh"
             );
         });
         peer.join();
@@ -3314,13 +2548,17 @@ mod tests {
     /// registry empty, and this test's re-install step would find nothing.
     #[test]
     fn aborting_during_the_stale_handle_recovery_keeps_the_waiter() {
+        let clock = ManualClock::new();
         let identity = commit_identity();
         let peer = ReusableH2Peer::start(&identity, true);
         let endpoint =
             crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
                 .expect("doh endpoint");
-        let owner =
-            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+        let owner = Arc::new(
+            DohReuseOwner::new(endpoint, commit_policy(&identity))
+                .expect("owner")
+                .with_clock(clock.clone()),
+        );
 
         with_runtime(async {
             // 1. Establish a pooled h2 session.
@@ -3333,7 +2571,7 @@ mod tests {
             .await
             .expect("the first h2 exchange succeeds");
 
-            // 2. Abort a second exchange in flight, leaving a stale handle.
+            // 2. Abort a second stream; later idle expiry retires its session.
             let second = test_query(0xd031);
             let inflight = {
                 let owner = Arc::clone(&owner);
@@ -3353,7 +2591,8 @@ mod tests {
             inflight.abort();
             let _ = inflight.await;
 
-            // 3. Park the stale scope's teardown, so the recovery blocks on it.
+            clock.advance(IDLE_TIMEOUT.as_secs() + 1);
+            // 3. Idle expiry retires the shared session; park its teardown.
             let recovery_gate = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
                 owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&recovery_gate)),

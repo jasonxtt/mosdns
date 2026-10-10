@@ -720,20 +720,19 @@ let prepared = upstream.prepare_exchange(request, context)?;
 // Slice0 has performed only pure validation; later slices own socket I/O.
 ```
 
-## Scenario: native secure reuse busy admission
+## Scenario: native DoT serial reuse busy admission
 
 ### 1. Scope / Trigger
 
-Use this contract when the native host composes serial DoT/DoH reuse owners
+Use this contract when the native host composes serial DoT reuse owners
 with the secure one-shot transports. It records the regression guard for
 concurrent requests sharing one configured secure entry.
 
 ### 2. Signatures
 
 - `ForwardOwner::exchange(query, deadline, cancellation, tracker)` delegates
-  to `SecureReuseOwner` or `DohReuseOwner` first.
-- `DotUpstream::exchange(ExchangeRequest<'_>, ExchangeContext)` and
-  `DohUpstream::exchange(ExchangeRequest<'_>, ExchangeContext)` are the scoped
+  to `SecureReuseOwner` first.
+- `DotUpstream::exchange(ExchangeRequest<'_>, ExchangeContext)` is the scoped
   fresh-connection paths for one request.
 - `ForwardOwner::close() -> Future` closes and drains both the reuse owner and
   its secure one-shot owner.
@@ -755,7 +754,7 @@ concurrent requests sharing one configured secure entry.
 
 | Condition | Required result |
 |---|---|
-| secure reuse lease busy before send | one matching fresh DoT/DoH exchange |
+| DoT reuse lease busy before send | one matching fresh DoT exchange |
 | reuse failure after any side effect | original typed failure; no second connection |
 | fresh exchange failure | original fresh typed failure; no additional retry |
 | native owner close | pooled and fresh exchanges drain before close completes |
@@ -770,8 +769,8 @@ concurrent requests sharing one configured secure entry.
 
 ### 6. Tests Required
 
-- Native-host loopback tests must cover DoT, DoH HTTP/1.1, and DoH HTTP/2 with
-  a synthetic CA, prove two accepted secure connections under a barrier, and
+- Native-host loopback tests must cover DoT with a synthetic CA,
+  prove two accepted secure connections under a barrier, and
   complete a parent listener close/drain.
 - Focused tests must assert the second request succeeds only through the
   one-shot path; existing side-effect/error tests must retain no-retry
@@ -794,6 +793,53 @@ match reuse.exchange(request, context.clone()).await {
     result => result,
 }
 ```
+
+## Scenario: native DoH bounded concurrent reuse (2026-10-09 revision)
+
+The user-approved 5D-fix-A revises the previous DoH serial/busy-fresh policy
+following 5D-1's F latency and handshake measurements. TCP and DoT retain
+their existing behavior; their concurrent reuse is a separate follow-up.
+
+- An immutable `DohReuseOwner` binds numeric dial, HTTP authority, TLS identity,
+  trust and SOCKS route. Every connection authenticates and dials that same
+  endpoint. The host delegates directly to reuse, with no busy one-shot path.
+- HTTP/2 shares one authenticated connection through independent sender/stream
+  handles. Response association uses HTTP streams; reuse adds no DNS ID map.
+  Existing DoH GET zero-ID encoding and restoration remain unchanged.
+  Initial send allowance is one until peer SETTINGS arrive; Hyper/h2 enforces
+  the peer stream limit. A local semaphore bounds exchange leases to 64,
+  including waits for a stream or connection; fixture counters independently
+  prove the actual peer stream bound.
+- HTTP/1.1 allows twelve connecting/busy/idle connections, each exclusive to
+  one exchange. Pool shortage waits inside the original absolute deadline.
+  At most 256 calls are admitted; further calls fail `Backpressure(NotSent)`.
+  Twelve leaves 50% headroom above F's approximately eight in-flight queries;
+  eight alone leaves no room for handshake/scheduling overhead. 64 leaves bounded
+  headroom for h2 without increasing runtime threads or adding public settings.
+- Caller cancellation/deadline drops only its h2 stream; siblings retain their
+  shared scope. A cancelled/failed h1 session is discarded. Owner close cancels
+  and drains all exchanges and registered connection-driver children.
+- A reused attempt gets at most one replacement only for typed send/receive
+  `NotSent`. Hyper's returned original request is the proof for send failures.
+  `MaybeSent`, `Sent`, TLS/protocol errors and controls remain terminal; no
+  ambiguous in-flight replay. GOAWAY drains accepted streams and prevents new
+  sends; unhealthy connections retire before subsequent callers reconnect.
+- Retired h2 scopes retain their connection-budget slot until drain completes.
+  Total connecting/live/retiring resources stay within twelve. Scope publication
+  precedes cancellable handshake awaits. Concurrent/repeated close and aborted
+  drain preserve shared registry/closing state for the next waiter.
+- Lazy ten-second idle expiration is checked at checkout; active h2 streams
+  prevent idle eviction. Close releases all sessions/scopes. No timer, hidden
+  executor, untracked background task or new public HTTP API is added.
+- Internal counters report connect attempts, reuse, active/peak leases and
+  retained connection slots; these are diagnostics, not configuration fields.
+
+Required tests cover distinct concurrent responses under both ALPN outcomes,
+SOCKS-only reachability, h1 pool exhaustion with deadline/NotSent, h2 peer and
+local bounds, cancellation isolation, GOAWAY versus ambiguous disconnect,
+bounded reconnect without replay, idle expiry and recoverable close/drain.
+The native-host composition test must exercise simultaneous h2 streams on one
+connection, while h1 pooling and DoT serial/fresh behavior retain their guards.
 
 ## Scenario: Phase 4 DoQ post-open cancellation and response-FIN contract
 

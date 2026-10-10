@@ -1,0 +1,18 @@
+{
+  "attempts": 12,
+  "all_returncode_zero": true,
+  "all_run_cleanup_pass": true,
+  "owned_processes_remaining": [],
+  "network_namespaces": [],
+  "original_service": [
+    "MainPID=827437",
+    "ActiveState=active"
+  ],
+  "config_rust_gaps": 0,
+  "workspace_tests": {
+    "passed": 1476,
+    "failed": 0,
+    "ignored": 4
+  },
+  "freeze_sha256": "afe441e906ab0ca0d0ffad2c5d36c854c2d61a5725b79608e70f54d6cb8c70a9"
+}

@@ -1,0 +1,90 @@
+[
+  {
+    "scenario": "f",
+    "stage": "warmup",
+    "go_median_us": 396.1584633853541,
+    "native_us": [
+      456.1824729891956,
+      372.14885954381754,
+      408.16326530612247
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "f",
+    "stage": "q100",
+    "go_median_us": 392.0000000000001,
+    "native_us": [
+      336.00000000000006,
+      416.0,
+      464.0000000000001
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "f",
+    "stage": "recovery",
+    "go_median_us": 413.33333333333326,
+    "native_us": [
+      343.3333333333333,
+      421.6666666666667,
+      451.6666666666667
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "normal",
+    "stage": "warmup",
+    "go_median_us": 288.1152460984394,
+    "native_us": [
+      348.1392557022808,
+      372.14885954381754,
+      360.1440576230492
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "normal",
+    "stage": "q20",
+    "go_median_us": 379.9999999999999,
+    "native_us": [
+      439.99999999999994,
+      419.99999999999994,
+      340.00000000000006
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "normal",
+    "stage": "q100",
+    "go_median_us": 252.00000000000006,
+    "native_us": [
+      288.0,
+      212.0,
+      200.0
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "normal",
+    "stage": "q500",
+    "go_median_us": 137.6,
+    "native_us": [
+      146.41171293703496,
+      99.20000000000002,
+      138.4
+    ],
+    "triggered_repetitions": []
+  },
+  {
+    "scenario": "normal",
+    "stage": "recovery",
+    "go_median_us": 221.70361726954476,
+    "native_us": [
+      221.70361726954494,
+      223.37056176029336,
+      236.66666666666674
+    ],
+    "triggered_repetitions": []
+  }
+]

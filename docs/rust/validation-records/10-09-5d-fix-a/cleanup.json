@@ -1,0 +1,14 @@
+{
+  "vm_temporary_root_deleted": true,
+  "vm_archive_removed": true,
+  "all_owned_processes_exited": true,
+  "owned_network_namespaces_absent": true,
+  "original_service_unchanged": true,
+  "original_service": [
+    "MainPID=827437",
+    "ActiveState=active"
+  ],
+  "private_archive_sha256": "2280294c7a84e7da8f6d8b0374b4375326642a40415f137f3bd8628fb71d00ab",
+  "private_archive_saved_and_verified_locally": true,
+  "all_twelve_run_receipts_pass": true
+}

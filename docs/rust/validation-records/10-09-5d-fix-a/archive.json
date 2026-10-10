@@ -1,0 +1,9 @@
+{
+  "private_archive_name": "5dfixa-private-evidence-20261010.tar.gz",
+  "sha256": "2280294c7a84e7da8f6d8b0374b4375326642a40415f137f3bd8628fb71d00ab",
+  "bytes": 162672277,
+  "member_count": 4705,
+  "all_twelve_raw_runs_verified": true,
+  "source_logs_artifacts_verified": true,
+  "baseline_archive_sha256": "0afc0d933fd939db7f57144c49ded77bdf97701ac381959f8a9abcaed4b1f5cb"
+}
