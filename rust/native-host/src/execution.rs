@@ -2249,7 +2249,14 @@ impl<'a> BranchPollQueue<'a> {
             let Some(task) = task.upgrade() else { continue };
             task.queued.set(false);
             self.poll_task(&task, cx);
-            cx.waker().wake_by_ref();
+            // Another outer poll is needed only to consume a finished branch
+            // or to continue with more deferred work. A branch that merely
+            // waits for its upstream is woken by that upstream; waking again
+            // here would re-poll the whole chain (and re-defer its deep tail)
+            // until the I/O completes.
+            if task.result.borrow().is_some() || !self.pending.borrow().is_empty() {
+                cx.waker().wake_by_ref();
+            }
             return;
         }
     }
@@ -5561,6 +5568,207 @@ plugins:
             "deep synchronous work must retain primary-first selection"
         );
         assert_eq!(result.upstream_attempts.len(), 1);
+    }
+
+    /// Answers the primary leg only after a delay; every other leg never
+    /// finishes inside the test.
+    struct DelayedExchange {
+        primary: ExecutableId,
+        delay: Duration,
+    }
+
+    impl ExchangeExecutor for DelayedExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            query: &'a [u8],
+            _deadline: Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            let delay = if executable == self.primary {
+                self.delay
+            } else {
+                Duration::from_secs(60)
+            };
+            let response = response_with_ip(query, [192, 0, 2, 91]);
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                let id = u16::from_be_bytes([response[0], response[1]]);
+                Ok(ExchangeResponse::new(
+                    response,
+                    id,
+                    id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
+        }
+    }
+
+    /// `levels` fallbacks nested through their primary legs; the innermost
+    /// primary is the forward `primary`, every secondary the forward `secondary`.
+    fn nested_fallback_config(levels: usize) -> CompiledConfig {
+        let mut yaml = String::from(
+            "log: {level: error}\nplugins:\n  - tag: primary\n    type: forward\n    args: {upstreams: [{addr: '127.0.0.1:15000'}]}\n  - tag: secondary\n    type: forward\n    args: {upstreams: [{addr: '127.0.0.1:15010'}]}\n",
+        );
+        for index in 0..levels {
+            let inner = if index + 1 == levels {
+                "$primary".to_owned()
+            } else {
+                format!("$level{}", index + 1)
+            };
+            yaml.push_str(&format!(
+                "  - tag: level{index}\n    type: fallback\n    args: {{primary: '{inner}', secondary: '$secondary', threshold: 60000}}\n"
+            ));
+        }
+        yaml.push_str("  - tag: main\n    type: sequence\n    args:\n      - exec: $level0\n  - tag: listener\n    type: udp_server\n    args: {entry: main, listen: '127.0.0.1:53'}\n");
+        compile_yaml(&yaml).unwrap()
+    }
+
+    /// How often the outermost future is polled while a branch nested `levels`
+    /// deep waits `delay` for its upstream, and the answer it returns.
+    fn polls_while_a_nested_branch_waits(levels: usize, delay: Duration) -> (usize, Vec<u8>) {
+        let config = nested_fallback_config(levels);
+        let primary = config
+            .forwards
+            .iter()
+            .find(|f| f.tag == "primary")
+            .unwrap()
+            .executable;
+        let exchange = DelayedExchange { primary, delay };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).unwrap();
+        let options = HostOptions::default();
+        let request = query_name(96, "slow.example");
+        let (header, question) = parse_query(&request).unwrap();
+        let mut checkpoint = ExecutionCheckpoint::new(true);
+        let polls = Cell::new(0_usize);
+        let catalog = cache.catalog();
+        let execution = super::execute_request_with_observation(
+            super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
+                config: &config,
+                cache: &catalog,
+                options: &options,
+                raw: &request,
+                header,
+                question,
+                switch_seed: Default::default(),
+            },
+            &exchange,
+            TransportCancellation::new(),
+            &mut checkpoint,
+        );
+        let mut execution = Box::pin(execution);
+        let result = futures_like_block_on(std::future::poll_fn(|cx| {
+            polls.set(polls.get() + 1);
+            execution.as_mut().poll(cx)
+        }));
+        (polls.get(), result.response_wire)
+    }
+
+    #[test]
+    fn a_deferred_deep_branch_waiting_for_its_upstream_does_not_spin() {
+        let (shallow, answer) = polls_while_a_nested_branch_waits(4, Duration::from_millis(200));
+        assert_eq!(
+            mosdns_dns_core::observe_answer_addresses(&answer).unwrap(),
+            vec![std::net::IpAddr::V4("192.0.2.91".parse().unwrap())]
+        );
+        let (deep, answer) = polls_while_a_nested_branch_waits(40, Duration::from_millis(200));
+        assert_eq!(
+            mosdns_dns_core::observe_answer_addresses(&answer).unwrap(),
+            vec![std::net::IpAddr::V4("192.0.2.91".parse().unwrap())]
+        );
+        let (deep_longer, _) = polls_while_a_nested_branch_waits(40, Duration::from_millis(600));
+        eprintln!(
+            "outer polls: shallow(4)={shallow} deep(40)={deep} deep(40, 3x wait)={deep_longer}"
+        );
+        // A wait-proportional count would triple with the wait; waking only on
+        // I/O keeps both at the same small, wait-independent count.
+        assert!(
+            deep_longer <= deep + 8,
+            "outer polls grow with the wait: {deep} -> {deep_longer}"
+        );
+        assert!(deep < 400, "outer polls while waiting: {deep}");
+    }
+
+    /// Never answers; ends only when its cancellation fires (as a real
+    /// upstream exchange does).
+    struct CancelOnlyExchange;
+
+    impl ExchangeExecutor for CancelOnlyExchange {
+        fn exchange<'a>(
+            &'a self,
+            _executable: ExecutableId,
+            _query: &'a [u8],
+            _deadline: Instant,
+            cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                cancellation.cancelled().await;
+                Err(super::ExchangeError::Upstream(UpstreamError::Connect))
+            })
+        }
+    }
+
+    #[test]
+    fn a_deep_branch_still_notices_cancellation_without_a_spinning_wake() {
+        let config = nested_fallback_config(40);
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).unwrap();
+        let options = HostOptions::default();
+        let request = query_name(95, "cancel.example");
+        let (header, question) = parse_query(&request).unwrap();
+        let mut checkpoint = ExecutionCheckpoint::new(true);
+        let root = TransportCancellation::new();
+        let polls = Cell::new(0_usize);
+        let catalog = cache.catalog();
+        let execution = super::execute_request_with_observation(
+            super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
+                config: &config,
+                cache: &catalog,
+                options: &options,
+                raw: &request,
+                header,
+                question,
+                switch_seed: Default::default(),
+            },
+            &CancelOnlyExchange,
+            root.clone(),
+            &mut checkpoint,
+        );
+        let mut execution = Box::pin(execution);
+        let canceller = root.clone();
+        let outcome = futures_like_block_on(async {
+            let cancel = async {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                canceller.cancel();
+            };
+            let run = std::future::poll_fn(|cx| {
+                polls.set(polls.get() + 1);
+                execution.as_mut().poll(cx)
+            });
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::join!(run, cancel).0
+            })
+            .await
+        });
+        // A cancelled query ends without a response; what matters is that it ends.
+        outcome.expect("a cancelled deep branch must finish, not hang");
+        assert!(
+            polls.get() < 400,
+            "outer polls while waiting: {}",
+            polls.get()
+        );
     }
 
     #[test]

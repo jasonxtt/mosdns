@@ -67,9 +67,19 @@ unrelated cache owners remain; changed source dependencies invalidate affected
 group/main-flow caches.
 Failure before the authority commit keeps the old authority, derived YAML and
 generation (invalidated disk caches may be empty). After publication, a failed
-artifact cleanup is reported as committed cleanup failure and stops the host;
-the committed authority remains and startup retries orphan cleanup. It must not
-report that an already committed deletion was rolled back.
+artifact cleanup of a deleted group's files is **not fatal** (5D-2a): the
+committed generation is correct without it, so the save succeeds, the host stays
+ready, a warning is logged, and the file stays listed as `pending_cleanup`
+(paths relative to the configuration root) in `GET /api/v1/system/health`. The
+cleanup is a sweep of numeric orphan artifacts (slot >= 50 and not an active
+group's); every later group save and every startup runs it again, so a pending
+file is removed once the fault is gone, and a file of a slot that a new group
+has since taken is never touched. The same applies to startup: an orphan that
+cannot be removed is a warning plus a pending entry, not a startup failure.
+Only this file removal was relaxed; failure to retire the old generation or to
+finish the managed store's retirement remains a committed-cleanup failure that
+stops the host. It must not report that an already committed deletion was rolled
+back.
 
 The standard path does not read/write Go's `upstream_overrides.json`; old state
 that relied on that file to supply missing `owned_upstreams` must be migrated

@@ -507,6 +507,15 @@ Go, cgo, plugin registries, listeners, upstreams, or network I/O.
   so the finite dispatch budget is reached before Rust stack overflow. Their
   ancestry order preserves synchronous primary-first selection; deferred weak
   entries do not retain cancelled/dropped branches. No new task or fuel root.
+  A deferred (nesting >= 16) branch that waits for its upstream is woken only by
+  that upstream: the pump re-wakes the outer future only to consume a finished
+  branch or to continue with more deferred work, never after merely polling a
+  waiting one. Before the 5D-2a fix a 40-level nested fallback waiting 200 ms for
+  one upstream polled the outer future 10036 times (32720 for 600 ms: linear in
+  the wait, a busy loop on the single core); after it, 20 times regardless of
+  the wait. Tests `a_deferred_deep_branch_waiting_for_its_upstream_does_not_spin`
+  and `a_deep_branch_still_notices_cancellation_without_a_spinning_wake` in
+  `execution.rs` keep both properties. Production nesting is far below 16.
 
 ### 4. Validation & Error Matrix
 

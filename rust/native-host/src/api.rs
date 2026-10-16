@@ -596,7 +596,13 @@ async fn process_connection(
                     "ready": state == "ready", "state": state, "runtime": "rust",
                     "version": crate::build_identity::VERSION,
                     "required_config_schema": null, "applied_config_schema": null,
-                    "config_management_enabled": false
+                    "config_management_enabled": false,
+                    // Deleted special-group files that could not be removed
+                    // yet (relative to the configuration root); retried on the
+                    // next save. Never makes the host unready.
+                    "pending_cleanup": control
+                        .as_ref()
+                        .map_or_else(Vec::new, |control| control.pending_cleanup())
                 }),
             )
         } else {
