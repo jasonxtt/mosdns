@@ -1,0 +1,13 @@
+{
+  "formal_attempts": 6,
+  "cleanup_receipts": 9,
+  "all_run_cleanups_pass": true,
+  "all_owned_processes_exited": true,
+  "remaining_owned_processes": [],
+  "owned_network_namespaces_absent": true,
+  "original_service": {
+    "MainPID": "827437",
+    "ActiveState": "active"
+  },
+  "original_service_unchanged": true
+}

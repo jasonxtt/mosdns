@@ -77,6 +77,35 @@ python3 -m unittest discover -s tools/e2e-1
 Do not publish private corpus/oracle/requests/mock logs/full metrics/configs.
 Public summaries use only numeric statistics, hashes and source identities.
 
+Fix-B replacement-input run (user authorized 2026-10-16 after the prior private
+archives were lost): rebuild unmodified BASE353371fa and Go offline, prepare one
+new immutable private snapshot, run Go oracle and BASE-native diagnostic probes
+before changing expected replies. `fix_b_inputs.py` accepts only the established
+ASCII case-insensitive `full:` no-v4/no-v6 difference; all other differences
+stop the preparation. The candidate is never an oracle input. Original
+numerical thresholds remain byte-identical; old-snapshot Go RSS is historical,
+so use fresh Go controls for the new input.
+
+`fix_b_matrix.py --root /private/task-root --freeze-record /private/frozen.json`
+pins the binaries/tools/all prepared files and runs G/N,N/G,G/N (seeds501/502/503)
+through the original20/100/500/1000/2000/4000/8000 ladder, preserving30s stages,
+5s settling,100QPS10s warmup and100QPS60s tail. Audit on/capacity100000;
+all attempts retained without automatic replacement. No builds or other tests
+during formal timing. F,16k/overload,5D-2/3 are outside this affected RSS scope.
+
+Field-byte diagnostics are excluded from timing acceptance. In a disposable
+BASE copy, include `audit_memory.rs` inside observer.rs and call its
+`audit_memory_report(&state)` in audit_snapshot before cloning. In a disposable
+candidate copy, include `audit_memory_compact.rs` inside observer/retention.rs
+and call `retention::audit_memory_report(&state)` at that same snapshot seam.
+Copy `audit_memory_launcher.rs` to native-host/examples/, build offline against
+the corresponding release target, and use the launcher with diagnostic.py.
+It reports requested live bytes (String/Vec capacities, Arc/layout/container
+storage, unique shared allocations, and stale weak layouts) on shutdown.
+Count independent slowest records once. Restore the uninstrumented sources
+and retain their manifest-verified binaries for formal timing. Public snapshot
+clones are not a substitute: cloning can discard original spare capacity.
+
 5D-fix-A uses `fix_a_matrix.py --root ... --freeze-record ...`: F followed by
 normal20/100/500, three Go/native pairs in G/N,N/G,G/N order, original timing
 and byte-identical frozen JSON. It pins tools, binaries and both oracles before

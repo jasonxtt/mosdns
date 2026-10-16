@@ -1,0 +1,23 @@
+{
+  "scope": "Unmodified config_rust package with saved production rule/data snapshot and original migrated settings; no endpoint mapping or E2E probes",
+  "execution": "VM only; unshare --net with no public interface/route",
+  "results": {
+    "base": {
+      "returncode": 0,
+      "summary": "SUMMARY gaps=0 cascades=0 globals=0 definitions=128",
+      "binary_sha256": "526704c85e0af4c6d2ee1ab6fa887903b6713b62e6162394c25c115f814d329d"
+    },
+    "native": {
+      "returncode": 0,
+      "summary": "SUMMARY gaps=0 cascades=0 globals=0 definitions=128",
+      "binary_sha256": "e69db9dbda8dbdfdfd3f9722eda3b1d35a5eea07dd877a0faa7e642146f6e996"
+    }
+  },
+  "config_tree_sha256": "b6d478f909b056fc99534ccf09a8c9365a1719e01c889337d53be5e63e8b9441",
+  "input_files_unchanged": true,
+  "stdout_byte_equal": true,
+  "stderr_byte_equal": true,
+  "evidence_archive_sha256": "ae76bd4fcb453ec42b0e2571010908285763274c264f9d0c527fb253160dc084",
+  "evidence_archive_bytes": 2355,
+  "evidence_member_count": 8
+}

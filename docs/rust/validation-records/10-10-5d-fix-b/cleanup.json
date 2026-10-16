@@ -1,0 +1,17 @@
+{
+  "checked_at_utc": "2026-10-16T17:23:26.876901+00:00",
+  "vm_task_root_deleted": true,
+  "vm_archive_copy_deleted": true,
+  "all_owned_processes_exited": true,
+  "owned_network_namespaces_absent": true,
+  "original_service": {
+    "MainPID": "827437",
+    "ActiveState": "active"
+  },
+  "original_service_unchanged": true,
+  "private_archive_saved_and_verified_locally": true,
+  "private_archive_sha256": "62f18fef57ad4d3fa99a2689f7e2ab07ce93191e5408c777bbd5c768b12bab03",
+  "executor_commit": false,
+  "push": false,
+  "deployment": false
+}

@@ -1,0 +1,39 @@
+{
+  "base": "353371fa9206d01c01eeb067bf8f7b64dd05f412",
+  "config_commit": "0412666b9648a1f52d831e43d7817abd7a5ab556",
+  "replacement_inputs_authorized": "2026-10-16",
+  "input_hashes": {
+    "config_all": "8b784f82d635eb1e215e63524805ac7c8fac753a6005df9fad0c69310d57158f",
+    "config_rust": "545895cef101460fd92ec9121fdb75dffcbb04c50b38d307884ca76d1abf5042",
+    "snapshot": "9473f55097e97f3dad9e61f12f030154d83415bd448c97bac5d04b4ae39e5716"
+  },
+  "prepared_sha256": "484affa620c8bdc96efce51f270544f796e2333d00baf736d2fcd79267a84770",
+  "binary_sha256": {
+    "mosdns-go": "b0dfa890f171648f9a0e0f210ab4b740b9770438d5e1bd7a24343cac933fa7bc",
+    "mosdns-base": "526704c85e0af4c6d2ee1ab6fa887903b6713b62e6162394c25c115f814d329d",
+    "mosdns-native": "e69db9dbda8dbdfdfd3f9722eda3b1d35a5eea07dd877a0faa7e642146f6e996"
+  },
+  "candidate_source_manifest_sha256": "240f76540d7f38dfcfae32fad34518fbfa3ab633c5d37268ce4774a3414682d9",
+  "candidate_manifest_sha256": "ca54a7efcfee94ed77aafa1d41bee40ea4cdc753947650f06d67a4a7ce7d8bf5",
+  "runtime_source_hashes": {
+    "rust/native-host/src/observer.rs": "d78e40bbcfb872946cf31b98ccce05ecce9df7d5eb4c59a608e9a51ee9d75653",
+    "rust/native-host/src/observer/retention.rs": "4bdc8f4c77a9aeb6c00124cd4f90e254352ff85059e3926e27d9732fd85928aa",
+    "rust/native-host/src/api.rs": "491f108690aaebc09169c788500a81be9c5a4944cda372a008e515a8b6f9719f",
+    "rust/native-host/src/api/audit_retention_tests.rs": "56cdfdf272cccb95c86709a0d72acdb4cc724a2abbf931755c6360dc6f909916",
+    "rust/native-host/tests/fixtures/audit-retention-base.jsonl": "4d377fd728383f51a6095e7d2510de4c8aa005962a680681190e312cecc9b8ab"
+  },
+  "freeze_sha256": "afe441e906ab0ca0d0ffad2c5d36c854c2d61a5725b79608e70f54d6cb8c70a9",
+  "kernel": "7.0.9-x64v3-xanmod1",
+  "machine": "x86_64",
+  "clk_tck": 100,
+  "rust": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "go": "go version go1.26.4 linux/amd64",
+  "sut_cpu": 0,
+  "helpers_cpu": 1,
+  "cargo_jobs": 2,
+  "audit_capacity": 100000,
+  "original_service": [
+    "MainPID=827437",
+    "ActiveState=active"
+  ]
+}

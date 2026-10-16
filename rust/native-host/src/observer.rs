@@ -11,29 +11,33 @@ use std::time::{Duration, SystemTime};
 use mosdns_sequence_core::ExecutableId;
 use mosdns_upstream_core::TransportCancellation;
 
+mod retention;
+use retention::AuditRetention;
+pub(crate) use retention::RetainedAuditRecord;
+
 /// One final-wire Answer record retained for diagnostics.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AuditAnswer {
     pub rrtype: u16,
     pub ttl: u32,
     pub data: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum AnswerDetailsStatus {
     Complete,
     RawRdata,
     DecodeError,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ResponseFlags {
     pub aa: bool,
     pub tc: bool,
     pub ra: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ResponseDetails {
     pub rcode: u16,
     pub flags: ResponseFlags,
@@ -165,7 +169,7 @@ impl AuditClock for AuditTestClock {
 }
 
 /// The lifecycle result of an admitted query at the existing transport boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum QueryTerminalOutcome {
     /// The transport operation completed successfully; client delivery is not implied.
     SendSucceeded,
@@ -193,7 +197,7 @@ impl std::fmt::Display for AdmissionError {
 impl std::error::Error for AdmissionError {}
 
 /// The listener transport that admitted a query.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum QueryTransport {
     /// A UDP datagram listener.
     Udp,
@@ -202,7 +206,7 @@ pub enum QueryTransport {
 }
 
 /// Cache disposition for one admitted query.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum CacheStatus {
     /// Execution ended before cache disposition was established.
     Undetermined,
@@ -215,7 +219,7 @@ pub enum CacheStatus {
 }
 
 /// Origin of a formed DNS response.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ResponseSource {
     /// The final response was supplied by the cache.
     Cache,
@@ -226,7 +230,7 @@ pub enum ResponseSource {
 }
 
 /// Whether execution formed a DNS response, with its code and source when present.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ResponseState {
     /// A response was formed; this does not imply that the client received it.
     Dns { rcode: u16, source: ResponseSource },
@@ -235,7 +239,7 @@ pub enum ResponseState {
 }
 
 /// Result of one upstream network attempt, in execution order.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum UpstreamAttemptOutcome {
     /// The upstream supplied a DNS response.
     Response,
@@ -250,7 +254,7 @@ pub enum UpstreamAttemptOutcome {
 }
 
 /// The destination transport used by a configured upstream leg.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum UpstreamTransport {
     Udp,
     Tcp,
@@ -270,7 +274,7 @@ impl UpstreamTransport {
 }
 
 /// The selected network leg in the optional schema-versioned diagnostics.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UpstreamDiagnosticSelected {
     pub branch_id: Option<usize>,
     pub entry: String,
@@ -279,7 +283,7 @@ pub struct UpstreamDiagnosticSelected {
 }
 
 /// One started configured entry in the optional schema-versioned diagnostics.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UpstreamDiagnosticAttempt {
     pub ordinal: usize,
     pub branch_id: Option<usize>,
@@ -292,7 +296,7 @@ pub struct UpstreamDiagnosticAttempt {
 
 /// One query-local branch in schema-2 diagnostics. The root branch is id 0;
 /// child policy branches point to their creating branch through parent_id.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UpstreamDiagnosticBranch {
     pub id: usize,
     pub parent_id: Option<usize>,
@@ -305,7 +309,7 @@ pub struct UpstreamDiagnosticBranch {
 /// Native-only schema 1 supplier diagnostics. Old supplier fields remain the
 /// compatibility surface; this object is emitted only for new detailed native
 /// records with actual structured instrumentation.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UpstreamDiagnostics {
     pub schema_version: u8,
     pub branches: Vec<UpstreamDiagnosticBranch>,
@@ -496,7 +500,7 @@ impl Drop for UpstreamAttemptTracker {
 }
 
 /// One actual upstream attempt made by the request execution path.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UpstreamAttemptRecord {
     /// Configured upstream identity; never a query or client value.
     pub upstream: String,
@@ -636,7 +640,7 @@ impl Index<usize> for UpstreamAttemptList {
 }
 
 /// Classification for a local failure that produced or prevented a response.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum LocalFailureKind {
     /// No upstream leg produced a usable response.
     NoUsableUpstreamResponse,
@@ -647,7 +651,7 @@ pub enum LocalFailureKind {
 }
 
 /// Request-level provenance for a final upstream or local failure.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum FailureProvenance {
     /// An upstream leg timed out.
     UpstreamTimeout { upstream: String },
@@ -658,7 +662,7 @@ pub enum FailureProvenance {
 }
 
 /// One bounded typed record retained when detailed audit capture is enabled.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AuditRecord {
     /// Wall-clock time at query admission.
     pub timestamp: SystemTime,
@@ -867,8 +871,8 @@ pub(crate) struct AuditStatsSnapshot {
 }
 
 pub(crate) struct AuditReadSnapshot {
-    pub records: Vec<Arc<AuditRecord>>,
-    pub slowest: Vec<Arc<AuditRecord>>,
+    pub records: Vec<Arc<RetainedAuditRecord>>,
+    pub slowest: Vec<Arc<RetainedAuditRecord>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1192,8 +1196,9 @@ impl MetricsState {
 #[derive(Default)]
 struct ObserverState {
     metrics: MetricsState,
-    audit_records: VecDeque<Arc<AuditRecord>>,
-    slowest_records: Vec<Arc<AuditRecord>>,
+    audit_records: VecDeque<Arc<RetainedAuditRecord>>,
+    slowest_records: Vec<Arc<RetainedAuditRecord>>,
+    retention: AuditRetention,
     audit_timings: VecDeque<AuditTimingSnapshot>,
     audit_elapsed_micros: u128,
     audit_capacity: usize,
@@ -1398,11 +1403,12 @@ impl QueryObserver {
                 observation.upstream_attempts.metric_attempts(),
                 observation.elapsed,
             );
-            let record = Arc::new(make_audit_record(observation));
+            let record = make_audit_record(observation);
             self.decrement_in_flight();
             if state.audit_capacity == 0 {
                 return;
             }
+            let record = Arc::new(state.retention.retain(record));
             state.slowest_records.push(Arc::clone(&record));
             state.slowest_records.sort_by(|left, right| {
                 right
@@ -1465,6 +1471,7 @@ impl QueryObserver {
         state.audit_records.clear();
         state.slowest_records.clear();
         state.audit_timings.clear();
+        state.retention = AuditRetention::default();
         state.audit_elapsed_micros = 0;
         state.evicted_total = 0;
     }
@@ -1475,6 +1482,7 @@ impl QueryObserver {
         state.audit_records.clear();
         state.slowest_records.clear();
         state.audit_timings.clear();
+        state.retention = AuditRetention::default();
         state.audit_elapsed_micros = 0;
         state.evicted_total = 0;
     }
@@ -1642,7 +1650,7 @@ impl QueryObserver {
             records: state
                 .audit_records
                 .iter()
-                .map(|record| record.as_ref().clone())
+                .map(|record| record.expand())
                 .collect(),
             evicted_total: state.evicted_total,
         }
@@ -1870,6 +1878,70 @@ mod tests {
             ["route-a".to_owned(), "route-b".to_owned()],
             capacity,
         )
+    }
+
+    #[test]
+    fn compact_retention_round_trips_complete_records_without_losing_optional_values() {
+        let mut original = audit_record(observation(Duration::from_micros(123)), "a.example.");
+        original.domain_set = Some(String::new());
+        original.matched_rule_source = Some("provider:名单".to_owned());
+        original.failure_provenance = Some(FailureProvenance::UpstreamTimeout {
+            upstream: "route-b".to_owned(),
+        });
+        original.response_details.answers = vec![super::AuditAnswer {
+            rrtype: 65000,
+            ttl: 42,
+            data: "arbitrary \\000 raw data".to_owned(),
+        }];
+        original.response_details.answer_decode_error = Some("decode detail".to_owned());
+        let mut retention = super::retention::AuditRetention::default();
+        let retained = retention.retain(original.clone());
+        assert_eq!(retained.expand(), original);
+        assert!(std::mem::size_of_val(&retained) <= 160);
+    }
+
+    #[test]
+    fn compact_ring_keeps_concurrent_canceled_records_and_releases_cleared_snapshots() {
+        let observer = std::sync::Arc::new(observer(true, 4));
+        let threads: Vec<_> = (0..4)
+            .map(|worker| {
+                let observer = std::sync::Arc::clone(&observer);
+                std::thread::spawn(move || {
+                    for index in 0..128 {
+                        observer.admit_query();
+                        let mut event = observation(Duration::from_micros(index));
+                        event.outcome = QueryTerminalOutcome::Canceled;
+                        observer.record_terminal(event, |event| {
+                            let mut record =
+                                audit_record(event, &format!("{worker}-{index}.example."));
+                            record.final_sequence = Some(format!("generation-{}", index / 8));
+                            record
+                        });
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let metrics = observer.metrics_snapshot();
+        assert_eq!(metrics.completed_total, 512);
+        assert_eq!(metrics.in_flight, 0);
+        let snapshot = observer.audit_read_snapshot().unwrap();
+        assert_eq!(snapshot.records.len(), 4);
+        assert_eq!(observer.audit_snapshot().evicted_total, 508);
+        assert!(
+            snapshot
+                .records
+                .iter()
+                .all(|record| record.common().terminal_outcome == QueryTerminalOutcome::Canceled)
+        );
+        let payload = std::sync::Arc::downgrade(&snapshot.records[0].response_details);
+        observer.set_audit_capacity(0);
+        assert!(observer.audit_snapshot().records.is_empty());
+        assert!(payload.upgrade().is_some());
+        drop(snapshot);
+        assert!(payload.upgrade().is_none());
     }
 
     #[test]

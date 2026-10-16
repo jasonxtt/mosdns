@@ -1,0 +1,33 @@
+{
+  "container_requested_bytes": 5312512,
+  "excludes": "allocator size-class overhead, fragmentation, transient query/read allocations",
+  "fields_requested_bytes": {
+    "answer_data": 871,
+    "answer_decode_error": 0,
+    "answer_vec": 2528,
+    "diagnostics": 9367,
+    "domain_set": 3129,
+    "effective_tag": 1858,
+    "failure": 0,
+    "final_sequence": 1800,
+    "final_upstream": 632,
+    "matched_group": 0,
+    "matched_rule_source": 2737,
+    "qname": 1898343,
+    "response_inline_and_arc": 5832,
+    "response_source": 76,
+    "row_inline_and_arc": 14443200,
+    "selected_upstream": 1456,
+    "stale_weak_allocations": 44520,
+    "template_inline_and_arc": 67488,
+    "upstream_attempts": 2510,
+    "upstream_targets": 1365
+  },
+  "record_size": 128,
+  "requested_bytes_per_ring_record": 218.00224,
+  "ring_len": 100000,
+  "total_requested_bytes": 21800224,
+  "unique_records": 100300,
+  "unique_responses": 81,
+  "unique_templates": 111
+}

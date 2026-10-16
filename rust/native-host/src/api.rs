@@ -31,7 +31,8 @@ use crate::config::{CacheKind, CompiledConfig};
 use crate::managed::ManagedDomainSet;
 use crate::observer::{
     AnswerDetailsStatus, AuditClock, AuditReadSnapshot, AuditRecord, AuditStatsSnapshot,
-    AuditTimingSnapshot, QueryObserver, ResponseState, UpstreamAttemptOutcome, UpstreamDiagnostics,
+    AuditTimingSnapshot, QueryObserver, ResponseState, RetainedAuditRecord, UpstreamAttemptOutcome,
+    UpstreamDiagnostics,
 };
 use crate::udp::{drain_tasks, reap_one_task};
 
@@ -2174,27 +2175,27 @@ fn text_matches(value: &str, query: &str, exact: bool) -> bool {
     }
 }
 
-fn projected_query_name(record: &AuditRecord) -> String {
-    if record.qname == "." {
+fn projected_query_name(record: &RetainedAuditRecord) -> String {
+    if record.qname.as_ref() == "." {
         ".".to_owned()
     } else {
         record.qname.trim_end_matches('.').to_owned()
     }
 }
 
-fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
+fn audit_record_matches(record: &RetainedAuditRecord, filter: &AuditFilter) -> bool {
     let query_match = filter.q.as_ref().is_none_or(|query| {
         let exact = filter.exact;
         let ip_query = normalized_ip(query);
         let mut values = vec![
             projected_query_name(record),
             canonical_ip(record.client_addr.ip()).to_string(),
-            record.trace_id.clone(),
+            record.trace_id.to_string(),
         ];
-        values.extend(record.domain_set.clone());
-        values.extend(record.effective_tag.clone());
-        values.extend(record.matched_rule_source.clone());
-        values.extend(record.selected_upstream.clone());
+        values.extend(record.common().domain_set.clone());
+        values.extend(record.common().effective_tag.clone());
+        values.extend(record.common().matched_rule_source.clone());
+        values.extend(record.common().selected_upstream.clone());
         values.extend(
             record
                 .response_details
@@ -2240,11 +2241,11 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
     let domain_set_match = filter
         .domain_set
         .as_ref()
-        .is_none_or(|value| record.domain_set.as_deref() == Some(value));
+        .is_none_or(|value| record.common().domain_set.as_deref() == Some(value));
     let effective_match = filter
         .effective_tag
         .as_ref()
-        .is_none_or(|value| record.effective_tag.as_deref() == Some(value));
+        .is_none_or(|value| record.common().effective_tag.as_deref() == Some(value));
     let exact_domain_match = filter
         .exact_domain
         .as_ref()
@@ -2260,7 +2261,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
 }
 
 fn audit_logs_from_records(
-    records: Vec<std::sync::Arc<AuditRecord>>,
+    records: Vec<Arc<RetainedAuditRecord>>,
     page: usize,
     limit: usize,
 ) -> Result<AuditLogsResponse, ()> {
@@ -2279,7 +2280,7 @@ fn audit_logs_from_records(
             .rev()
             .skip(start)
             .take(limit)
-            .map(|record| project_log(record)),
+            .map(|record| project_log(&record.expand())),
     );
     Ok(AuditLogsResponse {
         pagination: AuditLogPagination {
@@ -2326,8 +2327,8 @@ enum AuditReadFailure {
 }
 
 fn rank_items(
-    records: &[std::sync::Arc<AuditRecord>],
-    key: impl Fn(&AuditRecord) -> Option<String>,
+    records: &[Arc<RetainedAuditRecord>],
+    key: impl Fn(&RetainedAuditRecord) -> Option<String>,
     shutdown: &TransportCancellation,
 ) -> Result<Vec<AuditRankItem>, AuditReadFailure> {
     let mut keys = Vec::new();
@@ -2423,12 +2424,20 @@ fn rank_response(
         )?)
         .map_err(|_| AuditReadFailure::Allocation),
         AuditReadKind::RankDomainSet => Response::try_json_compact(&take_rank_items(
-            rank_items(&records, |record| record.domain_set.clone(), shutdown)?,
+            rank_items(
+                &records,
+                |record| record.common().domain_set.clone(),
+                shutdown,
+            )?,
             limit,
         )?)
         .map_err(|_| AuditReadFailure::Allocation),
         AuditReadKind::RankEffective => Response::try_json_compact(&take_rank_items(
-            rank_items(&records, |record| record.effective_tag.clone(), shutdown)?,
+            rank_items(
+                &records,
+                |record| record.common().effective_tag.clone(),
+                shutdown,
+            )?,
             limit,
         )?)
         .map_err(|_| AuditReadFailure::Allocation),
@@ -2445,7 +2454,7 @@ fn rank_response(
                     .slowest
                     .iter()
                     .take(limit)
-                    .map(|record| project_log(record)),
+                    .map(|record| project_log(&record.expand())),
             );
             Response::try_json_compact(&records).map_err(|_| AuditReadFailure::Allocation)
         }
@@ -3959,6 +3968,10 @@ fn cache_show(
     }
     Ok(body)
 }
+
+#[cfg(test)]
+#[path = "api/audit_retention_tests.rs"]
+mod audit_retention_tests;
 
 #[cfg(test)]
 mod tests {
