@@ -1,0 +1,32 @@
+{
+  "container_requested_bytes": 5246976,
+  "diagnostics_option_size": 136,
+  "excludes": "allocator size-class overhead, fragmentation, transient query/read allocations",
+  "failure_option_size": 32,
+  "fields_requested_bytes": {
+    "answer_data": 1514240,
+    "answer_decode_error": 0,
+    "answer_vec": 12113920,
+    "diagnostics": 889580,
+    "domain_set": 1676439,
+    "effective_tag": 1325395,
+    "failure": 0,
+    "final_sequence": 1309169,
+    "final_upstream": 705422,
+    "matched_group": 0,
+    "matched_rule_source": 1749067,
+    "qname": 1898503,
+    "record_inline_and_arc": 60982400,
+    "response_source": 1160,
+    "selected_upstream": 1501824,
+    "trace_id": 6820400,
+    "upstream_attempts": 33895,
+    "upstream_targets": 1407960
+  },
+  "record_size": 592,
+  "requested_bytes_per_ring_record": 991.7635,
+  "response_details_size": 56,
+  "ring_len": 100000,
+  "total_requested_bytes": 99176350,
+  "unique_records": 100300
+}

@@ -215,3 +215,67 @@ because an implementation contract existed.
 Wrong: a named cache supplier bypasses all priorities and returns every tag.
 Correct: select the established fallback decision, retaining no-V flags and
 unknown user labels when no core matches.
+
+## Compact retention (5D-fix-B)
+
+### 1. Scope / Trigger
+
+Native audit retention memory optimization; no API/config/capacity migration.
+
+### 2. Signatures
+
+Public `AuditRecord` and `AuditSnapshot` remain lossless owned projections.
+Internally `AuditRetention::retain` creates `RetainedAuditRecord`; `expand`
+reconstructs the original record before the existing log projector runs.
+
+### 3. Contracts
+
+Per-row storage owns timestamp/client socket/elapsed, exact-length qname and
+native numeric nonce/counter (noncanonical trace IDs retain exact text).
+Immutable common facts, including optional diagnostics/failures, are shared
+separately from response details. New response payloads discard spare vector
+and string capacity without changing any answer or text. Filters/ranks read
+compact records; only selected output rows expand on diagnostic workers.
+
+Each of two weak sharing caches has 4096 fixed slots, full equality checks and
+no strong payload ownership. Collisions only reduce sharing. Obsolete payloads
+drop after their last ring/slowest/read-snapshot reference. Expired weak slots
+can retain their fixed Arc allocation layout, bounded by those slot counts;
+clear/capacity changes also reset the caches. There is no growing query-name
+intern table or configuration-generation owner retained by a record.
+
+Preserve all existing retention, slowest ordering, settings, capture, worker
+permit and recoverable-allocation contracts above. No byte eviction, answer
+truncation, capacity reduction or output normalization is authorized.
+
+Existing display differences from Go are unchanged: native may populate
+`final_sequence`/`final_upstream` where Go left them empty; without a mapper
+default native `domain_set` is empty where Go uses `unmatched_rule`.
+
+### 4. Validation / Error Matrix
+
+Hash collision -> separate equal-checked payloads. Expired weak hint -> create
+a new payload. Clear/resize -> reset ring, slowest, timings and sharing hints;
+an already admitted diagnostic snapshot remains valid. Noncanonical trace ID
+-> exact text fallback. DNS/lifetime metrics remain independent of retention.
+
+### 5. Good / Base / Bad Cases
+
+Good: many cache hits share immutable route/answer data. Base: an unknown RR's
+full data and a legacy trace ID round-trip exactly. Bad: use a template's empty
+per-row placeholders as output or keep query strings in a growing strong map.
+
+### 6. Tests Required
+
+BASE-generated response bytes for status/capacity/stats/windows/logs/domain
+logs/ranks/start/stop/clear; full-record optional-value round-trip; trace byte
+and ordering preservation; collisions; old-generation weak reclamation;
+concurrent canceled terminal records, eviction, resize and held snapshots.
+Production-shaped field allocation measurements and frozen RSS/latency gates
+are separate evidence; a smaller struct alone does not establish an RSS PASS.
+
+### 7. Wrong vs Correct
+
+Wrong: deep-expand the full ring under the DNS-thread observer lock for every
+HTTP read. Correct: snapshot compact Arc handles, filter/rank on a bounded
+worker and expand only output rows through the unchanged projector.

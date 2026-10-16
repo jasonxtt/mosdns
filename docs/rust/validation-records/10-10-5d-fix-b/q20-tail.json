@@ -1,0 +1,157 @@
+{
+  "scope": "q20 stable seed502 event correlation, not exclusive supplier or latency decomposition; no sample removed or threshold changed",
+  "runs": [
+    {
+      "role": "go",
+      "seed": 502,
+      "stable_over_50ms": 7,
+      "corpus_indexes": [
+        956,
+        100,
+        1318,
+        1238,
+        1451,
+        734,
+        496
+      ],
+      "latency_ms": [
+        85.83922,
+        83.347034,
+        83.582505,
+        84.426989,
+        84.994885,
+        82.725556,
+        82.873236
+      ],
+      "every_slow_row_has_foreignecs_https_response_in_its_window": true,
+      "correlation": [
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 3.521543
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.910139
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.81471
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 2.656792
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 3.13641
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.740128
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.810839
+        }
+      ],
+      "configured_mock_delay_ms": 80
+    },
+    {
+      "role": "native",
+      "seed": 502,
+      "stable_over_50ms": 7,
+      "corpus_indexes": [
+        956,
+        100,
+        1318,
+        1238,
+        1451,
+        734,
+        496
+      ],
+      "latency_ms": [
+        84.875614,
+        86.146321,
+        85.597682,
+        85.750159,
+        82.861977,
+        83.479488,
+        85.452022
+      ],
+      "every_slow_row_has_foreignecs_https_response_in_its_window": true,
+      "correlation": [
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 3.257475
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 3.573347
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.714795
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 3.350765
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.742671
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 1.799391
+        },
+        {
+          "groups": [
+            "foreignecs:https",
+            "nocnfake:udp"
+          ],
+          "foreign_response_to_client_finish_ms": 2.880062
+        }
+      ],
+      "configured_mock_delay_ms": 80
+    }
+  ]
+}

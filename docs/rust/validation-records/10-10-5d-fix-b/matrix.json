@@ -1,0 +1,113 @@
+{
+  "freeze_sha256": "afe441e906ab0ca0d0ffad2c5d36c854c2d61a5725b79608e70f54d6cb8c70a9",
+  "plan": [
+    {
+      "name": "go-r1",
+      "role": "go",
+      "seed": 501
+    },
+    {
+      "name": "native-r1",
+      "role": "native",
+      "seed": 501
+    },
+    {
+      "name": "native-r2",
+      "role": "native",
+      "seed": 502
+    },
+    {
+      "name": "go-r2",
+      "role": "go",
+      "seed": 502
+    },
+    {
+      "name": "go-r3",
+      "role": "go",
+      "seed": 503
+    },
+    {
+      "name": "native-r3",
+      "role": "native",
+      "seed": 503
+    }
+  ],
+  "attempts": [
+    {
+      "name": "go-r1",
+      "role": "go",
+      "seed": 501,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-r1",
+      "role": "native",
+      "seed": 501,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-r2",
+      "role": "native",
+      "seed": 502,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-r2",
+      "role": "go",
+      "seed": 502,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "go-r3",
+      "role": "go",
+      "seed": 503,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    },
+    {
+      "name": "native-r3",
+      "role": "native",
+      "seed": 503,
+      "returncode": 0,
+      "cleanup": {
+        "all_owned_processes_exited": true,
+        "namespace_deleted": true,
+        "original_service_unchanged": true
+      }
+    }
+  ],
+  "inputs": "user-approved replacement snapshot 2026-10-16",
+  "rates": [
+    20,
+    100,
+    500,
+    1000,
+    2000,
+    4000,
+    8000
+  ]
+}

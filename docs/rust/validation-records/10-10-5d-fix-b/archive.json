@@ -1,0 +1,13 @@
+{
+  "private_archive_name": "private-evidence-20261017.tar.gz",
+  "sha256": "62f18fef57ad4d3fa99a2689f7e2ab07ce93191e5408c777bbd5c768b12bab03",
+  "bytes": 225745570,
+  "member_count": 4771,
+  "all_six_raw_runs_verified": true,
+  "formal_raw_request_rows": 2853600,
+  "all_matrix_pinned_file_hashes_verified": true,
+  "all_runtime_source_hashes_verified": true,
+  "diagnostics_build_failures_review_package_present": true,
+  "targets_node_modules_excluded": true,
+  "final_cleanup_receipt": "separate; created after VM deletion"
+}
