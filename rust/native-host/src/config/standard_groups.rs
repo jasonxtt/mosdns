@@ -173,13 +173,31 @@ pub(crate) fn state_bytes(groups: &[Group]) -> Vec<u8> {
     serde_json::to_vec_pretty(&values).unwrap_or_default()
 }
 impl Profile {
-    pub(crate) fn recover(&self) -> Result<(), ConfigError> {
+    /// Restores the derived YAML, then sweeps orphan artifacts. The sweep is
+    /// best effort: the paths it could not remove are returned (pending
+    /// cleanup), never an error, because the committed state is already right.
+    pub(crate) fn recover(&self) -> Result<Vec<String>, ConfigError> {
         if read_state(&self.base)? != self.expected_state {
             return Err(error("group state changed before startup recovery"));
         }
         crate::runtime_snapshot::write_durably(&self.base.join(GENERATED), &self.generated)
             .map_err(|e| error(format!("generated config recovery: {e}")))?;
+        Ok(self.sweep_orphans())
+    }
+
+    /// Removes the artifacts of groups that no longer exist (slot >= 50 and not
+    /// active). Every failure is logged as a warning and returned as the path
+    /// relative to the configuration root (a directory that cannot be listed
+    /// as `dir/ (listing failed)`); a later sweep retries it.
+    pub(crate) fn sweep_orphans(&self) -> Vec<String> {
         let active: BTreeSet<_> = self.groups.iter().map(|g| g.slot).collect();
+        let mut pending = Vec::new();
+        let mut fail = |relative: String, reason: &dyn std::fmt::Display| {
+            crate::diag::warn_line!(
+                "special group cleanup pending: cannot remove {relative}: {reason}"
+            );
+            pending.push(relative);
+        };
         for (directory, prefix, suffix) in [
             ("cache", "cache_special_", ".dump"),
             ("srs", "special_", ".json"),
@@ -188,10 +206,19 @@ impl Profile {
             let paths = match std::fs::read_dir(self.base.join(directory)) {
                 Ok(paths) => paths,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(error(e.to_string())),
+                Err(e) => {
+                    fail(format!("{directory}/ (listing failed)"), &e);
+                    continue;
+                }
             };
             for path in paths {
-                let path = path.map_err(|e| error(e.to_string()))?;
+                let path = match path {
+                    Ok(path) => path,
+                    Err(e) => {
+                        fail(format!("{directory}/ (listing failed)"), &e);
+                        continue;
+                    }
+                };
                 let name = path.file_name();
                 let Some(name) = name.to_str() else {
                     continue;
@@ -204,11 +231,17 @@ impl Profile {
                     continue;
                 };
                 if slot >= 50 && !active.contains(&slot) {
-                    std::fs::remove_file(path.path()).map_err(|e| error(e.to_string()))?;
+                    match std::fs::remove_file(path.path()) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => fail(format!("{directory}/{name}"), &e),
+                    }
                 }
             }
         }
-        Ok(())
+        pending.sort();
+        pending.dedup();
+        pending
     }
     pub(crate) fn view(&self, group: &Group) -> serde_json::Value {
         let resolution = &self.resolutions[&group.slot];

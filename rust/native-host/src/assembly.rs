@@ -556,9 +556,12 @@ impl HostAssembly {
             None => (None, None),
         };
         if let Some(profile) = &self.config.standard_groups {
-            profile
+            // Orphan artifacts that cannot be removed do not stop the host;
+            // they stay visible in health and the next save retries them.
+            let pending = profile
                 .recover()
                 .map_err(|error| HostRunError::Task(error.to_string()))?;
+            self.control().set_pending_cleanup(pending);
         }
         Ok(BoundHost {
             control: self.control(),

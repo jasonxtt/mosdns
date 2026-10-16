@@ -455,3 +455,202 @@ plugins:
     });
     drop(assemblies);
 }
+
+/// The configuration of the cleanup tests: one proxy object, one forward group
+/// and one DNS listener, with the management API.
+fn cleanup_config(tree: &Tree, api: u16, dns: u16, upstream: u16) {
+    std::fs::write(
+        tree.0.join("config.yaml"),
+        format!(
+            r"log: {{level: error}}
+api: {{http: '127.0.0.1:{api}'}}
+include: [sub_config/special_groups.yaml]
+plugins:
+{ONE}
+  - tag: switch4
+    type: switch4
+    args: {{initial_value: rule/switch4.txt}}
+  - tag: normal
+    type: aliapi
+    args: {{proxy: $p, upstreams: [{{tag: original, addr: 'udp://127.0.0.1:{upstream}'}}]}}
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $special_upstream_matcher
+      - exec: $sequence_special
+      - exec: $normal
+  - tag: server
+    type: udp_server
+    args: {{listen: '127.0.0.1:{dns}', entry: entry, enable_audit: true}}
+"
+        ),
+    )
+    .unwrap();
+}
+
+async fn health(api: u16) -> (u16, serde_json::Value) {
+    http(api, "GET", "/api/v1/system/health", serde_json::Value::Null).await
+}
+
+/// The fault goes away (the name is a plain file again); the next save retries.
+async fn retried_by_the_next_save(
+    api: u16,
+    blocker: &std::path::Path,
+    sources: &serde_json::Value,
+) {
+    std::fs::remove_dir_all(blocker).unwrap();
+    std::fs::write(blocker, "stale").unwrap();
+    let (status, saved) = http(
+        api,
+        "POST",
+        "/api/v1/special-groups",
+        serde_json::json!({"name":"two","upstream_sources":sources}),
+    )
+    .await;
+    assert_eq!((status, saved["slot"].as_u64()), (200, Some(50)), "{saved}");
+    // Slot 50 is in use again, so its files are not orphans and must stay.
+    assert!(blocker.exists(), "an active group's file is never swept");
+    assert_eq!(
+        health(api).await.1["pending_cleanup"],
+        serde_json::json!([])
+    );
+    let (status, _) = http(
+        api,
+        "DELETE",
+        "/api/v1/special-groups/50",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, 204);
+    assert!(!blocker.exists(), "the retried cleanup removed the file");
+    assert_eq!(
+        health(api).await.1["pending_cleanup"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn an_undeletable_group_artifact_after_a_save_is_pending_not_fatal() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let host = tokio::task::LocalSet::new().block_on(&runtime, async {
+        let tree = Tree::new("cleanup-save", ONE, true);
+        std::fs::write(tree.0.join("webinfo/special_upstream_groups.json"), "[]").unwrap();
+        let cancel = mosdns_upstream_core::TransportCancellation::new();
+        let (a, stub_a) = stub(10, cancel.clone()).await;
+        let (dns, api) = (port(), port());
+        cleanup_config(&tree, api, dns, a);
+        let host = mosdns_native_host::HostAssembly::from_config_file(&tree.0.join("config.yaml"))
+            .unwrap();
+        let bound = host.bind_host().await.unwrap();
+        let scope = mosdns_upstream_core::TransportCancellation::new();
+        let serve_scope = scope.clone();
+        let serving = tokio::task::spawn_local(async move {
+            bound.serve(serve_scope).await.unwrap();
+        });
+        let sources = serde_json::json!([{"kind":"group","plugin_tag":"normal"}]);
+        let (status, saved) = http(
+            api,
+            "POST",
+            "/api/v1/special-groups",
+            serde_json::json!({"name":"one","upstream_sources":sources}),
+        )
+        .await;
+        assert_eq!((status, saved["slot"].as_u64()), (200, Some(50)), "{saved}");
+        assert_eq!(
+            health(api).await.1["pending_cleanup"],
+            serde_json::json!([])
+        );
+
+        // The group's manual file cannot be removed: a directory has its name.
+        let blocker = tree.0.join("rule/special_50.txt");
+        let _ = std::fs::remove_file(&blocker);
+        std::fs::create_dir_all(blocker.join("inner")).unwrap();
+        let (status, _) = http(
+            api,
+            "DELETE",
+            "/api/v1/special-groups/50",
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(
+            status, 204,
+            "a committed deletion is not undone by its cleanup"
+        );
+        let (status, state) = health(api).await;
+        assert_eq!(status, 200, "the host stays ready: {state}");
+        assert_eq!(state["ready"], true);
+        assert_eq!(
+            state["pending_cleanup"],
+            serde_json::json!(["rule/special_50.txt"])
+        );
+        assert_eq!(
+            query(dns, "after.example.com").await.last(),
+            Some(&10),
+            "DNS keeps answering"
+        );
+        let (_, listed) = http(
+            api,
+            "GET",
+            "/api/v1/special-groups",
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(
+            listed,
+            serde_json::json!([]),
+            "the deletion stays committed"
+        );
+
+        retried_by_the_next_save(api, &blocker, &sources).await;
+        scope.cancel();
+        serving.await.unwrap();
+        cancel.cancel();
+        stub_a.await.unwrap();
+        host
+    });
+    drop(host);
+}
+
+#[test]
+fn an_undeletable_orphan_at_startup_is_pending_not_fatal() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let host = tokio::task::LocalSet::new().block_on(&runtime, async {
+        let tree = Tree::new("cleanup-start", ONE, true);
+        std::fs::write(tree.0.join("webinfo/special_upstream_groups.json"), "[]").unwrap();
+        let cancel = mosdns_upstream_core::TransportCancellation::new();
+        let (a, stub_a) = stub(10, cancel.clone()).await;
+        let (dns, api) = (port(), port());
+        cleanup_config(&tree, api, dns, a);
+        // One orphan that can be removed and one that cannot.
+        std::fs::write(tree.0.join("cache/cache_special_61.dump"), "x").unwrap();
+        std::fs::create_dir_all(tree.0.join("srs/special_62.json/inner")).unwrap();
+        let host = mosdns_native_host::HostAssembly::from_config_file(&tree.0.join("config.yaml"))
+            .unwrap();
+        let bound = host.bind_host().await.expect("startup continues");
+        let scope = mosdns_upstream_core::TransportCancellation::new();
+        let serve_scope = scope.clone();
+        let serving = tokio::task::spawn_local(async move {
+            bound.serve(serve_scope).await.unwrap();
+        });
+        assert!(!tree.0.join("cache/cache_special_61.dump").exists());
+        let (status, state) = health(api).await;
+        assert_eq!(status, 200, "{state}");
+        assert_eq!(
+            state["pending_cleanup"],
+            serde_json::json!(["srs/special_62.json"])
+        );
+        assert_eq!(query(dns, "start.example.com").await.last(), Some(&10));
+        scope.cancel();
+        serving.await.unwrap();
+        cancel.cancel();
+        stub_a.await.unwrap();
+        host
+    });
+    drop(host);
+}

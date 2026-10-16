@@ -87,6 +87,9 @@ struct Control {
     management_drained: Notify,
     recovery_required: Cell<bool>,
     closed: Cell<bool>,
+    /// Deleted special-group artifacts that could not be removed yet, relative
+    /// to the configuration root. Non-fatal; the next sweep retries them.
+    pending_cleanup: RefCell<Vec<String>>,
     observer: Arc<QueryObserver>,
     shutdown: RefCell<Option<mosdns_upstream_core::TransportCancellation>>,
     #[cfg(test)]
@@ -446,6 +449,7 @@ impl RuntimeControl {
             management_drained: Notify::new(),
             recovery_required: Cell::new(false),
             closed: Cell::new(false),
+            pending_cleanup: RefCell::new(Vec::new()),
             observer,
             shutdown: RefCell::new(None),
             #[cfg(test)]
@@ -656,6 +660,16 @@ impl RuntimeControl {
 
     pub(crate) fn recovery_required(&self) -> bool {
         self.0.recovery_required.get()
+    }
+
+    /// Replaces the list of deleted-group artifacts still waiting to be removed
+    /// (relative to the configuration root; empty when nothing is pending).
+    pub(crate) fn set_pending_cleanup(&self, pending: Vec<String>) {
+        *self.0.pending_cleanup.borrow_mut() = pending;
+    }
+
+    pub(crate) fn pending_cleanup(&self) -> Vec<String> {
+        self.0.pending_cleanup.borrow().clone()
     }
 
     pub(crate) fn stop_host(&self) {
@@ -1131,25 +1145,6 @@ impl RuntimeControl {
         mut managed: Option<crate::transaction::CandidatePersistence>,
         mut files: Option<FileCommit>,
     ) -> Result<u64, ApplyFailure> {
-        let removed_group_files = {
-            let current = self.view();
-            match (&current.config.standard_groups, &config.standard_groups) {
-                (Some(old), Some(next)) => old
-                    .groups
-                    .iter()
-                    .filter(|g| !next.groups.iter().any(|n| n.slot == g.slot))
-                    .flat_map(|g| {
-                        [
-                            old.base.join(format!("srs/special_{}.json", g.slot)),
-                            old.base.join(format!("rule/special_{}.txt", g.slot)),
-                            old.base
-                                .join(format!("cache/cache_special_{}.dump", g.slot)),
-                        ]
-                    })
-                    .collect::<Vec<_>>(),
-                _ => Vec::new(),
-            }
-        };
         let cache_dump_replacements = {
             let current = self.0.current.borrow();
             CacheCatalog::invalidated_dump_paths(&current.config, &config)
@@ -1397,17 +1392,17 @@ impl RuntimeControl {
                 reason: error.to_string(),
             });
         }
-        for path in removed_group_files {
-            if let Err(error) = std::fs::remove_file(&path) {
-                if error.kind() != std::io::ErrorKind::NotFound {
-                    self.enter_recovery_required();
-                    self.stop_host();
-                    return Err(ApplyFailure::CommittedCleanup {
-                        generation,
-                        reason: format!("{}: {error}", path.display()),
-                    });
-                }
-            }
+        // Artifacts of deleted groups are removed after publication. The
+        // committed generation is correct without that, so a failure is only
+        // reported (log and health) and retried by the next sweep.
+        let pending = self
+            .view()
+            .config
+            .standard_groups
+            .as_ref()
+            .map(crate::config::standard_groups::Profile::sweep_orphans);
+        if let Some(pending) = pending {
+            self.set_pending_cleanup(pending);
         }
         // The retired generation is freed once the last query admitted to it has
         // finished; hand its pages back right away and again after those queries

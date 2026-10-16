@@ -48,7 +48,10 @@ config/runtime construction, and rejects extra arguments. Bare Cargo defaults
 to `dev`; explicit `MOSDNS_BUILD_VERSION` is nonempty and cannot contain CR/LF.
 Health GET `/api/v1/system/health` shares this exact version. JSON fields are
 `ready`, `runtime:"rust"`, `version`, `state`, `required_config_schema:null`,
-`applied_config_schema:null`, `config_management_enabled:false`. Null schemas do
+`applied_config_schema:null`, `config_management_enabled:false`, and
+`pending_cleanup` (array of paths, relative to the configuration root, of deleted
+special-group files that could not be removed yet; empty normally, never affects
+`ready`; see native-special-groups.md). Null schemas do
 not mean YAML schema zero or disable native managed group/upstream operations.
 State values are `starting`, `ready`, `applying`, `recovery_required`, `stopping`,
 and `closed`. Health is read-only and crosses the admission rejection barrier without a lease.
