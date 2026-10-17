@@ -401,12 +401,12 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | C06 | 上游管理 | M1（随 `aliapi`；非托管下的上游/覆盖/生成开关 API 由 M1-f1 以类型化设置实现，WebUI 接线与配置包为 M1-f2） | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
 | C07 | 配置导出/更新/生成 | M1（切换门槛，执行顺序第 5 项） |  |
 | C08 | 查询审计 | M1（WebUI 使用面；`check` 不覆盖 API） | [查询诊断](validation-records/09-30-rust-native-query-diagnostics-overview/prd.md) |
-| C09 | 日志/capture | M1（维护中 Vue 调用 `/api/v1/capture/*`；`check` 不覆盖 API 面） |  |
-| C10 | Prometheus/插件 API | M1（维护中 Vue 调用 `/metrics` 与 `/plugins/{tag}`） |  |
+| C09 | 日志/capture | F-2 已原生接入：`/api/v1/capture/{start,logs}` 契约、有界缓冲、级别恢复、查询级轨迹（不含 Go 的逐 matcher 轨迹，属 S 类） | [F-2 记录](validation-records/10-17-f2/README.md) |
+| C10 | Prometheus/插件 API | M1（维护中 Vue 调用 `/metrics` 与 `/plugins/{tag}`）；F-2：`mosdns_aliapi_*`（query/error/winner/延迟直方图）与 cache、进程指标已对齐；`inflight_queries`、`conn_*`、`forward`/`metrics_collector` 系列明确不提供 | [F-2 记录](validation-records/10-17-f2/README.md) |
 | C11 | Vue `/`、`/log`、UI 挂载 | M1（WebUI 使用面） | [WebUI 运行时](validation-records/10-04-rust-native-webui-runtime-capabilities/) |
 | C12 | 外观与系统设置 | M1（维护中 Vue 调用 `/api/v1/appearance/*` 等） | [WebUI 运行时](validation-records/10-04-rust-native-webui-runtime-capabilities/) |
 | C13 | cache dump/运行时文件 | M1（7 个 cache 带 `dump_file`；路径基准见 §3.1） | [cache 生命周期](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) |
 | C14 | CLI/服务生命周期 | M1（Linux amd64） |  |
 | C15 | 二进制/配置更新与发布 | M1（切换门槛，执行顺序第 5 项） |  |
-| C16 | `/debug/pprof` | 替换后（`webui-log/src`、`src-log1` 与 `config_all` 均不引用；延后不等于删除，C16 的兼容决策要求保留） |  |
+| C16 | `/debug/pprof` | F-2 兼容决策：原生**不提供**（返回 404，Go profiler 格式属 S 类；替代手段为日志抓取、`/metrics`、主机上的 `perf`），已写入 [契约](contracts/native-webui-hosting.md) | [F-2 记录](validation-records/10-17-f2/README.md) |
 | C17 | 配置包 | M1（本清单即基于 `config_all` 实际包版本） |  |

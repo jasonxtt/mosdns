@@ -1260,6 +1260,7 @@ async fn attempt(ctx: &Ctx, provider: &Provider, key: &str) -> Result<(), String
         return Err("source changed during the download; result discarded".to_owned());
     }
     let (kind, tag, regexp) = (provider.kind, provider.tag.clone(), current.enable_regexp);
+    crate::diag::debug_line!("{tag}: '{key}' downloaded {} bytes", bytes.len());
     let count = on_build_thread(move || store_download(kind, &tag, &bytes, &file, regexp))
         .await
         .map_err(|error| error.to_string())??;

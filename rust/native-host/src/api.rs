@@ -749,6 +749,39 @@ async fn process_connection(
     }
 }
 
+/// `POST /api/v1/capture/start`: an empty body keeps the default of 120 seconds; otherwise
+/// `{"duration_seconds": n}` with `1 <= n <= 600`. The first JSON value is read and unknown
+/// fields are ignored, as the reference's decoder does.
+fn capture_start(body: &[u8]) -> Response {
+    #[derive(Deserialize)]
+    struct Start {
+        duration_seconds: Option<i64>,
+    }
+    let mut seconds = 120;
+    if !body.is_empty() {
+        let mut values = serde_json::Deserializer::from_slice(body).into_iter::<Option<Start>>();
+        match values.next() {
+            // A null body or an absent/null field leaves the default, as in the reference.
+            Some(Ok(start)) => {
+                seconds = start
+                    .and_then(|start| start.duration_seconds)
+                    .unwrap_or(120);
+            }
+            Some(Err(error)) => {
+                return Response::error(400, &format!("Invalid request body: {error}"));
+            }
+            None => return Response::error(400, "Invalid request body: EOF"),
+        }
+    }
+    if !(1..=600).contains(&seconds) {
+        return Response::error(400, "Duration must be between 1 and 600 seconds");
+    }
+    crate::capture::start(std::time::Duration::from_secs(seconds.unsigned_abs()));
+    Response::success(&format!(
+        "Log capture started for {seconds} seconds. Log level set to DEBUG."
+    ))
+}
+
 /// The health document's view of the external UI directories: one object per directory under
 /// `ui/` — `name`, `mounted`, `kind` (`mosdns_ui` with a manifest, `static` without one,
 /// `unusable` for a reserved name or a non-directory), the package's `ui_version`/`built_at`
@@ -1074,6 +1107,8 @@ enum Route<'a> {
     },
     CacheInventory,
     Metrics,
+    CaptureStart,
+    CaptureLogs,
     Unknown,
 }
 
@@ -1234,6 +1269,12 @@ fn route(target: &str) -> Route<'_> {
     }
     if path == "/metrics" {
         return Route::Metrics;
+    }
+    if path == "/api/v1/capture/start" {
+        return Route::CaptureStart;
+    }
+    if path == "/api/v1/capture/logs" {
+        return Route::CaptureLogs;
     }
     if path == "/api/v1/capabilities" {
         return Route::Capabilities;
@@ -2744,7 +2785,14 @@ async fn dispatch(
             if request.method != "GET" {
                 return Response::method_not_allowed();
             }
+            crate::diag::debug_line!("Metrics endpoint accessed");
             let mut text = String::new();
+            // The reference's registry is name-sorted: `mosdns_aliapi_*` before `mosdns_cache_*`.
+            let snapshot = observer.metrics_snapshot();
+            crate::upstream_metrics::render(
+                crate::upstream_metrics::series(config, &snapshot),
+                &mut text,
+            );
             let names = ["query_total", "hit_total", "lazy_hit_total", "size_current"];
             for (index, name) in names.iter().enumerate() {
                 use std::fmt::Write;
@@ -2783,6 +2831,19 @@ async fn dispatch(
                 headers: Vec::new(),
             }
         }
+        Route::CaptureStart => match request.method.as_str() {
+            "POST" => capture_start(&request.body),
+            _ => Response::method_not_allowed(),
+        },
+        Route::CaptureLogs => match request.method.as_str() {
+            "GET" => Response {
+                status: 200,
+                content_type: Some("application/json"),
+                body: crate::capture::take_json().into_bytes(),
+                headers: Vec::new(),
+            },
+            _ => Response::method_not_allowed(),
+        },
         Route::Plugin {
             action: "flush" | "dump" | "load_dump",
             ..
@@ -3777,7 +3838,11 @@ fn ui_operations(
             serde_json::json!({"supported": supported, "reason": if supported { None } else { Some(reason) }}),
         );
     }
-    for id in ["capture.logs", "system.config_management", "system.update"] {
+    operations.insert(
+        "capture.logs".to_owned(),
+        serde_json::json!({"supported": true, "reason": null}),
+    );
+    for id in ["system.config_management", "system.update"] {
         operations.insert(
             id.to_owned(),
             serde_json::json!({"supported": false, "reason": "当前 Rust 原生运行时尚未实现此操作"}),

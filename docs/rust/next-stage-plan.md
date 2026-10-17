@@ -1,5 +1,14 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-17：F-2 诊断（日志抓取、指标对齐、pprof 决定）实现完成，待 Codex 审查结论与规划会话确认
+
+- **日志抓取**：`POST /api/v1/capture/start`、`GET /api/v1/capture/logs` 按 Go 契约（默认 120 s、1–600 s、读一次即清空、重叠 start 重置）。抓取期间诊断阈值临时降到 debug，到点自动回到**配置的** `log.level`（Go 硬恢复 INFO，原生不改写配置级别）；
+  缓冲 ≤4096 行且 ≤1 MiB，满了丢最旧；每个被审计查询产出一行 `dns query completed`（trace_id/域名/类型/缓存/路由/上游/耗时），只写内存缓冲，不在 DNS 线程做文件 I/O。Go 的逐 matcher 轨迹属实现细节，原生按查询粒度。
+- **`/metrics`**：新增 `mosdns_aliapi_{query_total,error_total,upstream_winner_total,response_latency_millisecond(直方图)}`，label `addr/metrics_tag/tag`、桶与单位同 Go；cache、进程指标不变。
+  明确不提供：`inflight_queries`、`conn_*`、`forward`/`metrics_collector` 系列（配置不用）、`go_*`。
+- **`/debug/pprof`**：原生不提供（404），兼容决定与替代手段（日志抓取、`/metrics`、`perf`）已写入契约。
+- 100/500 qps 冻结延迟门槛复测与浏览器冒烟结果见 [validation-records/10-17-f2](validation-records/10-17-f2/README.md)。5D-3 与 Go 侧 `/log` 的最终处理仍未开始。
+
 ## 2026-10-17：UI-1 原生去掉 `/log`、外置 UI 包实现完成，待 Codex 审查结论与规划会话确认
 
 原生只提供 `/`（`/log`、`vue-log1` 资源不再嵌入，构建脚本不再 `build:log1`；Go 侧未改）。新增外置 UI 包：`npm run build:external` 从同一份 `src/` 生成与目录名无关的包（相对路径 + `ui-manifest.json` + zip），

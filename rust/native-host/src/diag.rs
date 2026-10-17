@@ -45,12 +45,18 @@ pub(crate) fn install(settings: &LogSettings) -> std::io::Result<()> {
 }
 
 pub(crate) fn emit(level: LogLevel, message: Arguments<'_>) {
-    sink().write(level, message);
+    // A running capture lowers the threshold to debug without touching the
+    // configured level, so the end of the capture restores it by itself.
+    let capturing = crate::capture::active();
+    sink().write(level, message, capturing);
+    if capturing && level == LogLevel::Debug {
+        crate::capture::record("host", &message.to_string(), &[]);
+    }
 }
 
 impl Sink {
-    fn write(&mut self, level: LogLevel, message: Arguments<'_>) {
-        if level < self.level {
+    fn write(&mut self, level: LogLevel, message: Arguments<'_>, capturing: bool) {
+        if level < self.level && !capturing {
             return;
         }
         match &mut self.file {
@@ -86,6 +92,11 @@ fn timestamp() -> String {
         .unwrap_or_default()
 }
 
+macro_rules! debug_line {
+    ($($argument:tt)*) => {
+        $crate::diag::emit($crate::config::LogLevel::Debug, format_args!($($argument)*))
+    };
+}
 macro_rules! info_line {
     ($($argument:tt)*) => {
         $crate::diag::emit($crate::config::LogLevel::Info, format_args!($($argument)*))
@@ -101,7 +112,7 @@ macro_rules! error_line {
         $crate::diag::emit($crate::config::LogLevel::Error, format_args!($($argument)*))
     };
 }
-pub(crate) use {error_line, info_line, warn_line};
+pub(crate) use {debug_line, error_line, info_line, warn_line};
 
 #[cfg(test)]
 mod tests {
@@ -137,7 +148,7 @@ mod tests {
                 LogLevel::Warn,
                 LogLevel::Error,
             ] {
-                sink.write(emitted, format_args!("message"));
+                sink.write(emitted, format_args!("message"), false);
             }
             let log = std::fs::read_to_string(&path).unwrap();
             let names: Vec<_> = log

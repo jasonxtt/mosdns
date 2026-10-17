@@ -137,6 +137,19 @@ class WarmupProfile(unittest.TestCase):
                          dict(cpu_s=0.2, cpu_us_per_correct=240.0, correct_on_time=833, statuses={'correct': 1000}))
 
 
+class CaptureCost(unittest.TestCase):
+    def test_the_figures_come_from_the_q500_stage_only(self):
+        import capture_cost
+        stages = [dict(stage='warmup', resources=dict(cpu_us_per_correct=240.0),
+                       stable=dict(correct_on_time=833, planned_latency_ms=dict(p50=1, p95=2, p99=3)), all=dict(statuses={})),
+                  dict(stage='q500', resources=dict(cpu_us_per_correct=100.0),
+                       stable=dict(correct_on_time=12500, planned_latency_ms=dict(p50=0.7, p95=11.4, p99=12.2)),
+                       all=dict(statuses={'correct': 15000}))]
+        self.assertEqual(capture_cost.stage_figures(dict(stages=stages)),
+                         dict(p50=0.7, p95=11.4, p99=12.2, cpu_us_per_correct=100.0, correct_on_time=12500,
+                              statuses={'correct': 15000}))
+
+
 class Injected(unittest.TestCase):
     """The proof that a fault reached the mock's traffic, not merely the fault file."""
 

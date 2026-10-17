@@ -180,8 +180,64 @@ read from `/proc/self`): `process_cpu_seconds_total`, `process_start_time_second
 (`go_gc_*`, `go_goroutines`, `go_info`, `go_memstats_*`) and the system network counters of the
 reference's `process_network_*` do not exist in this runtime and are **not emitted**; the WebUI
 shows the available figures and marks the rest "不适用于 Rust 运行时". The start time is the
-process's (unchanged by an in-place restart, as in the reference). The complete native `/metrics`
-remains a later task.
+process's (unchanged by an in-place restart, as in the reference). The upstream and cache series
+of `/metrics` are described under "Diagnostics (F-2)" below.
+
+## Diagnostics (F-2)
+
+**Log capture (`capture.logs`)** — `POST /api/v1/capture/start` and `GET /api/v1/capture/logs`, with
+the reference's contract. `start` takes an optional body `{"duration_seconds": n}` (empty body or
+absent/null field: 120); `1 <= n <= 600`, otherwise `400 Duration must be between 1 and 600 seconds`;
+an undecodable body is `400 Invalid request body: <decoder text>` (the text after the prefix is the
+native decoder's); success is `200` with `Log capture started for N seconds. Log level set to DEBUG.`.
+`logs` returns `200 application/json`, an array of line objects, and **empties the buffer** (read
+once); no capture yet or an already read buffer gives `[]`. Other methods are `405`. A second `start`
+empties the buffer and restarts the window. The window ends lazily at its deadline (no timer task);
+lines already captured stay readable after it.
+
+While a capture runs the diagnostic threshold of the host drops to debug (also for `log.file`/stderr)
+and, at the end, the **configured `log.level` is in force again** — it is never overwritten (the
+reference resets to info whatever was configured; this is an intentional difference). Captured lines
+are `{level:"debug", time (RFC 3339), msg, logger_name, …fields}`: one `dns query completed` line
+(`logger_name:"query"`) per query of an `enable_audit` listener with `trace_id`, `domain`, `qtype`,
+`client`, `transport`, `outcome`, `cache` (`hit`/`miss`/`notapplicable`/`undetermined`), `elapsed_ms`,
+and — when the response or the execution established them — `rcode`, `route`, `matched_group`,
+`domain_set`, `upstream`, `failure`; plus the host's own low-frequency debug lines
+(`logger_name:"host"`). The reference writes one line per matcher/plugin step; the compiled native
+execution has no such step, so the trace is at query granularity (the UI groups by `trace_id` and
+shows one card per query). The per-query lines go **only to the capture buffer**, never to the log
+file or stderr, so a capture does not put file I/O on the DNS thread; recording is a short critical
+section on a dedicated mutex and costs one relaxed atomic load per query when no capture runs.
+The buffer is bounded: at most **4096 lines and 1 MiB** of serialized text, string values cut at 256
+characters; the oldest line is dropped first and a `warn` line `capture buffer limit reached: N older
+lines dropped` leads the next read.
+
+**`/metrics` upstream series** — for every `aliapi` upstream **with a `tag`** (as in the reference),
+from startup at zero: `mosdns_aliapi_query_total`, `_error_total`, `_upstream_winner_total`
+(counters) and `mosdns_aliapi_response_latency_millisecond` (histogram: `_bucket{le=…}` with the
+bounds `1,5,10,20,50,100,200,500,1000,2000,5000,+Inf`, `_sum`, `_count`), labelled `addr` (the
+configured address text), `metrics_tag` (the plugin tag) and `tag` (the upstream tag). Units are
+counts and whole milliseconds (truncated, as the reference). Semantics: `query_total` counts every
+upstream attempt, including attempts later canceled (a concurrent group's losers); `error_total`
+counts failed and timed-out attempts; a canceled or dropped attempt is neither an error nor a
+latency observation (the reference lets losers finish, so they would count there); the latency
+histogram observes successful attempts only; `winner_total` counts attempts whose response became
+their group's final response. Counters stay monotonic across configuration changes (the reference
+resets an upstream's counters when its group is rebuilt). The `mosdns_cache_*` series and the
+process figures are unchanged.
+
+*Not provided* (no matching native event, and nothing reads them): `mosdns_aliapi_inflight_queries`
+(attempts are tallied when a query ends, so attempts in flight are not visible), and
+`mosdns_aliapi_conn_opened_total` / `_conn_closed_total`; the `mosdns_forward_*` and
+`mosdns_metrics_collector_*` families (`config_rust` uses neither plugin); the `go_*` runtime series.
+They are not emitted as zeros.
+
+**`/debug/pprof` — compatibility decision.** The native host does **not** serve the Go profiler
+(`/debug/pprof/*`, `cmdline`, `profile`, `symbol`, `trace`): the paths answer `404`. The endpoint is
+the Go runtime's profile format (feature-coverage C16, class "implementation detail"), no WebUI or
+`config_all` path uses it, and there is no equivalent in a Rust binary. Replacements: the log capture
+above, `/metrics`, and `perf` on the host (`perf record -e cpu-clock -F 999 --call-graph dwarf -p
+<pid>`, as used for the 5D-2c profile).
 
 ## Capability discovery and UI
 
@@ -203,8 +259,9 @@ failed refresh keeps the actual mutation ACK factual and existing drafts visible
 Initial reads, all modes/tabs, refresh paths and handlers use the same operation
 admission. Unsupported operations remain visibly disabled with family reasons.
 Actual `/plugins/switch*/show|post` uses switches.manage, and follow-up requery is
-independently gated. Capture, remembered lists, aliases, server appearance,
-Go process metrics and Go-only system/config/update functions stay suppressed.
+independently gated. Aliases and Go-only system/config/update functions stay
+suppressed (capture is supported since F-2; remembered lists, server appearance and
+process metrics are supported where their own sections say so).
 `rules.adguard` is supported when an `adguard_rule` tagged `adguard` exists, and
 `rules.diversion` also when any `sd_set_light`/`si_set` exists; the diversion tab then
 probes the built-in provider tags (`/plugins/{tag}/config`, 404 = not configured) and
