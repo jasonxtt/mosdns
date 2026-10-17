@@ -183,9 +183,10 @@ fn named_inventory_metrics_management_and_restart_use_real_owners() {
         assert_eq!(
             metrics
                 .lines()
-                .filter(|line| !line.starts_with('#') && !line.is_empty())
+                .filter(|line| line.starts_with("mosdns_cache_"))
                 .count(),
-            8
+            8,
+            "the cache section is unchanged (process figures are a separate section)"
         );
         let (status, show) = http(
             api,

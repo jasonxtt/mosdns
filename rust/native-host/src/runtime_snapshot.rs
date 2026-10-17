@@ -93,6 +93,13 @@ struct Control {
     /// The receive buffer the kernel granted each live UDP listener (`None`
     /// when it could not be read); shown by the health endpoint.
     udp_receive_buffers: RefCell<BTreeMap<BindingKey, Option<usize>>>,
+    /// The management listener's actual address (set when it is bound).
+    api_listen: Cell<Option<std::net::SocketAddr>>,
+    /// An in-place restart was scheduled / has been requested of the supervisor.
+    restart_scheduled: Cell<bool>,
+    restart_requested: Cell<bool>,
+    /// The stop came from a termination signal, which overrides a pending restart.
+    signal_stop: Cell<bool>,
     observer: Arc<QueryObserver>,
     shutdown: RefCell<Option<mosdns_upstream_core::TransportCancellation>>,
     #[cfg(test)]
@@ -454,6 +461,10 @@ impl RuntimeControl {
             closed: Cell::new(false),
             pending_cleanup: RefCell::new(Vec::new()),
             udp_receive_buffers: RefCell::new(BTreeMap::new()),
+            api_listen: Cell::new(None),
+            restart_scheduled: Cell::new(false),
+            restart_requested: Cell::new(false),
+            signal_stop: Cell::new(false),
             observer,
             shutdown: RefCell::new(None),
             #[cfg(test)]
@@ -679,6 +690,42 @@ impl RuntimeControl {
     /// Records the receive buffer a freshly bound UDP listener was granted.
     pub(crate) fn set_udp_receive_buffer(&self, key: BindingKey, bytes: Option<usize>) {
         self.0.udp_receive_buffers.borrow_mut().insert(key, bytes);
+    }
+
+    pub(crate) fn set_api_listen(&self, address: std::net::SocketAddr) {
+        self.0.api_listen.set(Some(address));
+    }
+
+    /// The management listener's actual address, once bound.
+    pub(crate) fn api_listen(&self) -> Option<std::net::SocketAddr> {
+        self.0.api_listen.get()
+    }
+
+    /// Schedules one in-place restart after `delay`; false when one is already scheduled.
+    /// The restart itself is the supervisor's ordinary graceful stop, after which `main`
+    /// replaces the process image (see `restart.rs`).
+    pub(crate) fn schedule_restart(&self, delay: std::time::Duration) -> bool {
+        if self.0.restart_scheduled.replace(true) {
+            return false;
+        }
+        let control = self.clone();
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(delay).await;
+            control.0.restart_requested.set(true);
+            control.stop_host();
+        });
+        true
+    }
+
+    /// Records that a termination signal started the shutdown.
+    pub(crate) fn note_signal_stop(&self) {
+        self.0.signal_stop.set(true);
+    }
+
+    /// Whether the host stopped to be restarted in place (a signal always wins).
+    #[must_use]
+    pub fn restart_requested(&self) -> bool {
+        self.0.restart_requested.get() && !self.0.signal_stop.get()
     }
 
     /// Forgets a UDP listener that is gone (served to the end, or staged and dropped unused).

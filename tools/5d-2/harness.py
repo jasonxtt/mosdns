@@ -31,7 +31,11 @@ def service_state():
 class Env:
     """Context manager: `with Env(...) as env:` leaves nothing behind."""
 
-    def __init__(self, work, role, binary, output, prepare_root=None, seed=501):
+    def __init__(self, work, role, binary, output, prepare_root=None, seed=501, saved_port_applies=None):
+        # The Go host and the F-1 native host start the management listener on the port saved in
+        # `webinfo/webui_port_settings.json` (the production snapshot has one); earlier native
+        # builds ignore it. Default: Go only, as in the 5D-2 runs.
+        self.saved_port_applies = (role == 'go') if saved_port_applies is None else saved_port_applies
         if os.geteuid() != 0:
             raise ValueError('VM root required')
         self.work, self.role, self.binary, self.output = work, role, pathlib.Path(binary), pathlib.Path(output)
@@ -77,7 +81,7 @@ class Env:
             self.host = self.spawn(0, ['unshare', '--mount', '--propagation', 'private', 'sh', '-c',
                                        'mount --bind "$1" /tmp; shift; exec "$@"', '5d2', self.root / 'tmp',
                                        self.binary, 'start', '-d', self.root, '-c', 'config_custom.yaml'], 'host.log')
-            if self.role == 'go':
+            if self.saved_port_applies:
                 self.api_port = json.loads((self.root / 'webinfo/webui_port_settings.json').read_text())['port']
             self.startup = []
             end = time.monotonic() + 90

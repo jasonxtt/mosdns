@@ -292,9 +292,24 @@ const systemSummaryCards = computed(() => {
     return []
   }
   if (capabilityState.value?.kind === 'native') {
-    return [
+    const identity = [
       {key:'runtime', title:'运行时', value:'Rust', tone:'ok'},
-      {key:'product-version', title:'产品版本', value:supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version'), tone:'ok'},
+      {key:'product-version', title:'产品版本', value:supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version'), tone:'ok'}
+    ]
+    if (supportsOperation('metrics.process')) {
+      // Process figures the Rust runtime has; Go-runtime ones are marked, never invented.
+      return [
+        ...identity,
+        {key: 'start-time', title: '启动时间', value: systemSummary.startTime ? new Date(systemSummary.startTime * 1000).toLocaleString('zh-CN', { hour12: false }) : '--', tone: 'ok'},
+        {key: 'cpu-time', title: 'CPU 时间', value: formatSeconds(systemSummary.cpuTime, 2), tone: 'neutral'},
+        {key: 'memory', title: '常驻内存 (RSS)', value: formatBytes(systemSummary.residentMemory), tone: 'neutral'},
+        {key: 'threads', title: '线程数', value: Number(systemSummary.threads || 0).toLocaleString(), tone: 'neutral'},
+        {key: 'open-fds', title: '打开文件描述符', value: Number(systemSummary.openFds || 0).toLocaleString(), tone: 'neutral'},
+        {key: 'go-not-applicable', title: 'GC / Go 版本 / goroutines', value: '不适用于 Rust 运行时', tone: 'neutral'}
+      ]
+    }
+    return [
+      ...identity,
       ...['CPU 时间','常驻内存 (RSS)','GC 次数','Go 版本','go_goroutines','进程 / 系统指标'].map((title,index) => ({key:`unsupported-${index}`,title,value:operationReason('metrics.process'),tone:'neutral'}))
     ]
   }
@@ -880,7 +895,7 @@ function parseSystemMetrics(metricsText) {
       next.gcDurationSeconds = Number.parseFloat(line.split(' ')[1] || '0') || 0
     } else if (line.startsWith('go_memstats_last_gc_time_seconds')) {
       next.lastGcTime = Number.parseFloat(line.split(' ')[1] || '0') || 0
-    } else if (line.startsWith('go_threads')) {
+    } else if (line.startsWith('go_threads') || line.startsWith('mosdns_process_threads')) {
       next.threads = Number.parseFloat(line.split(' ')[1] || '0') || 0
     } else if (line.startsWith('process_open_fds')) {
       next.openFds = Number.parseFloat(line.split(' ')[1] || '0') || 0

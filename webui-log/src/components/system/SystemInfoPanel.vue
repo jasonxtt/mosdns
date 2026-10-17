@@ -20,7 +20,15 @@ defineEmits(['restart'])
     <div v-if="capabilityState.value?.kind === 'native'" class="module-kv-list">
       <div class="control-line"><strong>运行时</strong><span>Rust</span></div>
       <div class="control-line"><strong>产品版本</strong><span>{{ supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version') }}</span></div>
-      <p class="muted" role="note">进程指标 / Go GC / goroutines：{{ operationReason('metrics.process') }}</p>
+      <template v-if="supportsOperation('metrics.process')">
+        <div class="control-line"><strong>启动时间</strong><span>{{ systemInfo.startTime ? new Date(systemInfo.startTime * 1000).toLocaleString('zh-CN', { hour12: false }) : 'N/A' }}</span></div>
+        <div class="control-line"><strong>CPU 时间</strong><span>{{ Number(systemInfo.cpuTime || 0).toFixed(2) }} 秒</span></div>
+        <div class="control-line"><strong>常驻内存 (RSS)</strong><span>{{ (Number(systemInfo.residentMemory || 0) / 1024 / 1024).toFixed(2) }} MB</span></div>
+        <div class="control-line"><strong>打开文件描述符</strong><span>{{ Number(systemInfo.openFds || 0).toLocaleString() }}</span></div>
+        <div class="control-line"><strong>线程数</strong><span>{{ Number(systemInfo.threads || 0).toLocaleString() }}</span></div>
+        <p class="muted" role="note">GC、Go 版本、goroutines：不适用于 Rust 运行时</p>
+      </template>
+      <p v-else class="muted" role="note">进程指标 / Go GC / goroutines：{{ operationReason('metrics.process') }}</p>
     </div>
     <div v-else class="module-kv-list">
       <div class="control-line"><strong>启动时间</strong><span>{{ systemInfo.startTime ? new Date(systemInfo.startTime * 1000).toLocaleString('zh-CN', { hour12: false }) : 'N/A' }}</span></div>

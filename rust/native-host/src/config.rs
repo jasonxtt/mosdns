@@ -1007,7 +1007,14 @@ fn compile_raw(
     let root = expect_map(raw, "$", "top level must be a mapping")?;
     root.reject_unknown(ROOT_FIELDS, "$")?;
     let log = compile_log(root.required("log", "$")?, root_dir)?.level;
-    let api = root.get("api").map(compile_api).transpose()?;
+    let api = root
+        .get("api")
+        .map(compile_api)
+        .transpose()?
+        // The port saved from the WebUI wins over the YAML one (the reference's priority).
+        .map(|api| ApiConfig {
+            http: crate::system_api::with_saved_port(root_dir, api.http),
+        });
     let managed = if managed_opt_in(raw)? {
         Some(match candidate {
             Some(profile) => profile,

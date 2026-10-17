@@ -583,6 +583,7 @@ impl HostAssembly {
         tokio::select! {
             result = &mut serving => result,
             signal = shutdown_signal() => {
+                self.control().note_signal_stop();
                 shutdown.cancel();
                 let drained = serving.await;
                 drained?;
