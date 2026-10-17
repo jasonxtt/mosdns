@@ -301,6 +301,7 @@ impl AliApiArgs {
             tag,
             response_identity: std::sync::Arc::from(identity.as_str()),
             identity,
+            metrics_addr: Some(upstream.addr.clone()),
             endpoint,
             target,
         })

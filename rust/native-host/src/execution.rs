@@ -1065,6 +1065,7 @@ impl ExecutionFacts<'_> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_invocation_attempt(
         &mut self,
         executable: ExecutableId,
@@ -1073,12 +1074,16 @@ impl ExecutionFacts<'_> {
         peer: Option<SocketAddr>,
         transport: Option<UpstreamTransport>,
         outcome: UpstreamAttemptOutcome,
+        elapsed: Option<std::time::Duration>,
+        winner: bool,
     ) {
         self.upstream_attempts.push_metric(UpstreamMetricAttempt {
             generation: self.config.generation,
             executable,
             entry_index,
             outcome,
+            elapsed,
+            winner,
         });
         if let Some(upstream) = upstream {
             if self.capture_audit_details {
@@ -1196,6 +1201,10 @@ impl Drop for ExecutionFacts<'_> {
                     executable,
                     entry_index: slot.entry_index,
                     outcome,
+                    elapsed: slot
+                        .elapsed
+                        .filter(|_| outcome == UpstreamAttemptOutcome::Response),
+                    winner: false,
                 });
                 if self.capture_audit_details {
                     let trace_entry = upstream.clone().unwrap_or_else(|| {
@@ -4046,6 +4055,7 @@ fn record_invocation_ledger(
                 UpstreamAttemptOutcome::Canceled
             }
         });
+        let response = outcome == UpstreamAttemptOutcome::Response;
         facts.record_invocation_attempt(
             executable,
             slot.entry_index,
@@ -4053,6 +4063,8 @@ fn record_invocation_ledger(
             slot.peer,
             slot.transport,
             outcome,
+            slot.elapsed.filter(|_| response),
+            response && selected_entry == Some(slot.entry_index),
         );
         if let Some(trace) = &facts.policy_trace {
             let mut trace = trace.borrow_mut();
@@ -4133,6 +4145,8 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
                 executable,
                 entry_index: 0,
                 outcome: fallback_outcome,
+                elapsed: None,
+                winner: false,
             });
         if trace.is_some() {
             branch_metrics.borrow_mut().push(UpstreamAttemptRecord {
@@ -4183,6 +4197,11 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
                 executable,
                 entry_index: slot.entry_index,
                 outcome,
+                elapsed: slot
+                    .elapsed
+                    .filter(|_| outcome == UpstreamAttemptOutcome::Response),
+                winner: outcome == UpstreamAttemptOutcome::Response
+                    && selected_entry == Some(slot.entry_index),
             });
         if trace.is_some() {
             branch_metrics.borrow_mut().push(UpstreamAttemptRecord {

@@ -359,6 +359,9 @@ pub(crate) struct UpstreamAttemptSlot {
     pub transport: Option<UpstreamTransport>,
     pub outcome: Option<UpstreamAttemptOutcome>,
     pub trace_slot: Option<u64>,
+    started: Instant,
+    /// Set when the attempt finishes; the response latency when it succeeded.
+    pub elapsed: Option<Duration>,
 }
 
 impl UpstreamAttemptLedger {
@@ -378,6 +381,8 @@ impl UpstreamAttemptLedger {
             transport: None,
             outcome: None,
             trace_slot,
+            started: Instant::now(),
+            elapsed: None,
         });
         slot
     }
@@ -400,6 +405,7 @@ impl UpstreamAttemptLedger {
             entry.peer = peer;
             entry.transport = transport;
             entry.outcome = Some(outcome);
+            entry.elapsed = Some(entry.started.elapsed());
         }
     }
 
@@ -531,6 +537,10 @@ pub(crate) struct UpstreamMetricAttempt {
     pub executable: ExecutableId,
     pub entry_index: usize,
     pub outcome: UpstreamAttemptOutcome,
+    /// Time the attempt took; set for a response only.
+    pub elapsed: Option<Duration>,
+    /// The attempt's response became the final one of its upstream group.
+    pub winner: bool,
 }
 
 impl UpstreamAttemptList {
@@ -811,6 +821,47 @@ pub struct UpstreamAttemptMetricsSnapshot {
     pub canceled_total: u64,
     /// Attempts interrupted by a non-cancellation drop or unwind.
     pub interrupted_total: u64,
+    /// Attempts whose response became the final one of its upstream group.
+    pub winners_total: u64,
+    /// Response latency of successful attempts, truncated to whole
+    /// milliseconds, per bucket of `UPSTREAM_LATENCY_BOUNDS_MS` (not
+    /// cumulative); the last slot is the overflow bucket.
+    pub latency_buckets: [u64; UPSTREAM_LATENCY_BOUNDS_MS.len() + 1],
+    /// Sum of the observed whole milliseconds.
+    pub latency_sum_ms: u64,
+    /// Number of observations.
+    pub latency_count: u64,
+}
+
+/// Upper bounds (milliseconds) of the per-upstream response latency histogram;
+/// the same buckets the reference registers for `response_latency_millisecond`.
+pub(crate) const UPSTREAM_LATENCY_BOUNDS_MS: [u64; 11] =
+    [1, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+
+impl UpstreamAttemptMetricsSnapshot {
+    fn record(&mut self, outcome: UpstreamAttemptOutcome, elapsed: Option<Duration>, winner: bool) {
+        self.attempts_total = self.attempts_total.saturating_add(1);
+        let counter = match outcome {
+            UpstreamAttemptOutcome::Response => &mut self.responses_total,
+            UpstreamAttemptOutcome::Failed => &mut self.failures_total,
+            UpstreamAttemptOutcome::TimedOut => &mut self.timeouts_total,
+            UpstreamAttemptOutcome::Canceled => &mut self.canceled_total,
+            UpstreamAttemptOutcome::Interrupted => &mut self.interrupted_total,
+        };
+        *counter = counter.saturating_add(1);
+        if winner {
+            self.winners_total = self.winners_total.saturating_add(1);
+        }
+        if outcome == UpstreamAttemptOutcome::Response
+            && let Some(elapsed) = elapsed
+        {
+            let millis = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+            let bucket = UPSTREAM_LATENCY_BOUNDS_MS.partition_point(|bound| millis > *bound);
+            self.latency_buckets[bucket] = self.latency_buckets[bucket].saturating_add(1);
+            self.latency_sum_ms = self.latency_sum_ms.saturating_add(millis);
+            self.latency_count = self.latency_count.saturating_add(1);
+        }
+    }
 }
 
 /// Read-only point-in-time copy of the host's basic metrics.
@@ -1072,46 +1123,37 @@ struct MetricsState {
 
 impl MetricsState {
     fn record_metric(&mut self, identity: &str, outcome: UpstreamAttemptOutcome) {
+        self.record_attempt(identity, outcome, None, false);
+    }
+
+    fn record_attempt(
+        &mut self,
+        identity: &str,
+        outcome: UpstreamAttemptOutcome,
+        elapsed: Option<Duration>,
+        winner: bool,
+    ) {
         if let Some(counters) = self.forward_attempts_by_upstream.get_mut(identity) {
-            counters.attempts_total = counters.attempts_total.saturating_add(1);
-            let counter = match outcome {
-                UpstreamAttemptOutcome::Response => &mut counters.responses_total,
-                UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
-                UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
-                UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
-                UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
-            };
-            *counter = counter.saturating_add(1);
+            counters.record(outcome, elapsed, winner);
         } else {
             self.unknown_forward_attempts_total =
                 self.unknown_forward_attempts_total.saturating_add(1);
         }
     }
 
-    fn record_metric_key(
-        &mut self,
-        key: (u64, ExecutableId, usize),
-        outcome: UpstreamAttemptOutcome,
-    ) {
+    fn record_metric_key(&mut self, attempt: &UpstreamMetricAttempt) {
+        let key = (attempt.generation, attempt.executable, attempt.entry_index);
         let Some(identity) = self.metric_identities.get(&key).cloned() else {
             self.unknown_forward_attempts_total =
                 self.unknown_forward_attempts_total.saturating_add(1);
             return;
         };
-        if let Some(counters) = self.forward_attempts_by_upstream.get_mut(identity.as_ref()) {
-            counters.attempts_total = counters.attempts_total.saturating_add(1);
-            let counter = match outcome {
-                UpstreamAttemptOutcome::Response => &mut counters.responses_total,
-                UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
-                UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
-                UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
-                UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
-            };
-            *counter = counter.saturating_add(1);
-        } else {
-            self.unknown_forward_attempts_total =
-                self.unknown_forward_attempts_total.saturating_add(1);
-        }
+        self.record_attempt(
+            identity.as_ref(),
+            attempt.outcome,
+            attempt.elapsed,
+            attempt.winner,
+        );
     }
 
     fn snapshot(&self, in_flight: u64) -> MetricsSnapshot {
@@ -1183,10 +1225,7 @@ impl MetricsState {
             }
         } else {
             for attempt in metric_attempts {
-                self.record_metric_key(
-                    (attempt.generation, attempt.executable, attempt.entry_index),
-                    attempt.outcome,
-                );
+                self.record_metric_key(attempt);
             }
         }
         self.duration.observe(elapsed);
@@ -1530,7 +1569,10 @@ impl QueryObserver {
         let enabled = listener_audit && self.audit_enabled.load(Ordering::SeqCst);
         let admitted_at = Instant::now();
         let trace_id = self.request_ids.allocate()?;
-        let audit_context = enabled.then(|| AuditContext {
+        // A running diagnostic capture traces the queries of audit listeners even while
+        // the audit collection itself is off, as the reference's trace mark does.
+        let traced = listener_audit && crate::capture::hint();
+        let audit_context = (enabled || traced).then(|| AuditContext {
             timestamp: self.audit_clock.now(),
             client_addr,
             transport,
@@ -1544,8 +1586,9 @@ impl QueryObserver {
             observer: std::sync::Arc::clone(self),
             admitted_at,
             audit_context,
+            audit: enabled,
             cancellation,
-            execution_checkpoint: Box::new(ExecutionCheckpoint::new(enabled)),
+            execution_checkpoint: Box::new(ExecutionCheckpoint::new(enabled || traced)),
             finalized: false,
         })
     }
@@ -1630,10 +1673,7 @@ impl QueryObserver {
     pub(crate) fn record_background_attempts(&self, attempts: &UpstreamAttemptList) {
         let mut state = self.lock();
         for attempt in attempts.metric_attempts() {
-            state.metrics.record_metric_key(
-                (attempt.generation, attempt.executable, attempt.entry_index),
-                attempt.outcome,
-            );
+            state.metrics.record_metric_key(attempt);
         }
     }
 
@@ -1707,6 +1747,9 @@ pub(crate) struct AdmittedQueryGuard {
     observer: std::sync::Arc<QueryObserver>,
     admitted_at: Instant,
     audit_context: Option<AuditContext>,
+    /// Whether the audit collection takes this query (the context may exist
+    /// only for a diagnostic capture).
+    audit: bool,
     cancellation: TransportCancellation,
     execution_checkpoint: Box<ExecutionCheckpoint>,
     finalized: bool,
@@ -1735,7 +1778,12 @@ impl AdmittedQueryGuard {
     fn record(&mut self, observation: TerminalObservation) {
         self.finalized = true;
         let audit_context = self.audit_context.take();
-        let enabled = audit_context.is_some();
+        if crate::capture::hint()
+            && let Some(context) = &audit_context
+        {
+            capture_query_line(context, &observation);
+        }
+        let enabled = self.audit;
         self.observer
             .record_terminal_on_listener(observation, enabled, |observation| {
                 let context = audit_context.expect("audit context exists when capture is enabled");
@@ -1801,6 +1849,53 @@ impl Drop for AdmittedQueryGuard {
             self.record(observation);
         }
     }
+}
+
+/// While a diagnostic capture runs, one debug line per audited query: the
+/// counterpart of the reference's per-query trace, at query granularity. It goes to
+/// the capture buffer only, so the DNS thread does no file I/O for it.
+fn capture_query_line(context: &AuditContext, observation: &TerminalObservation) {
+    use crate::capture::Field;
+    let client = context.client_addr.to_string();
+    let transport = format!("{:?}", context.transport).to_lowercase();
+    let outcome = format!("{:?}", observation.outcome);
+    let cache = format!("{:?}", observation.cache_status).to_lowercase();
+    let failure = observation
+        .failure_provenance
+        .as_ref()
+        .map(|failure| format!("{failure:?}"));
+    let upstream = observation
+        .final_upstream
+        .as_deref()
+        .or(observation.selected_upstream.as_deref());
+    let mut fields = vec![
+        ("trace_id", Field::Str(&context.trace_id)),
+        ("domain", Field::Str(context.qname.trim_end_matches('.'))),
+        ("qtype", Field::Uint(u64::from(context.qtype))),
+        ("client", Field::Str(&client)),
+        ("transport", Field::Str(&transport)),
+        ("outcome", Field::Str(&outcome)),
+        ("cache", Field::Str(&cache)),
+        (
+            "elapsed_ms",
+            Field::Uint(u64::try_from(observation.elapsed.as_millis()).unwrap_or(u64::MAX)),
+        ),
+    ];
+    if let ResponseState::Dns { rcode, .. } = &observation.response {
+        fields.push(("rcode", Field::Uint(u64::from(*rcode))));
+    }
+    for (key, value) in [
+        ("route", observation.final_sequence.as_deref()),
+        ("matched_group", observation.matched_group.as_deref()),
+        ("domain_set", observation.domain_set.as_deref()),
+        ("upstream", upstream),
+        ("failure", failure.as_deref()),
+    ] {
+        if let Some(value) = value {
+            fields.push((key, Field::Str(value)));
+        }
+    }
+    crate::capture::record("query", "dns query completed", &fields);
 }
 
 fn render_qname(wire: &[u8]) -> String {
@@ -2639,6 +2734,42 @@ mod tests {
         assert_eq!(metrics.forward_attempts_by_upstream.len(), 2);
         assert_eq!(metrics.unknown_forward_attempts_total, 1);
         assert_eq!(metrics.duration.count, metrics.completed_total);
+    }
+
+    #[test]
+    fn upstream_counters_track_winners_and_whole_millisecond_latency_of_responses_only() {
+        use super::{UPSTREAM_LATENCY_BOUNDS_MS, UpstreamAttemptMetricsSnapshot};
+        let mut counters = UpstreamAttemptMetricsSnapshot::default();
+        let ms = |millis: u64| Some(Duration::from_millis(millis) + Duration::from_micros(999));
+        counters.record(UpstreamAttemptOutcome::Response, ms(0), true); // 0 ms (truncated)
+        counters.record(UpstreamAttemptOutcome::Response, ms(1), false); // 1 ms
+        counters.record(UpstreamAttemptOutcome::Response, ms(5), true); // 5 ms: le=5
+        counters.record(UpstreamAttemptOutcome::Response, ms(6), false); // le=10
+        counters.record(UpstreamAttemptOutcome::Response, ms(5000), false); // le=5000
+        counters.record(UpstreamAttemptOutcome::Response, ms(5001), false); // overflow
+        counters.record(UpstreamAttemptOutcome::TimedOut, ms(900), false);
+        counters.record(UpstreamAttemptOutcome::Failed, None, false);
+        counters.record(UpstreamAttemptOutcome::Canceled, ms(3), false);
+        assert_eq!(counters.attempts_total, 9);
+        assert_eq!(
+            (
+                counters.responses_total,
+                counters.timeouts_total,
+                counters.failures_total
+            ),
+            (6, 1, 1)
+        );
+        assert_eq!((counters.canceled_total, counters.winners_total), (1, 2));
+        // Only the six responses are observed, in whole milliseconds.
+        assert_eq!(counters.latency_count, 6);
+        assert_eq!(counters.latency_sum_ms, 1 + 5 + 6 + 5000 + 5001);
+        let mut expected = [0_u64; UPSTREAM_LATENCY_BOUNDS_MS.len() + 1];
+        expected[0] = 2; // 0 and 1 ms are both <= 1
+        expected[1] = 1; // 5 ms
+        expected[2] = 1; // 6 ms
+        expected[10] = 1; // 5000 ms
+        expected[11] = 1; // 5001 ms
+        assert_eq!(counters.latency_buckets, expected);
     }
 
     #[test]

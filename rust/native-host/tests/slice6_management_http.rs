@@ -1527,7 +1527,6 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
             for id in [
                 "groups.upstreams",
                 "rules.adguard",
-                "capture.logs",
                 "client.aliases",
                 "switches.manage",
                 "cache.requery",
@@ -1545,14 +1544,18 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                     "{id}"
                 );
             }
-            // System and appearance operations are real now (F-1): supported with the API.
-            for id in ["appearance.server", "system.webui_port", "metrics.process"] {
+            // System and appearance operations are real now (F-1), and so is log capture (F-2).
+            for id in [
+                "appearance.server",
+                "system.webui_port",
+                "metrics.process",
+                "capture.logs",
+            ] {
                 assert_eq!(ops[id]["supported"], true, "{id}");
                 assert!(ops[id]["reason"].is_null());
             }
             for path in [
                 "/plugins/adguard/rules",
-                "/api/v1/capture/logs",
                 "/plugins/clientname",
                 "/plugins/switch3/show",
                 "/plugins/requery/status",

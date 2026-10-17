@@ -9,6 +9,7 @@ pub mod build_identity;
 mod cache;
 mod cache_dump;
 mod cache_placement;
+mod capture;
 mod cli;
 mod config;
 mod diag;
@@ -46,6 +47,7 @@ mod tcp;
 mod transaction;
 mod udp;
 mod ui_manifest;
+mod upstream_metrics;
 mod webinfo;
 
 pub use api::{ApiServer, ApiServerError};

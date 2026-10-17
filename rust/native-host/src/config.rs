@@ -95,6 +95,9 @@ pub struct ForwardEntryConfig {
     pub tag: Option<String>,
     pub identity: String,
     pub(crate) response_identity: std::sync::Arc<str>,
+    /// The upstream's configured `addr` text, set for `aliapi` upstreams only:
+    /// the `addr` label of their `/metrics` series.
+    pub(crate) metrics_addr: Option<String>,
     /// Numeric dial endpoint for the legacy view, when this entry is already
     /// numeric or supplies an explicit numeric `dial_addr`.
     pub endpoint: Option<Endpoint>,
@@ -264,6 +267,7 @@ impl ForwardCompiler {
                 tag: None,
                 response_identity: std::sync::Arc::from(identity.as_str()),
                 identity,
+                metrics_addr: None,
                 endpoint,
                 target,
             });
@@ -3419,6 +3423,7 @@ fn compile_forward(plugin: &RawPlugin) -> Result<ForwardDefinitionConfig, Config
             tag,
             response_identity: std::sync::Arc::from(identity.as_str()),
             identity,
+            metrics_addr: None,
             endpoint,
             target,
         });
