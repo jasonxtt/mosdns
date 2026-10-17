@@ -615,6 +615,10 @@ async fn process_connection(
                     "pending_cleanup": control
                         .as_ref()
                         .map_or_else(Vec::new, |control| control.pending_cleanup()),
+                    // Every directory under `<config root>/ui/` (served at `/<name>/`):
+                    // whether it is mounted and, for a mosdns UI package, its version or the
+                    // reason it is refused. Never affects `ready`.
+                    "external_ui": external_ui_json(external_ui.entries()),
                     // The kernel receive buffer each UDP listener was granted
                     // (null when unreadable): queries that arrive while a
                     // configuration save stalls the DNS thread wait there.
@@ -743,6 +747,34 @@ async fn process_connection(
         () = shutdown.cancelled() => Ok(()),
         written = write_response(&mut writer, &response) => written,
     }
+}
+
+/// The health document's view of the external UI directories: one object per directory under
+/// `ui/` — `name`, `mounted`, `kind` (`mosdns_ui` with a manifest, `static` without one,
+/// `unusable` for a reserved name or a non-directory), the package's `ui_version`/`built_at`
+/// when it has a compatible manifest, and a `reason` (why it is refused, or the note that a
+/// manifest-less directory is not a mosdns UI package).
+fn external_ui_json(entries: &[crate::external_ui::Entry]) -> serde_json::Value {
+    use crate::external_ui::Kind;
+    serde_json::Value::Array(
+        entries
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "name": entry.name,
+                    "mounted": entry.mounted,
+                    "kind": match entry.kind {
+                        Kind::MosdnsUi => "mosdns_ui",
+                        Kind::Static => "static",
+                        Kind::Unusable => "unusable",
+                    },
+                    "ui_version": entry.info.as_ref().map(|info| info.ui_version.as_str()),
+                    "built_at": entry.info.as_ref().and_then(|info| info.built_at.as_deref()),
+                    "reason": entry.reason,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Watches the request-side half after the complete request has been read.

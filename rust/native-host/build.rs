@@ -32,6 +32,11 @@ fn collect(directory: &Path, root: &Path, assets: &mut BTreeMap<String, PathBuf>
         let kind = entry.file_type().expect("embedded asset type");
         assert!(!kind.is_symlink(), "embedded symlink: {}", path.display());
         if kind.is_dir() {
+            // The compatibility UI (`/log`) is served by the Go host only; the native host
+            // embeds the maintained UI alone.
+            if path == root.join("assets/vue-log1") {
+                continue;
+            }
             collect(&path, root, assets);
         } else {
             regular(&path);
@@ -61,21 +66,20 @@ fn main() {
         PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../coremain/www");
     let mut assets = BTreeMap::new();
     collect(&root.join("assets"), &root, &mut assets);
-    for (route, file) in [("/", "log.html"), ("/log", "log1.html")] {
-        let path = root.join(file);
-        regular(&path);
-        let html = std::fs::read_to_string(&path).expect("embedded HTML");
-        for fragment in html.split(['"', '\'']) {
-            if fragment.starts_with("/assets/") {
-                let local = fragment.split('?').next().unwrap();
-                assert!(
-                    assets.contains_key(local),
-                    "embedded root references missing asset: {local}"
-                );
-            }
+    // The one embedded root: the maintained UI at `/`.
+    let path = root.join("log.html");
+    regular(&path);
+    let html = std::fs::read_to_string(&path).expect("embedded HTML");
+    for fragment in html.split(['"', '\'']) {
+        if fragment.starts_with("/assets/") {
+            let local = fragment.split('?').next().unwrap();
+            assert!(
+                assets.contains_key(local),
+                "embedded root references missing asset: {local}"
+            );
         }
-        assets.insert(route.to_owned(), path);
     }
+    assets.insert("/".to_owned(), path);
     let mut generated = String::from("static EMBEDDED: &[EmbeddedAsset] = &[\n");
     for (route, path) in assets {
         println!("cargo:rerun-if-changed={}", path.display());

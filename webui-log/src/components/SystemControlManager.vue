@@ -964,7 +964,9 @@ function buildWebUIRootUrl(port) {
   try {
     const url = new URL(window.location.href);
     url.port = String(port);
-    url.pathname = "/";
+    // An external UI (served at /<name>/) stays in its own directory after the port changes:
+    // its resource URLs are relative, so the page's own directory is the right target.
+    url.pathname = new URL("./", window.location.href).pathname;
     url.search = "";
     url.hash = "";
     return url.toString();

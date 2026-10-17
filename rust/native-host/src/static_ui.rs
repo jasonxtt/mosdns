@@ -114,10 +114,8 @@ pub(crate) async fn serve_embedded<W: AsyncWrite + Unpin>(
     let raw = target.split('?').next().unwrap_or(target);
     let decoded = decoded_path(target);
     let route = decoded.as_deref().unwrap_or(raw);
-    if !(matches!(route, "/" | "/log" | "/log/")
-        || route == "/assets"
-        || route.starts_with("/assets/"))
-    {
+    // Only the maintained UI is embedded; `/log` belongs to the Go host and is a plain 404 here.
+    if !(route == "/" || route == "/assets" || route.starts_with("/assets/")) {
         return Ok(false);
     }
     let asset = decoded
@@ -142,18 +140,6 @@ pub(crate) async fn serve_embedded<W: AsyncWrite + Unpin>(
                 &b""[..],
                 "Allow: GET, HEAD\r\n".to_owned(),
             )
-        } else if route == "/log/" && redirect_target("/log", target).is_none() {
-            (404, "Not Found", &b""[..], String::new())
-        } else if route == "/log/" {
-            (
-                301,
-                "Moved Permanently",
-                &b""[..],
-                format!(
-                    "Location: {}\r\n",
-                    redirect_target("/log", target).unwrap_or_default()
-                ),
-            )
         } else if representation && permit.is_none() {
             (503, "Service Unavailable", &b""[..], String::new())
         } else if let Some(asset) = asset {
@@ -162,7 +148,7 @@ pub(crate) async fn serve_embedded<W: AsyncWrite + Unpin>(
             } else {
                 200
             };
-            let kind = if matches!(asset.path, "/" | "/log") {
+            let kind = if asset.path == "/" {
                 "text/html; charset=utf-8"
             } else {
                 mime(asset.path)
@@ -239,11 +225,9 @@ mod tests {
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).await.unwrap();
             assert!(bytes.starts_with(b"HTTP/1.1 503"));
-            for (method, target, status) in [
-                ("POST", "/", "405"),
-                ("GET", "/log/?x=1", "301"),
-                ("GET", "/assets/missing", "404"),
-            ] {
+            for (method, target, status) in
+                [("POST", "/", "405"), ("GET", "/assets/missing", "404")]
+            {
                 let (mut writer, mut reader) = tokio::io::duplex(1024);
                 assert!(
                     serve_embedded(&mut writer, target, method, None, slots.clone(), &shutdown)

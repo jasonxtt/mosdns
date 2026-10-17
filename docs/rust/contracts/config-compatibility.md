@@ -8,7 +8,7 @@ Read `docs/ai/config-notes.md` before changing configuration generation, upgrade
 
 - Preserve MosDNS YAML syntax, plugin type names, arguments, and sequence semantics while implementations move to Rust.
 - Preserve the canonical `special_groups` name and its routing, upstream binding, online/local rule, and audit behavior.
-- The maintained Vue UI at `/` and compatibility UI at `/log` remain stable control surfaces. Saving in the UI must continue to affect generated config and runtime behavior.
+- The maintained Vue UI at `/` remains a stable control surface (the compatibility UI at `/log` exists in the Go host only; the Rust-native host does not serve it). Saving in the UI must continue to affect generated config and runtime behavior.
 - Keep existing HTTP paths, response shapes, Prometheus names, audit fields, state files, and cache dump format unless a separately approved migration explicitly versions them.
 - Approved planned exception (2026-09-30, rust-native-upstream-forwarding):
   native v2 rich logs may add optional upstream_diagnostics with schema_version1,

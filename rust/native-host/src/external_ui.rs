@@ -7,12 +7,40 @@ use tokio::{io::AsyncWrite, sync::Semaphore};
 #[cfg(target_os = "linux")]
 use tokio::{io::AsyncWriteExt, sync::mpsc};
 
+/// What a directory under `<config root>/ui/` is, as startup judged it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// It carries a `ui-manifest.json`: a mosdns UI package, mounted only when compatible.
+    MosdnsUi,
+    /// No manifest: any static pages the operator put there, served as before.
+    Static,
+    /// Not served: a reserved or invalid name, or not a plain directory.
+    Unusable,
+}
+
+/// One directory under `ui/` and whether (and why not) it is served at `/<name>/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Entry {
+    pub(crate) name: String,
+    pub(crate) mounted: bool,
+    pub(crate) kind: Kind,
+    pub(crate) info: Option<crate::ui_manifest::UiInfo>,
+    /// Fixed text without file contents; also set for an unmanaged (manifest-less) directory.
+    pub(crate) reason: Option<String>,
+}
+
+/// At most this many directories are listed (a bound on health size, far above real use).
+const MAX_LISTED: usize = 64;
+/// The note for a directory served without a manifest.
+pub(crate) const NO_MANIFEST_NOTE: &str = "非 mosdns UI 包（无 manifest）";
+
 #[derive(Default)]
 pub(crate) struct Registry {
     #[cfg(all(test, target_os = "linux"))]
     io_gate: Option<Arc<IoGate>>,
     #[cfg(target_os = "linux")]
     mounts: BTreeMap<String, Arc<std::os::fd::OwnedFd>>,
+    entries: Vec<Entry>,
 }
 
 impl Registry {
@@ -59,24 +87,42 @@ impl Registry {
                     if matches!(name, "." | "..") {
                         continue;
                     }
+                    // Plain files (a README, `.DS_Store`) are not UI directories: ignored silently.
+                    if entry.file_type() == rustix::fs::FileType::RegularFile {
+                        continue;
+                    }
+                    let unusable = |reason: &str| Entry {
+                        name: name.to_owned(),
+                        mounted: false,
+                        kind: Kind::Unusable,
+                        info: None,
+                        reason: Some(reason.to_owned()),
+                    };
                     if name.is_empty()
                         || name.contains(['/', '\\'])
                         || name.chars().any(char::is_control)
-                        || matches!(
-                            name,
-                            "root"
-                                | "log"
-                                | "log1"
-                                | "legacy"
-                                | "blog"
-                                | "assets"
-                                | "debug"
-                                | "metrics"
-                                | "plugins"
-                                | "api"
-                        )
                     {
                         skipped += 1;
+                        registry
+                            .entries
+                            .push(unusable("名称无效（含斜杠或控制字符）"));
+                        continue;
+                    }
+                    if matches!(
+                        name,
+                        "root"
+                            | "log"
+                            | "log1"
+                            | "legacy"
+                            | "blog"
+                            | "assets"
+                            | "debug"
+                            | "metrics"
+                            | "plugins"
+                            | "api"
+                    ) {
+                        skipped += 1;
+                        registry.entries.push(unusable("保留名，不会挂载"));
                         continue;
                     }
                     match openat2(
@@ -87,9 +133,37 @@ impl Registry {
                         ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS,
                     ) {
                         Ok(fd) => {
-                            registry.mounts.insert(name.to_owned(), Arc::new(fd));
+                            let (mounted, kind, info, reason) = match inspect(&fd) {
+                                Inspection::NoManifest => {
+                                    (true, Kind::Static, None, Some(NO_MANIFEST_NOTE.to_owned()))
+                                }
+                                Inspection::Package(Ok(info)) => {
+                                    (true, Kind::MosdnsUi, Some(info), None)
+                                }
+                                Inspection::Package(Err(reason)) => {
+                                    crate::diag::warn_line!(
+                                        "external UI package `ui/{name}` is not mounted: {reason}"
+                                    );
+                                    (false, Kind::MosdnsUi, None, Some(reason))
+                                }
+                            };
+                            if mounted {
+                                registry.mounts.insert(name.to_owned(), Arc::new(fd));
+                            }
+                            registry.entries.push(Entry {
+                                name: name.to_owned(),
+                                mounted,
+                                kind,
+                                info,
+                                reason,
+                            });
                         }
-                        Err(_) => skipped += 1,
+                        Err(_) => {
+                            skipped += 1;
+                            registry
+                                .entries
+                                .push(unusable("不是可用的目录（符号链接或无法读取）"));
+                        }
                     }
                 }
                 Ok(())
@@ -102,6 +176,14 @@ impl Registry {
                 crate::diag::warn_line!(
                     "native UI registry skipped {skipped} reserved, invalid, symlink or non-directory entries"
                 );
+            }
+            registry.entries.sort_by(|a, b| a.name.cmp(&b.name));
+            if registry.entries.len() > MAX_LISTED {
+                crate::diag::warn_line!(
+                    "native UI registry lists only the first {MAX_LISTED} of {} directories in health",
+                    registry.entries.len()
+                );
+                registry.entries.truncate(MAX_LISTED);
             }
             registry
         }
@@ -214,6 +296,75 @@ impl Registry {
             Ok(true)
         }
     }
+}
+
+impl Registry {
+    /// Every directory under `ui/` that startup judged (sorted by name, at most 64).
+    pub(crate) fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+}
+
+/// What the pinned directory of one `ui/<name>` holds.
+#[cfg(target_os = "linux")]
+enum Inspection {
+    /// No `ui-manifest.json`: generic static pages.
+    NoManifest,
+    /// A mosdns UI package: compatible (`Ok`) or the reason it is refused.
+    Package(Result<crate::ui_manifest::UiInfo, String>),
+}
+
+/// Looks for `ui-manifest.json` (beneath the directory, no symlinks, a regular file of at most
+/// 64 KiB) and, when there is one, judges it and checks that `index.html` is a regular file.
+#[cfg(target_os = "linux")]
+fn inspect(root: &std::os::fd::OwnedFd) -> Inspection {
+    use rustix::fs::{Mode, OFlags, ResolveFlags, openat2};
+    use std::io::Read;
+    let open = |name: &str| {
+        openat2(
+            root,
+            name,
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS,
+        )
+        .map(std::fs::File::from)
+    };
+    let manifest = match open("ui-manifest.json") {
+        Ok(file) => file,
+        Err(rustix::io::Errno::NOENT) => return Inspection::NoManifest,
+        Err(_) => {
+            return Inspection::Package(Err(
+                "ui-manifest.json 无法打开（符号链接或无法读取）".to_owned()
+            ));
+        }
+    };
+    let judged = (|| {
+        let metadata = manifest
+            .metadata()
+            .map_err(|_| "ui-manifest.json 无法读取".to_owned())?;
+        if !metadata.is_file() {
+            return Err("ui-manifest.json 不是普通文件".to_owned());
+        }
+        if metadata.len() > crate::ui_manifest::MAX_MANIFEST_BYTES {
+            return Err("ui-manifest.json 过大".to_owned());
+        }
+        let mut bytes = Vec::new();
+        manifest
+            .take(crate::ui_manifest::MAX_MANIFEST_BYTES)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "ui-manifest.json 无法读取".to_owned())?;
+        let info = crate::ui_manifest::evaluate(&bytes)?;
+        let index_is_file = open("index.html")
+            .ok()
+            .and_then(|file| file.metadata().ok())
+            .is_some_and(|metadata| metadata.is_file());
+        if !index_is_file {
+            return Err("缺少 index.html".to_owned());
+        }
+        Ok(info)
+    })();
+    Inspection::Package(judged)
 }
 
 #[cfg(target_os = "linux")]
@@ -394,6 +545,155 @@ impl IoGate {
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
+
+    const GOOD: &str = r#"{"manifest_schema":1,"ui_version":"v9","built_at":"2026-10-17T00:00:00Z","api_level":1,"requires_api_level":1}"#;
+
+    /// A configuration root whose `ui/` holds one directory per `(name, files)` entry.
+    fn root_with(label: &str, packages: &[(&str, &[(&str, &str)])]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("mosdns-ui-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("ui")).unwrap();
+        for (name, files) in packages {
+            std::fs::create_dir_all(root.join("ui").join(name)).unwrap();
+            for (file, text) in *files {
+                std::fs::write(root.join("ui").join(name).join(file), text).unwrap();
+            }
+        }
+        root
+    }
+
+    fn entry<'a>(registry: &'a Registry, name: &str) -> &'a Entry {
+        registry
+            .entries()
+            .iter()
+            .find(|entry| entry.name == name)
+            .unwrap_or_else(|| panic!("no entry for {name}: {:?}", registry.entries()))
+    }
+
+    #[test]
+    fn any_directory_name_works_and_a_manifest_decides_whether_a_package_is_mounted() {
+        const NEWER: &str =
+            r#"{"manifest_schema":1,"ui_version":"v","api_level":2,"requires_api_level":2}"#;
+        let root = root_with(
+            "names",
+            &[
+                // Different names, same package.
+                (
+                    "pg",
+                    &[("ui-manifest.json", GOOD), ("index.html", "<html>")],
+                ),
+                ("a", &[("ui-manifest.json", GOOD), ("index.html", "<html>")]),
+                // Without a manifest: generic static pages, as before, and noted as such.
+                ("plain", &[("index.html", "<html>")]),
+                ("newer", &[("ui-manifest.json", NEWER), ("index.html", "x")]),
+                ("garbage", &[("ui-manifest.json", "{"), ("index.html", "x")]),
+                ("no-index", &[("ui-manifest.json", GOOD)]),
+                // Reserved names are listed as refused, whatever they contain.
+                ("log", &[("ui-manifest.json", GOOD), ("index.html", "x")]),
+                ("api", &[("index.html", "x")]),
+            ],
+        );
+        std::fs::write(
+            root.join("ui/README.txt"),
+            "a plain file is not a UI directory",
+        )
+        .unwrap();
+        let registry = Registry::scan(Some(&root));
+        for name in ["pg", "a"] {
+            let found = entry(&registry, name);
+            assert!(found.mounted && found.kind == Kind::MosdnsUi && found.reason.is_none());
+            assert_eq!(found.info.as_ref().unwrap().ui_version, "v9");
+            assert_eq!(
+                found.info.as_ref().unwrap().built_at.as_deref(),
+                Some("2026-10-17T00:00:00Z")
+            );
+            assert!(registry.mounts.contains_key(name));
+        }
+        let plain = entry(&registry, "plain");
+        assert!(plain.mounted && plain.kind == Kind::Static && plain.info.is_none());
+        assert_eq!(plain.reason.as_deref(), Some(NO_MANIFEST_NOTE));
+        assert!(registry.mounts.contains_key("plain"));
+        for (name, reason) in [
+            ("newer", "需要接口级别 2"),
+            ("garbage", "不是合法的 JSON"),
+            ("no-index", "缺少 index.html"),
+        ] {
+            let found = entry(&registry, name);
+            assert!(!found.mounted && found.kind == Kind::MosdnsUi, "{name}");
+            assert!(
+                found.reason.as_deref().unwrap().contains(reason),
+                "{name}: {found:?}"
+            );
+            assert!(
+                !registry.mounts.contains_key(name),
+                "{name}: a refused package is not mounted"
+            );
+        }
+        for name in ["log", "api"] {
+            let found = entry(&registry, name);
+            assert!(!found.mounted && found.kind == Kind::Unusable, "{name}");
+            assert!(found.reason.as_deref().unwrap().contains("保留名"));
+            assert!(!registry.mounts.contains_key(name));
+        }
+        assert!(
+            registry
+                .entries()
+                .iter()
+                .all(|entry| entry.name != "README.txt")
+        );
+        let names: Vec<_> = registry
+            .entries()
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "listed by name");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_manifest_that_is_a_symlink_or_too_large_is_not_followed() {
+        let root = root_with("symlink", &[("pg", &[("index.html", "x")])]);
+        std::fs::write(root.join("real.json"), GOOD).unwrap();
+        std::os::unix::fs::symlink(root.join("real.json"), root.join("ui/pg/ui-manifest.json"))
+            .unwrap();
+        let registry = Registry::scan(Some(&root));
+        let found = entry(&registry, "pg");
+        assert!(!found.mounted && found.reason.as_deref().unwrap().contains("符号链接"));
+        std::fs::remove_file(root.join("ui/pg/ui-manifest.json")).unwrap();
+        std::fs::write(root.join("ui/pg/ui-manifest.json"), vec![b' '; 70 * 1024]).unwrap();
+        let registry = Registry::scan(Some(&root));
+        assert!(
+            entry(&registry, "pg")
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("过大")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn symlinked_or_missing_ui_directories_are_listed_or_empty() {
+        let root = std::env::temp_dir().join(format!("mosdns-ui-links-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("ui/real")).unwrap();
+        std::fs::write(root.join("ui/real/index.html"), "x").unwrap();
+        std::os::unix::fs::symlink(root.join("ui/real"), root.join("ui/link")).unwrap();
+        let registry = Registry::scan(Some(&root));
+        assert!(registry.mounts.contains_key("real") && !registry.mounts.contains_key("link"));
+        let link = entry(&registry, "link");
+        assert!(!link.mounted && link.kind == Kind::Unusable);
+        // No ui directory at all, or no configuration root: nothing to list.
+        assert!(
+            Registry::scan(Some(&root.join("elsewhere")))
+                .entries()
+                .is_empty()
+        );
+        assert!(Registry::scan(None).entries().is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn blocking_owner_retains_permits_and_shutdown_joins_started_io() {
         let root = std::env::temp_dir().join(format!("mosdns-ui-owned-{}", std::process::id()));

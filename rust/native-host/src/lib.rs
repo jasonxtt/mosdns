@@ -45,6 +45,7 @@ mod system_api;
 mod tcp;
 mod transaction;
 mod udp;
+mod ui_manifest;
 mod webinfo;
 
 pub use api::{ApiServer, ApiServerError};
