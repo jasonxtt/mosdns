@@ -1,5 +1,17 @@
 <script setup>
+import { computed } from 'vue'
 import { capabilityState, supportsOperation, operationReason } from '../../api/runtimeCapabilities'
+
+// The native host lists every directory under `<config root>/ui/` in its health (served at /<name>/).
+const externalEntries = computed(() => (Array.isArray(capabilityState.health?.external_ui) ? capabilityState.health.external_ui : []))
+// The directory this page was loaded from ('/' for the built-in UI, '/<name>/' for an external one).
+const currentDirectory = typeof window !== 'undefined' ? new URL('./', window.location.href).pathname : '/'
+const packageUrl = (entry) => `/${encodeURIComponent(entry.name)}/`
+// Compatible mosdns UI packages other than the one being viewed.
+const mountedPackages = computed(() => externalEntries.value.filter((entry) => entry.kind === 'mosdns_ui' && entry.mounted && packageUrl(entry) !== currentDirectory))
+// Packages the host refused (incompatible, broken manifest, ...), with the reason.
+const refusedPackages = computed(() => externalEntries.value.filter((entry) => entry.kind === 'mosdns_ui' && !entry.mounted))
+
 defineProps({
   restarting: {
     type: Boolean,
@@ -20,6 +32,8 @@ defineEmits(['restart'])
     <div v-if="capabilityState.value?.kind === 'native'" class="module-kv-list">
       <div class="control-line"><strong>运行时</strong><span>Rust</span></div>
       <div class="control-line"><strong>产品版本</strong><span>{{ supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version') }}</span></div>
+      <p v-for="entry in mountedPackages" :key="`ui-${entry.name}`" class="muted" role="note" data-external-ui-link>检测到外置 UI「{{ entry.name }}」版本 {{ entry.ui_version }}，<a :href="packageUrl(entry)">前往 {{ packageUrl(entry) }}</a></p>
+      <p v-for="entry in refusedPackages" :key="`refused-${entry.name}`" class="muted" role="note" data-external-ui-rejected>外置 UI「{{ entry.name }}」未挂载：{{ entry.reason }}</p>
       <template v-if="supportsOperation('metrics.process')">
         <div class="control-line"><strong>启动时间</strong><span>{{ systemInfo.startTime ? new Date(systemInfo.startTime * 1000).toLocaleString('zh-CN', { hour12: false }) : 'N/A' }}</span></div>
         <div class="control-line"><strong>CPU 时间</strong><span>{{ Number(systemInfo.cpuTime || 0).toFixed(2) }} 秒</span></div>

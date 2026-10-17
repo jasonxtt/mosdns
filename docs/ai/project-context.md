@@ -22,7 +22,7 @@ Phase 3B+ modules.
 - `coremain/`: HTTP/API server, runtime state, audit endpoints, and embedded assets under `coremain/www/`
 - `plugin/`: executable plugins and sequence/routing behavior
 - `pkg/`: shared DNS and query-context utilities
-- `webui-log/`: active Vue frontend workspace; `src/` builds the maintained UI and `src-log1/` builds the compatibility UI
+- `webui-log/`: active Vue frontend workspace; `src/` builds the maintained UI (built in at `/`, or as an external package for any `ui/<name>/` with `npm run build:external`) and `src-log1/` builds the compatibility UI (Go only)
 - `rust/`: experimental Rust cores, runtime, ABI, and adapters
 - `docs/rust/contracts/`: public product and migration contracts
 - `docs/rust/validation-summary.md`: accepted scope, validation evidence and limitations
@@ -33,8 +33,9 @@ Phase 3B+ modules.
 
 The normal route contract is:
 
-- `/` → maintained Vue UI
-- `/log` → compatibility UI
+- `/` → maintained Vue UI (Go and Rust-native)
+- `/log` → compatibility UI (**Go only**; the Rust-native host serves no `/log`)
+- `/<name>/` → optional external UI package from `<config root>/ui/<name>/`, any directory name (Rust-native; see `docs/rust/external-ui.md`)
 
 Do not infer the route from a directory name. Verify `coremain/mosdns.go`, the
 embedded HTML files, and the Vite configuration before changing UI behavior.

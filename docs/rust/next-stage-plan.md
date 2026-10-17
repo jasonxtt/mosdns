@@ -1,5 +1,12 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-17：UI-1 原生去掉 `/log`、外置 UI 包实现完成，待 Codex 审查结论与规划会话确认
+
+原生只提供 `/`（`/log`、`vue-log1` 资源不再嵌入，构建脚本不再 `build:log1`；Go 侧未改）。新增外置 UI 包：`npm run build:external` 从同一份 `src/` 生成与目录名无关的包（相对路径 + `ui-manifest.json` + zip），
+放进 `<配置根>/ui/<任意名字>/` 后在 `/<名字>/` 打开；带 manifest 的目录做兼容检查（不兼容则不挂载，health 说明原因），无 manifest 的目录照旧作为通用静态挂载；health 的 `external_ui` 列出全部外置目录，
+内置 `/` 的系统页对所有已挂载且兼容的包显示链接。VM 浏览器冒烟用 `pg`、`a` 目录名，在 `/pg/` 里做了审计停止/启动，并验证 manifest 兼容/缺失/不兼容与文件实时替换。
+记录见 [validation-records/10-17-ui-1](validation-records/10-17-ui-1/README.md)，使用说明 [external-ui.md](external-ui.md)。完整原生 `/metrics`（F-2）、5D-3 与 Go 侧 `/log` 的最终处理仍未开始。
+
 ## 2026-10-17：F-1 系统与外观实现完成，待 Codex 审查结论与规划会话确认
 
 四项能力从“尚未实现”改为真实：**外观（服务端）**（背景上传/历史/文字与按钮颜色，状态文件与 Go 互通，用 Go 处理器做了 34 个请求的双向逐字节对比）、**WebUI 端口**（启动时覆盖 `api.http`，保存后重启生效，优先级同 Go）、

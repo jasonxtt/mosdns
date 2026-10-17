@@ -43,3 +43,6 @@ demo/
 
 # Retired root eBPF build artifact
 /proxy.o
+
+# external UI package build output (webui-log, `npm run build:external`)
+webui-log/dist-external/

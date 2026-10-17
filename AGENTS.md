@@ -23,7 +23,7 @@ name is similar.
 ## Scope and stable facts
 
 - The final Rust migration target is a pure Rust-native MosDNS binary/runtime. The current Go default and existing opt-in Rust bridges remain only as transitional validation scaffolding until the Rust-native host passes its final cutover gate.
-- `/` is the maintained Vue UI. `/log` is the compatibility UI. `webui-log/` is the active frontend workspace despite its historical name.
+- `/` is the maintained Vue UI. `/log` is the compatibility UI and exists in the **Go host only**: the Rust-native host serves `/` (built in) and any external UI package placed in `<config root>/ui/<name>/` at `/<name>/` (`main` is only an example; see `docs/rust/external-ui.md`); it has no `/log`. `webui-log/` is the active frontend workspace despite its historical name.
 - The canonical backend feature name is `special_groups`; do not reintroduce `route_group`.
 - Do not import the upstream `nft` / `eBPF` direction. The detailed cutoff and decisions are in `UPSTREAM_SYNC.md`.
 

@@ -5,15 +5,18 @@ select the production/default binary or close the full native migration gate.
 
 ## Same-origin hosting
 
-`api.http` serves maintained Vue `/`, compatibility Vue `/log`, and recursively
-embedded `/assets/...` from the executable. No Go, Node, frontend proxy, source
+`api.http` serves the maintained Vue UI at `/` and its recursively embedded
+`/assets/...` from the executable. **The native host serves no `/log`**: the
+compatibility UI (`/log`, `webui-log/src-log1/`, `assets/vue-log1`) belongs to the Go
+host only; `/log`, `/log/`, `/log1` and `/assets/vue-log1/...` are plain 404s here
+and the native build neither builds nor embeds that UI (`scripts/build-rust-native.sh`
+runs `npm run build` only). No Go, Node, frontend proxy, source
 checkout or external web server is required at runtime. Cargo validates required
 roots and their referenced assets, regular files, forbidden secret/map names and
 symlinks, and tracks source assets for rebuilds. Roots use `no-cache`, accurate
 MIME, `nosniff`, representation lengths and SHA-256 strong ETags. GET/HEAD support
-weak/list/star If-None-Match; HEAD and 304 have no body. `/log/` redirects to `/log`
-without losing a safe query. Other methods return 405 with Allow; missing assets
-return 404, without SPA fallback or directory listings.
+weak/list/star If-None-Match; HEAD and 304 have no body. Other methods return 405
+with Allow; missing assets return 404, without SPA fallback or directory listings.
 
 External UI is registered once from immediate real directories under the
 **top-level configuration directory** `ui/<name>`. A basename `-c config.yaml`
@@ -31,6 +34,43 @@ Symlink/device/FIFO/socket/nonregular/escape targets return no file contents.
 Root replacement does not change the pinned mount. Unsupported platforms or
 kernels fail closed for external UI; embedded UI and API continue. Startup
 failures produce bounded diagnostics, without filenames/content disclosure.
+
+**External UI packages (UI-1).** The built-in UI at `/` is the preset; a newer UI can be shipped
+without rebuilding the program by unpacking an external package into **any** directory
+`<config root>/ui/<name>/`, which the mount serves at `/<name>/` (`ui/pg` → `/pg/`, `ui/a` → `/a/`;
+`main` is only an example; the built-in `/` stays available as the fallback). Directory names follow
+the rules above: non-empty, no slash/backslash/control characters, a real directory (no symlink), not
+a reserved name (`root`, `log`, `log1`, `legacy`, `blog`, `assets`, `debug`, `metrics`, `plugins`,
+`api`). `npm run build:external` in `webui-log/` builds the same `src/` into
+`webui-log/dist-external/package/` with **relative** resource URLs (`base: './'`: the package does
+not depend on its directory name, so the same package works under any `ui/<name>/`; API calls are
+same-origin absolute paths) and writes `release/mosdns-ui-<version>.zip` whose top level is the
+package. A **mosdns UI package** is a directory that carries a `ui-manifest.json`:
+
+```json
+{"manifest_schema": 1, "ui_version": "v0.7.3-12-gabcdef", "built_at": "2026-10-17T10:00:00Z", "api_level": 1, "requires_api_level": 1}
+```
+
+`manifest_schema` must be 1; `ui_version` is required (non-empty, at most 64 characters, no
+control characters); `built_at` is optional; `api_level` is the interface level the UI was built for
+and `requires_api_level` (default `api_level`) the least level it needs from the host. The host
+provides `HOST_API_LEVEL = 1` and still serves UIs built for `MIN_UI_API_LEVEL = 1` or later
+(`rust/native-host/src/ui_manifest.rs`; backward-compatible additions do not change the level, the UI
+degrades by `/api/v1/capabilities`). **Compatible ⇔ `requires_api_level ≤ HOST_API_LEVEL` and
+`api_level ≥ MIN_UI_API_LEVEL`.** The manifest check applies **only to directories that have a
+manifest**. At startup the registry looks in each pinned `ui/<name>` directory for
+`ui-manifest.json` (beneath-only, no symlinks, a regular file of at most 64 KiB):
+- **no manifest** → not a mosdns UI package: the directory is mounted as the generic static mount it
+  always was (existing behaviour; other static pages an operator put there keep working), and health
+  notes "非 mosdns UI 包（无 manifest）" (`kind: "static"`);
+- **manifest, compatible, `index.html` a regular file** → mounted (`kind: "mosdns_ui"`, with its version);
+- **manifest present but unreadable / not JSON / wrong schema / invalid version / incompatible level /
+  `index.html` missing** → **not mounted** (`/<name>/` is 404) with a fixed, content-free reason.
+Reserved names and non-directories (a symlink, a file with the name of a directory entry) are listed as
+`kind: "unusable"` and not mounted; plain files directly under `ui/` are ignored. The result is
+decided at startup, like every mount; file contents are re-read live, so replacing files of the same
+package takes effect at once, but a new package's manifest is judged (and the version shown) only at
+the next start — restart once after an update. Usage: [docs/rust/external-ui.md](../external-ui.md).
 
 Both static services share four active representation owners; saturation is
 503. Non-representation 301/404/405 retain their status. Headers have a five-second
@@ -51,7 +91,12 @@ Health GET `/api/v1/system/health` shares this exact version. JSON fields are
 `applied_config_schema:null`, `config_management_enabled:false`, and
 `pending_cleanup` (array of paths, relative to the configuration root, of deleted
 special-group files that could not be removed yet; empty normally, never affects
-`ready`; see native-special-groups.md) and `udp_receive_buffers` (one
+`ready`; see native-special-groups.md), `external_ui`
+(an array, sorted by name, at most 64 entries, one per directory under `ui/`:
+`{"name", "mounted", "kind": "mosdns_ui"|"static"|"unusable", "ui_version", "built_at", "reason"}`;
+`reason` explains a refusal, or notes that a manifest-less directory is not a mosdns UI package; the
+built-in UI shows a link to `/<name>/` for **every** mounted compatible mosdns UI package (not the one
+being viewed) and the reason of each refused one; never affects `ready`) and `udp_receive_buffers` (one
 `{listen, bytes}` per live UDP listener: the kernel receive buffer it was
 granted, `null` when unreadable; see "UDP receive buffer and apply pause"
 below; never affects `ready`). Null schemas do
@@ -180,7 +225,7 @@ state, HTTP, generation, and query-admission contract is in
 
 Run `scripts/build-rust-native.sh` from a fresh clone with Rust/Cargo, Node/npm and
 network/cache access to the locked dependencies. It installs locked npm inputs,
-builds maintained Vue then compatibility Vue, validates roots/assets/stamps, and
+builds the maintained Vue UI (the compatibility UI is Go-only and not built), validates roots/assets/stamps, and
 only then runs locked Cargo release for the native host in a source/asset-hash-keyed
 Cargo directory, preventing restored older mtimes from reusing a stale executable. `BUILD_VERSION` overrides
 repository `git describe --dirty` (fallback dev). The URL-encoded asset query stamp

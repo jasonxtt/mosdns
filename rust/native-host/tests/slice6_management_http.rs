@@ -1102,19 +1102,12 @@ fn embedded_ui_roots_assets_and_revalidation_are_real_http() {
         let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
         let before = host.metrics_snapshot();
         host.start_audit();
-        for path in [
-            "/",
-            "/log",
-            "/assets/vue-log/app.js?v=proof",
-            "/assets/vue-log1/app.css",
-        ] {
+        for path in ["/", "/assets/vue-log/app.js?v=proof"] {
             let response = http_request(api, &get(path)).await;
             assert_eq!(response.status, 200, "{path}: {response:?}");
             assert!(!response.body.is_empty());
             let mime = if path.contains("app.js") {
                 "text/javascript; charset=utf-8"
-            } else if path == "/assets/vue-log1/app.css" {
-                "text/css; charset=utf-8"
             } else {
                 "text/html; charset=utf-8"
             };
@@ -1144,21 +1137,22 @@ fn embedded_ui_roots_assets_and_revalidation_are_real_http() {
             "/plugins/missing",
             "/assets/%2e%2e/log.html",
             "/assets/vue-log%2fapp.js",
+            // The compatibility UI is not part of the native host (Go only): no root, no
+            // redirect, no assets.
+            "/log",
+            "/log/",
+            "/log/?x=1",
+            "/log1",
+            "/assets/vue-log1/app.css",
+            "/assets/vue-log1/app.js",
         ] {
-            assert_eq!(http_request(api, &get(path)).await.status, 404, "{path}");
+            let response = http_request(api, &get(path)).await;
+            assert_eq!(response.status, 404, "{path}");
+            assert!(response.header("location").is_none(), "{path}");
         }
         let wrong = http_request(api, &post("/", "")).await;
         assert_eq!(wrong.status, 405);
         assert_eq!(wrong.header("allow"), Some("GET, HEAD"));
-        let redirect = http_request(api, &get("/log/")).await;
-        assert_eq!(redirect.status, 301);
-        assert_eq!(redirect.header("location"), Some("/log"));
-        let queried = http_request(api, &get("/log/?x=1&return=%2F")).await;
-        assert_eq!(queried.status, 301);
-        assert_eq!(queried.header("location"), Some("/log?x=1&return=%2F"));
-        let unsafe_query = http_request(api, &get("/log/?x=%0d%0aInjected%3Ayes")).await;
-        assert_eq!(unsafe_query.status, 404);
-        assert!(unsafe_query.header("location").is_none());
         assert_eq!(host.metrics_snapshot(), before);
         assert!(host.audit_snapshot().records.is_empty());
         shutdown.cancel();
@@ -1262,6 +1256,153 @@ fn external_ui_is_live_confined_and_root_pinned() {
         exercise_ui_swaps(api, &fixture).await;
         fs::remove_file(fixture.root.join("ui/old/index.html")).unwrap();
         assert_eq!(http_request(api, &get("/demo/")).await.status, 404);
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+    });
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[allow(clippy::too_many_lines)]
+fn external_ui_packages_use_any_directory_name_and_a_manifest_decides_mounting() {
+    const GOOD: &str = r#"{"manifest_schema":1,"ui_version":"v9.9","built_at":"2026-10-17T00:00:00Z","api_level":1,"requires_api_level":1}"#;
+    const TOO_NEW: &str =
+        r#"{"manifest_schema":1,"ui_version":"v10","api_level":2,"requires_api_level":2}"#;
+    let fixture = fixture("ui-packages", free_udp_port(), free_tcp_port());
+    for (path, text) in [
+        // The same package under two unrelated names: the mount name is the directory name.
+        ("ui/pg/index.html", "<html>external</html>"),
+        ("ui/pg/app.js", "console.log(1)"),
+        ("ui/pg/ui-manifest.json", GOOD),
+        ("ui/a/index.html", "<html>a</html>"),
+        ("ui/a/ui-manifest.json", GOOD),
+        // No manifest: generic static pages exactly as before (not a mosdns UI package).
+        ("ui/plain/index.html", "<html>plain</html>"),
+        ("ui/newer/index.html", "x"),
+        ("ui/newer/ui-manifest.json", TOO_NEW),
+        ("ui/broken/index.html", "x"),
+        ("ui/broken/ui-manifest.json", "{nope"),
+        ("ui/log/index.html", "x"),
+        ("ui/log/ui-manifest.json", GOOD),
+    ] {
+        fixture.write(path, text);
+    }
+    let host = assembly_for(&fixture);
+    host.block_on(async {
+        let bound = host.bind_host().await.unwrap();
+        let api = bound.api_addr().unwrap();
+        let shutdown = TransportCancellation::new();
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let health = http_request(api, &get("/api/v1/system/health")).await;
+        assert_eq!(health.status, 200, "readiness is not affected");
+        let health: serde_json::Value = serde_json::from_str(&health.body).unwrap();
+        let listed = health["external_ui"].as_array().unwrap();
+        let find = |name: &str| listed.iter().find(|entry| entry["name"] == name).unwrap();
+        for name in ["pg", "a"] {
+            let entry = find(name);
+            assert_eq!(
+                (
+                    entry["mounted"].as_bool(),
+                    entry["kind"].as_str(),
+                    entry["ui_version"].as_str(),
+                    entry["built_at"].as_str()
+                ),
+                (
+                    Some(true),
+                    Some("mosdns_ui"),
+                    Some("v9.9"),
+                    Some("2026-10-17T00:00:00Z")
+                ),
+                "{name}"
+            );
+            assert!(entry["reason"].is_null(), "{name}");
+        }
+        let plain = find("plain");
+        assert_eq!(
+            (
+                plain["mounted"].as_bool(),
+                plain["kind"].as_str(),
+                plain["reason"].as_str()
+            ),
+            (
+                Some(true),
+                Some("static"),
+                Some("非 mosdns UI 包（无 manifest）")
+            )
+        );
+        assert!(plain["ui_version"].is_null());
+        for (name, kind, reason) in [
+            ("newer", "mosdns_ui", "需要接口级别 2"),
+            ("broken", "mosdns_ui", "不是合法的 JSON"),
+            ("log", "unusable", "保留名"),
+        ] {
+            let entry = find(name);
+            assert_eq!(
+                (entry["mounted"].as_bool(), entry["kind"].as_str()),
+                (Some(false), Some(kind)),
+                "{name}"
+            );
+            assert!(
+                entry["reason"].as_str().unwrap().contains(reason),
+                "{name}: {entry}"
+            );
+        }
+        // Mounted packages work under their own names, whatever those are.
+        for (name, body) in [("pg", "<html>external</html>"), ("a", "<html>a</html>")] {
+            let redirect = http_request(api, &get(&format!("/{name}?x=1"))).await;
+            assert_eq!(
+                (redirect.status, redirect.header("location")),
+                (301, Some(format!("/{name}/?x=1").as_str()))
+            );
+            let index = http_request(api, &get(&format!("/{name}/"))).await;
+            assert_eq!((index.status, index.body.as_str()), (200, body), "{name}");
+            assert_eq!(
+                index.header("content-type"),
+                Some("text/html; charset=utf-8")
+            );
+            assert_eq!(index.header("cache-control"), Some("no-store"));
+        }
+        let script = http_request(api, &get("/pg/app.js")).await;
+        assert_eq!(
+            (script.status, script.header("content-type")),
+            (200, Some("text/javascript; charset=utf-8"))
+        );
+        assert_eq!(script.header("x-content-type-options"), Some("nosniff"));
+        // Files are re-read on every request: a replaced file is served at once.
+        fixture.write("ui/pg/index.html", "<html>replaced</html>");
+        assert_eq!(
+            http_request(api, &get("/pg/")).await.body,
+            "<html>replaced</html>"
+        );
+        // The package cannot read outside itself; the manifest is one of its public files.
+        assert_eq!(
+            http_request(api, &get("/pg/%2e%2e/config.yaml"))
+                .await
+                .status,
+            404
+        );
+        assert_eq!(http_request(api, &get("/pg/missing.js")).await.status, 404);
+        assert_eq!(
+            http_request(api, &get("/pg/ui-manifest.json")).await.status,
+            200
+        );
+        // A directory without a manifest keeps working as plain static pages.
+        assert_eq!(
+            http_request(api, &get("/plain/")).await.body,
+            "<html>plain</html>"
+        );
+        // Refused or reserved: not served.
+        for path in [
+            "/newer/",
+            "/broken/",
+            "/broken/ui-manifest.json",
+            "/log/",
+            "/log",
+        ] {
+            assert_eq!(http_request(api, &get(path)).await.status, 404, "{path}");
+        }
+        // The built-in UI and everything else are unaffected.
+        assert_eq!(http_request(api, &get("/")).await.status, 200);
         shutdown.cancel();
         task.await.unwrap().unwrap();
     });

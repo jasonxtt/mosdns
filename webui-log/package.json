@@ -8,6 +8,7 @@
     "dev:log1": "vite --config vite.log1.config.js",
     "build": "vite build",
     "build:log1": "vite build --config vite.log1.config.js",
+    "build:external": "node ../scripts/build-external-ui.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

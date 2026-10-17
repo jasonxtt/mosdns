@@ -26,10 +26,14 @@ if (mode === 'stamp') {
       files.set(relative,hash(relative))
     } else throw new Error(`non-regular build input: ${relative}`)
   }
-  for (const dir of ['rust','webui-log/src','webui-log/src-log1']) collect(dir)
-  for (const file of ['webui-log/package.json','webui-log/package-lock.json','webui-log/vite.config.js','webui-log/vite.log1.config.js','webui-log/index.html','webui-log/log1.index.html','scripts/build-rust-native.sh','scripts/native-build-manifest.mjs']) collect(file)
-  collect('coremain/www/assets',true)
-  for (const file of ['log.html','log1.html']) {
+  // The native host embeds the maintained UI only; the compatibility UI (`/log`, src-log1) is Go's.
+  for (const dir of ['rust','webui-log/src']) collect(dir)
+  for (const file of ['webui-log/package.json','webui-log/package-lock.json','webui-log/vite.config.js','webui-log/index.html','scripts/build-rust-native.sh','scripts/native-build-manifest.mjs']) collect(file)
+  for (const name of readdirSync(path.join(root,'coremain/www/assets')).sort()) {
+    if (name === 'vue-log1') continue
+    collect(`coremain/www/assets/${name}`,true)
+  }
+  for (const file of ['log.html']) {
     collect(`coremain/www/${file}`,true)
     const html=readFileSync(`coremain/www/${file}`,'utf8')
     const refs=[...html.matchAll(/["'](\/assets\/[^"']+)["']/g)].map(m=>m[1])

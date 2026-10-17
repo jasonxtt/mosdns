@@ -15,7 +15,6 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT_DIR}/rust/target}"
   cd webui-log
   npm ci --include=dev
   npm run build
-  npm run build:log1
 )
 mkdir -p "$(dirname "${OUTPUT}")"
 node scripts/native-build-manifest.mjs prepare "${MANIFEST}"
