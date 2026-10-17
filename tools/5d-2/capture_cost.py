@@ -40,7 +40,7 @@ def send(args):
 
 def run(args):
     from harness import Env
-    with Env(args.work, 'native', args.binary, args.output, seed=args.seed, saved_port_applies=False) as env:
+    with Env(args.work, 'native', args.binary, args.output, seed=args.seed) as env:
         if args.capture == 'on':
             status, text, _ = env.api('POST', '/api/v1/capture/start', {'duration_seconds': 600})
             assert status == 200, (status, text)

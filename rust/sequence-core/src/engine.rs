@@ -117,6 +117,19 @@ pub struct ExecutionControl {
     pub cancellation: CancellationState,
     cancellation_token: CancellationToken,
     shared_budget: Option<RootFuelHandle>,
+    step_trace: Option<Rc<dyn StepTrace>>,
+}
+
+/// Receives every named matcher evaluation and every rule action of one
+/// query, for the diagnostic capture. `sequence` is the name of the executing
+/// configuration sequence (a synthetic inline sequence reports under the
+/// sequence it was lowered from). Absent (the default) the engine
+/// does nothing per step beyond one `Option` check.
+pub trait StepTrace: std::fmt::Debug {
+    /// A matcher was evaluated; `matched` already includes `!`.
+    fn matcher(&self, sequence: &str, name: &str, matched: bool, state: &ExecutionState);
+    /// Every matcher of a rule matched; its action runs next.
+    fn plugin(&self, sequence: &str, name: &str, state: &ExecutionState);
 }
 
 impl ExecutionControl {
@@ -127,6 +140,7 @@ impl ExecutionControl {
             cancellation: CancellationState::Active,
             cancellation_token: CancellationToken::new(),
             shared_budget: None,
+            step_trace: None,
         }
     }
 
@@ -140,6 +154,7 @@ impl ExecutionControl {
             cancellation: CancellationState::Active,
             cancellation_token,
             shared_budget: None,
+            step_trace: None,
         }
     }
 
@@ -156,6 +171,7 @@ impl ExecutionControl {
             cancellation: CancellationState::Active,
             cancellation_token,
             shared_budget: Some(shared_budget),
+            step_trace: None,
         }
     }
 
@@ -167,10 +183,20 @@ impl ExecutionControl {
             .shared_budget
             .clone()
             .unwrap_or_else(|| RootFuelHandle::new(self.remaining_fuel));
-        Self::with_shared_budget(
+        let mut child = Self::with_shared_budget(
             shared_budget,
             CancellationToken::with_parents(child_cancellation, self.cancellation_token.clone()),
-        )
+        );
+        child.step_trace.clone_from(&self.step_trace);
+        child
+    }
+
+    /// Attaches the step trace of a diagnostic capture; children forked from
+    /// this control report to it too.
+    #[must_use]
+    pub fn with_step_trace(mut self, trace: Rc<dyn StepTrace>) -> Self {
+        self.step_trace = Some(trace);
+        self
     }
 
     /// Returns the live shared allowance, or the legacy local field.
@@ -1148,12 +1174,13 @@ fn next_step(
         // reported origin instead of inventing an execution position.
         scopes.rule_origin = Some(sequence_id);
     }
-    run_rule(program, rule, scopes, state, control)
+    run_rule(program, rule, &sequence.trace_name, scopes, state, control)
 }
 
 fn run_rule(
     program: &ValidatedProgram,
     rule: &ValidatedRule,
+    sequence_name: &str,
     scopes: &mut ScopeStack,
     state: &mut ExecutionState,
     control: &mut ExecutionControl,
@@ -1184,6 +1211,11 @@ fn run_rule(
         } else {
             outcome.matched
         };
+        if let Some(trace) = &control.step_trace {
+            if !matcher.name.is_empty() {
+                trace.matcher(sequence_name, &matcher.name, effective_match, state);
+            }
+        }
         if !effective_match {
             return Ok(Step::Continue);
         }
@@ -1192,6 +1224,13 @@ fn run_rule(
         }
     }
 
+    // Every matcher matched: the rule's action is about to run (a rule without
+    // one is reported too, as the reference's `no_exec`).
+    if let Some(trace) = &control.step_trace {
+        if let Some(name) = &rule.plugin_name {
+            trace.plugin(sequence_name, name, state);
+        }
+    }
     let Some(executable) = &rule.executable else {
         return Ok(Step::Continue);
     };

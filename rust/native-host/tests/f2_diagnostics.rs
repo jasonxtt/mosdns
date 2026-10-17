@@ -101,13 +101,18 @@ impl Stub {
 }
 
 fn ask(dns: u16, name: &str) -> Option<Vec<u8>> {
+    ask_type(dns, name, 1)
+}
+
+fn ask_type(dns: u16, name: &str, qtype: u16) -> Option<Vec<u8>> {
     let socket = UdpSocket::bind("127.0.0.1:0").ok()?;
     socket
         .set_read_timeout(Some(Duration::from_millis(1500)))
         .ok()?;
-    socket
-        .send_to(&dns_query(name, 0x4242), ("127.0.0.1", dns))
-        .ok()?;
+    let mut query = dns_query(name, 0x4242);
+    let at = query.len() - 4;
+    query[at..at + 2].copy_from_slice(&qtype.to_be_bytes());
+    socket.send_to(&query, ("127.0.0.1", dns)).ok()?;
     let mut buffer = [0_u8; 512];
     let (length, _) = socket.recv_from(&mut buffer).ok()?;
     Some(buffer[..length].to_vec())
@@ -187,20 +192,32 @@ impl Host {
         std::fs::write(
             root.join("config.yaml"),
             format!(
-                "log: {{level: error}}\napi: {{http: '127.0.0.1:{api}'}}\nplugins:\n  - tag: cache_main\n    type: cache\n    args: {{}}\n  - tag: normal\n    type: aliapi\n    args:\n      upstreams: [{{tag: original, addr: 'udp://127.0.0.1:{upstream}', upstream_query_timeout: 400}}]\n  - tag: main\n    type: sequence\n    args: [{{exec: $cache_main}}, {{exec: $normal}}]\n  - tag: dns\n    type: udp_server\n    args: {{listen: '127.0.0.1:{dns}', entry: main, enable_audit: true}}\n"
+                "log: {{level: error}}\napi: {{http: '127.0.0.1:{api}'}}\nplugins:\n  - tag: cache_main\n    type: cache\n    args: {{}}\n  - tag: normal\n    type: aliapi\n    args:\n      upstreams: [{{tag: original, addr: 'udp://127.0.0.1:{upstream}', upstream_query_timeout: 400}}]\n  - tag: sub\n    type: sequence\n    args: [{{exec: $cache_main}}, {{exec: $normal}}]\n  - tag: pri\n    type: sequence\n    args: [{{matches: ['_true'], exec: $normal}}]\n  - tag: sec\n    type: sequence\n    args: [{{exec: $normal}}]\n  - tag: fb\n    type: fallback\n    args: {{primary: pri, secondary: sec}}\n  - tag: main\n    type: sequence\n    args:\n      - {{matches: ['qtype 28'], exec: 'reject 3'}}\n      - {{matches: ['qtype 15'], exec: $fb}}\n      - {{matches: ['!_false', 'qtype 1'], exec: $sub}}\n      - {{exec: accept}}\n  - tag: dns\n    type: udp_server\n    args: {{listen: '127.0.0.1:{dns}', entry: main, enable_audit: true}}\n"
             ),
         )
         .unwrap();
         let stub = Stub::start(upstream);
-        let mut child = Command::new(&exe)
-            .args(["start", "-d"])
-            .arg(&root)
-            .arg("-c")
-            .arg(root.join("config.yaml"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        // Another test thread copying its own binary at the same moment can leave this file
+        // briefly open for writing in a forked child ("Text file busy"): retry the spawn.
+        let mut attempt = 0;
+        let mut child = loop {
+            match Command::new(&exe)
+                .args(["start", "-d"])
+                .arg(&root)
+                .arg("-c")
+                .arg(root.join("config.yaml"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => break child,
+                Err(error) if error.raw_os_error() == Some(26) && attempt < 20 => {
+                    attempt += 1;
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(error) => panic!("spawn failed: {error}"),
+            }
+        };
         let (sender, stderr) = channel();
         let pipe = child.stderr.take().unwrap();
         std::thread::spawn(move || {
@@ -379,9 +396,9 @@ fn log_capture_follows_the_reference_contract() {
     assert!(ask(host.dns, "third.example.com").is_some());
     let mut line = None;
     wait_until("the third query line", || {
-        line = captured(&host)
-            .into_iter()
-            .find(|line| line["domain"] == "third.example.com");
+        line = captured(&host).into_iter().find(|line| {
+            line["domain"] == "third.example.com" && line["msg"] == "dns query completed"
+        });
         line.is_some()
     });
     let line = line.unwrap();
@@ -558,4 +575,150 @@ fn the_upstream_series_count_attempts_errors_winners_and_latency() {
         Some(3.0),
         "only successful attempts are observed"
     );
+}
+
+/// The `(logger_name, kind, name, result)` steps of one query's lines, in time order, from the
+/// reference's two step messages.
+fn steps(lines: &[serde_json::Value], domain: &str) -> Vec<String> {
+    let mut mine: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|line| line["domain"] == domain)
+        .collect();
+    mine.sort_by_key(|line| line["time"].as_str().unwrap().to_owned());
+    mine.iter()
+        .filter_map(|line| match line["msg"].as_str().unwrap() {
+            "dns query flows through matcher" => Some(format!(
+                "{}|matcher|{}|{}",
+                line["logger_name"].as_str().unwrap(),
+                line["matcher_name"].as_str().unwrap(),
+                line["match_result"]
+            )),
+            "dns query flows through plugin" => Some(format!(
+                "{}|plugin|{}",
+                line["logger_name"].as_str().unwrap(),
+                line["plugin_name"].as_str().unwrap()
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_capture_reports_every_matcher_and_action_in_the_reference_form() {
+    let host = Host::start("steps");
+    // Before a capture: no lines at all (and nothing is kept).
+    assert!(ask(host.dns, "before.example.com").is_some());
+    std::thread::sleep(Duration::from_millis(200));
+    host.api(
+        "POST",
+        "/api/v1/capture/start",
+        br#"{"duration_seconds": 30}"#,
+    );
+    assert!(ask(host.dns, "steps.example.com").is_some());
+    let mut lines = Vec::new();
+    wait_until("the summary line of the query", || {
+        lines.extend(captured(&host));
+        lines.iter().any(|line| {
+            line["domain"] == "steps.example.com" && line["msg"] == "dns query completed"
+        })
+    });
+    // The first query misses the cache and goes upstream: every rule of both sequences.
+    assert_eq!(
+        steps(&lines, "steps.example.com"),
+        [
+            "main|matcher|anonymous_match(qtype: 28)|false",
+            "main|matcher|anonymous_match(qtype: 15)|false",
+            "main|matcher|not(anonymous_match(_false: ))|true",
+            "main|matcher|anonymous_match(qtype: 1)|true",
+            "main|plugin|sub",
+            "sub|plugin|cache_main",
+            "sub|plugin|normal",
+            "main|plugin|anonymous_exec(accept: )",
+        ]
+    );
+    // One trace id ties the steps to the summary line; steps carry the query id and no `time` skew.
+    let ids: std::collections::BTreeSet<_> = lines
+        .iter()
+        .filter(|line| line["domain"] == "steps.example.com")
+        .map(|line| line["trace_id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ids.len(), 1, "{ids:?}");
+    let plugin = lines
+        .iter()
+        .find(|line| line["plugin_name"] == "sub" && line["domain"] == "steps.example.com")
+        .unwrap();
+    assert_eq!(plugin["query_id"], 0x4242);
+    assert_eq!(plugin["level"], "debug");
+    assert!(
+        lines
+            .iter()
+            .filter(|line| line["domain"] == "steps.example.com")
+            .all(|line| line["time"].as_str().unwrap().contains('T'))
+    );
+    // Nothing from the query made before the capture.
+    assert!(
+        lines
+            .iter()
+            .all(|line| line["domain"] != "before.example.com")
+    );
+
+    // A second ask of the same name is a cache hit: the cache step is reported, the upstream one is not.
+    assert!(ask(host.dns, "steps.example.com").is_some());
+    let mut again = Vec::new();
+    wait_until("the second summary line", || {
+        again.extend(captured(&host));
+        again.iter().any(|line| {
+            line["domain"] == "steps.example.com" && line["msg"] == "dns query completed"
+        })
+    });
+    let second = steps(&again, "steps.example.com");
+    assert!(
+        second.contains(&"sub|plugin|cache_main".to_owned()),
+        "{second:?}"
+    );
+    assert!(
+        !second.contains(&"sub|plugin|normal".to_owned()),
+        "{second:?}"
+    );
+
+    // An AAAA query takes the first rule's action, and a name with a trailing dot form is the same name.
+    let reply = ask_type(host.dns, "v6.example.com", 28).unwrap();
+    assert_eq!(reply[3] & 0x0f, 3, "reject 3 answers NXDOMAIN");
+    let mut v6 = Vec::new();
+    wait_until("the AAAA summary line", || {
+        v6.extend(captured(&host));
+        v6.iter()
+            .any(|line| line["domain"] == "v6.example.com" && line["msg"] == "dns query completed")
+    });
+    assert_eq!(
+        steps(&v6, "v6.example.com"),
+        [
+            "main|matcher|anonymous_match(qtype: 28)|true",
+            "main|plugin|anonymous_exec(reject: 3)",
+        ]
+    );
+
+    // A fallback runs its primary branch as a nested sequence under the same trace id.
+    assert!(ask_type(host.dns, "mx.example.com", 15).is_some());
+    let mut mx = Vec::new();
+    wait_until("the MX summary line", || {
+        mx.extend(captured(&host));
+        mx.iter()
+            .any(|line| line["domain"] == "mx.example.com" && line["msg"] == "dns query completed")
+    });
+    let flow = steps(&mx, "mx.example.com");
+    for expected in [
+        "main|matcher|anonymous_match(qtype: 15)|true",
+        "main|plugin|fb",
+        "pri|matcher|anonymous_match(_true: )|true",
+        "pri|plugin|normal",
+    ] {
+        assert!(flow.contains(&expected.to_owned()), "{expected}: {flow:?}");
+    }
+    let ids: std::collections::BTreeSet<_> = mx
+        .iter()
+        .filter(|line| line["domain"] == "mx.example.com")
+        .map(|line| line["trace_id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ids.len(), 1, "{ids:?}");
 }

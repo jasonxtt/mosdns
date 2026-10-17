@@ -203,14 +203,42 @@ are `{level:"debug", time (RFC 3339), msg, logger_name, …fields}`: one `dns qu
 `client`, `transport`, `outcome`, `cache` (`hit`/`miss`/`notapplicable`/`undetermined`), `elapsed_ms`,
 and — when the response or the execution established them — `rcode`, `route`, `matched_group`,
 `domain_set`, `upstream`, `failure`; plus the host's own low-frequency debug lines
-(`logger_name:"host"`). The reference writes one line per matcher/plugin step; the compiled native
-execution has no such step, so the trace is at query granularity (the UI groups by `trace_id` and
-shows one card per query). The per-query lines go **only to the capture buffer**, never to the log
-file or stderr, so a capture does not put file I/O on the DNS thread; recording is a short critical
-section on a dedicated mutex and costs one relaxed atomic load per query when no capture runs.
-The buffer is bounded: at most **4096 lines and 1 MiB** of serialized text, string values cut at 256
-characters; the oldest line is dropped first and a `warn` line `capture buffer limit reached: N older
-lines dropped` leads the next read.
+(`logger_name:"host"`).
+
+**Step trace (F-2b).** Before that summary line the capture also carries the reference's step log,
+with its two messages and field names, under the **same `trace_id`** as the summary line and for the
+same queries (those of `enable_audit` listeners): after every *named* matcher evaluation
+`dns query flows through matcher` with `trace_id`, `domain`, `matcher_name`, `match_result`; and,
+once every matcher of a rule matched and before its action runs, `dns query flows through plugin`
+with `trace_id`, `query_id`, `domain`, `plugin_name` (a rule without an action is reported too, as
+`no_exec`). `domain` is the question name at that step without the trailing dot (so a rewrite or
+redirect shows). Lines are reported by the engine at the one place all matchers and rules run, so
+the root sequence, `call`/`goto`/`jump` targets, sequences used as an `exec`, multi-`exec` rules
+(the rule as `multi_exec[...]`, then each executable) and fallback/preference branches all report
+(concurrent branches interleave; the lines carry their times). `logger_name` is the configuration
+sequence that is executing; a synthetic inline sequence reports under the sequence it belongs to.
+(Difference: the reference reports the rules reached through `jump`/`goto` under the logger of the
+jumping sequence; here they are reported under the target sequence, so the UI's "进入序列" marker
+names the sequence that really runs.) As in the
+reference, the first false matcher of a rule ends its evaluation (later matchers of that rule are not
+evaluated or reported), and a sequence that runs to its end reports nothing more.
+Names are generated at configuration compile time with the reference's rules (`sequence.go`):
+`matcher_name` is the tag of a `$tag` matcher, otherwise `anonymous_match(type: args)` with the
+argument text as written (first-space split, trimmed), wrapped in `not(...)` for `!`; `plugin_name` is
+`no_exec`, the tag of a single `$tag` exec, `anonymous_exec(type: args)` for a single quick exec, or
+`multi_exec[tag-or-type,...]`. (The task text said "raw configuration text"; the reference's actual
+output is the generated name above, which is what is implemented and compared.) Matchers and rules
+the host inserts that have no configuration text (managed-profile rules, etc.) are not reported.
+A query is traced only when it was admitted while a capture was running; queries already in flight
+when `start` is called are not.
+
+The per-query lines go **only to the capture buffer**, never to the log file or stderr, so a capture
+does not put file I/O on the DNS thread; recording is a short critical section on a dedicated mutex.
+With no capture running the engine does one `Option` check per matcher and per rule (no allocation,
+no formatting) and admission one relaxed atomic load. The buffer is bounded: at most **32768 lines
+and 8 MiB** of serialized text (one query's trace is about 10–20 lines; the reference's buffer is
+unbounded), string values cut at 256 characters; the oldest line is dropped first and a `warn` line
+`capture buffer limit reached: N older lines dropped` leads the next read.
 
 **`/metrics` upstream series** — for every `aliapi` upstream **with a `tag`** (as in the reference),
 from startup at zero: `mosdns_aliapi_query_total`, `_error_total`, `_upstream_winner_total`

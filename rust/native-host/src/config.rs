@@ -4269,12 +4269,15 @@ fn compile_sequence(
                 .into_iter()
                 .enumerate()
             {
-                matchers.push(compile_matcher(
-                    &expression,
-                    &format!("{matches_path}[{match_index}]"),
-                    catalog,
-                    &plugin.root_dir,
-                )?);
+                matchers.push(
+                    compile_matcher(
+                        &expression,
+                        &format!("{matches_path}[{match_index}]"),
+                        catalog,
+                        &plugin.root_dir,
+                    )?
+                    .with_name(matcher_trace_name(&expression)),
+                );
             }
         }
         let executable = item
@@ -4296,12 +4299,87 @@ fn compile_sequence(
                 "a sequence rule requires at least one matcher or executable",
             ));
         }
+        let (plugin_name, exec_names) = exec_trace_names(item.get("exec"));
         rules.push(
             RuleSpec::new(matchers, executable)
-                .with_audit_source(format!("inline:{}#{}", plugin.tag, rule_index)),
+                .with_audit_source(format!("inline:{}#{}", plugin.tag, rule_index))
+                .with_trace_names(plugin_name, exec_names),
         );
     }
     Ok(SequenceSpec::new(plugin.tag.clone(), rules))
+}
+
+/// Splits a rule part like the reference's `parseMatch`/`parseExecStr`: the first
+/// space ends the head, the rest (trimmed) is the argument text; a head starting with `$`
+/// is a plugin tag.
+fn split_rule_part(text: &str) -> (Option<String>, String, String) {
+    let (head, args) = text.split_once(' ').unwrap_or((text, ""));
+    let args = args.trim().to_owned();
+    match head.strip_prefix('$') {
+        Some(tag) => (Some(tag.trim().to_owned()), String::new(), args),
+        None => (None, head.to_owned(), args),
+    }
+}
+
+/// The `matcher_name` the reference's step log carries for a `matches` entry:
+/// the tag, or `anonymous_match(type: args)`, wrapped in `not(...)` for `!`.
+fn matcher_trace_name(expression: &str) -> String {
+    let text = expression.trim();
+    let (text, reverse) = match text.strip_prefix('!') {
+        Some(rest) => (rest.trim(), true),
+        None => (text, false),
+    };
+    let name = match split_rule_part(text) {
+        (Some(tag), _, _) if !tag.is_empty() => tag,
+        (_, kind, args) => format!("anonymous_match({kind}: {args})"),
+    };
+    if reverse {
+        format!("not({name})")
+    } else {
+        name
+    }
+}
+
+/// The reference's `plugin_name` of a rule, and for several executables the name of
+/// each as its own rule: none → `no_exec`; one → the tag or `anonymous_exec(type: args)`;
+/// several → `multi_exec[tag-or-type,...]`.
+fn exec_trace_names(exec: Option<&RawValue>) -> (String, Vec<String>) {
+    let items: Vec<&str> = match exec {
+        Some(RawValue::String(text)) => vec![text.as_str()],
+        Some(RawValue::Sequence(values)) => values
+            .iter()
+            .filter_map(|value| match value {
+                RawValue::String(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let parts: Vec<_> = items
+        .into_iter()
+        .map(|item| split_rule_part(item.trim()))
+        .collect();
+    let single = |(tag, kind, args): &(Option<String>, String, String)| match tag {
+        Some(tag) if !tag.is_empty() => tag.clone(),
+        _ => format!("anonymous_exec({kind}: {args})"),
+    };
+    match parts.as_slice() {
+        [] => ("no_exec".to_owned(), Vec::new()),
+        [only] => (single(only), Vec::new()),
+        many => {
+            let heads: Vec<String> = many
+                .iter()
+                .map(|(tag, kind, _)| match tag {
+                    Some(tag) if !tag.is_empty() => tag.clone(),
+                    _ => kind.clone(),
+                })
+                .collect();
+            (
+                format!("multi_exec[{}]", heads.join(",")),
+                many.iter().map(single).collect(),
+            )
+        }
+    }
 }
 
 /// A rule's `matches` accepts one expression or an ordered list.
@@ -5711,6 +5789,53 @@ mod tests {
 
     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
     const TCP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
+
+    #[test]
+    fn trace_names_follow_the_reference_generation_rules() {
+        use super::{RawValue, exec_trace_names, matcher_trace_name};
+        for (expression, expected) in [
+            ("fast_mark 16", "anonymous_match(fast_mark: 16)"),
+            (
+                "  qname $geosite_cn ",
+                "anonymous_match(qname: $geosite_cn)",
+            ),
+            ("resp_ip $geoip_cn", "anonymous_match(resp_ip: $geoip_cn)"),
+            ("has_resp", "anonymous_match(has_resp: )"),
+            ("_true", "anonymous_match(_true: )"),
+            ("$my_matcher", "my_matcher"),
+            ("!has_resp", "not(anonymous_match(has_resp: ))"),
+            ("! $my_matcher", "not(my_matcher)"),
+            ("!qtype 28 65", "not(anonymous_match(qtype: 28 65))"),
+            ("switch6 on", "anonymous_match(switch6: on)"),
+        ] {
+            assert_eq!(matcher_trace_name(expression), expected, "{expression}");
+        }
+        let text = |value: &str| RawValue::String(value.to_owned());
+        let list = |values: &[&str]| RawValue::Sequence(values.iter().map(|v| text(v)).collect());
+        for (exec, expected_name, expected_parts) in [
+            (None, "no_exec", vec![]),
+            (Some(list(&[])), "no_exec", vec![]),
+            (Some(text("$cache_main")), "cache_main", vec![]),
+            (Some(text("accept")), "anonymous_exec(accept: )", vec![]),
+            (Some(text("jump sub")), "anonymous_exec(jump: sub)", vec![]),
+            (Some(text("reject 3")), "anonymous_exec(reject: 3)", vec![]),
+            (Some(list(&["$only"])), "only", vec![]),
+            (
+                Some(list(&["$a", "accept"])),
+                "multi_exec[a,accept]",
+                vec!["a", "anonymous_exec(accept: )"],
+            ),
+            (
+                Some(list(&["jump x", "$b", "reject 2"])),
+                "multi_exec[jump,b,reject]",
+                vec!["anonymous_exec(jump: x)", "b", "anonymous_exec(reject: 2)"],
+            ),
+        ] {
+            let (name, parts) = exec_trace_names(exec.as_ref());
+            assert_eq!(name, expected_name);
+            assert_eq!(parts, expected_parts, "{expected_name}");
+        }
+    }
 
     #[test]
     fn cache_dependency_fingerprint_fails_closed_for_file_backed_ip_matchers() {

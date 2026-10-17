@@ -1413,10 +1413,14 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     let request_deadline = options
         .admission_deadline
         .unwrap_or_else(|| Instant::now() + options.request_deadline);
-    let root_control = ExecutionControl::with_shared_budget(
+    let mut root_control = ExecutionControl::with_shared_budget(
         RootFuelHandle::new(REQUEST_FUEL),
         CancellationToken::new(),
     );
+    // A running diagnostic capture traces this query's steps (set at admission).
+    if let Some(trace) = facts.checkpoint.step_trace() {
+        root_control = root_control.with_step_trace(trace);
+    }
     let mut machine = match mosdns_sequence_core::ExecutionMachine::new(
         &config.program,
         options.entry_sequence.unwrap_or(config.sequence.sequence),

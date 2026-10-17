@@ -142,6 +142,9 @@ pub struct MatcherSpecInput {
     pub matcher: Option<Box<dyn Matcher>>,
     pub reverse: bool,
     pub dispatch_metadata: DispatchMetadata,
+    /// The step-trace name (`matcher_name` of a diagnostic capture). Empty:
+    /// the matcher is not reported.
+    pub name: String,
     unknown_kind: Option<String>,
 }
 
@@ -156,6 +159,7 @@ impl MatcherSpecInput {
             matcher: Some(matcher),
             reverse,
             dispatch_metadata,
+            name: String::new(),
             unknown_kind: None,
         }
     }
@@ -165,8 +169,16 @@ impl MatcherSpecInput {
             matcher: None,
             reverse: false,
             dispatch_metadata: DispatchMetadata::None,
+            name: String::new(),
             unknown_kind: Some(kind.into()),
         }
+    }
+
+    /// Names the matcher for the step trace.
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
     }
 }
 
@@ -175,6 +187,8 @@ pub struct MatcherSpec {
     pub matcher: Box<dyn Matcher>,
     pub reverse: bool,
     pub dispatch_metadata: DispatchMetadata,
+    /// The step-trace name; empty when the matcher is not reported.
+    pub name: String,
 }
 
 /// Typed dispatcher metadata for preserved routing/audit side effects.
@@ -251,6 +265,12 @@ pub struct RuleSpec {
     pub exec: Option<Vec<ExecutableSpec>>,
     /// Optional configuration-owned identity for the executable-bearing rule.
     pub audit_source: Option<String>,
+    /// The step-trace name of the rule's action (`plugin_name` of a
+    /// diagnostic capture). `None`: the rule is not reported.
+    pub plugin_name: Option<String>,
+    /// For a multi-executable rule, the trace name of each executable as its
+    /// own single-executable rule (the inline lowering reports them).
+    pub exec_names: Vec<String>,
 }
 
 impl RuleSpec {
@@ -260,7 +280,17 @@ impl RuleSpec {
             matchers,
             exec,
             audit_source: None,
+            plugin_name: None,
+            exec_names: Vec::new(),
         }
+    }
+
+    /// Names the rule's action and, for several executables, each of them.
+    #[must_use]
+    pub fn with_trace_names(mut self, plugin_name: String, exec_names: Vec<String>) -> Self {
+        self.plugin_name = Some(plugin_name);
+        self.exec_names = exec_names;
+        self
     }
 
     #[must_use]
@@ -421,6 +451,7 @@ impl ProgramSpec {
             let id = SequenceId(index);
             let rules = normalize_rules(
                 sequence.rules,
+                &sequence.name,
                 &sequence_ids,
                 &fixture_ids,
                 &external_ids,
@@ -429,6 +460,7 @@ impl ProgramSpec {
             )?;
             sequence_slots[index] = Some(ValidatedSequence {
                 id,
+                trace_name: sequence.name.clone(),
                 name: sequence.name,
                 synthetic: false,
                 rules,
@@ -457,6 +489,8 @@ pub struct ValidatedRule {
     pub matchers: Vec<MatcherSpec>,
     pub executable: Option<ValidatedExecutable>,
     pub audit_source: Option<String>,
+    /// The step-trace name of the rule's action; `None` when not reported.
+    pub plugin_name: Option<String>,
 }
 
 /// A validated sequence. Synthetic inline sequences have stable IDs but do
@@ -468,6 +502,9 @@ pub struct ValidatedSequence {
     /// configuration-named sequence. Only named sequences are real execution
     /// origins, so a synthetic scope must never be reported as one.
     pub synthetic: bool,
+    /// The name this sequence reports its steps under: its own name, or for a
+    /// synthetic inline sequence the named sequence it was lowered from.
+    pub trace_name: String,
     pub rules: Vec<ValidatedRule>,
 }
 
@@ -549,6 +586,7 @@ pub enum ProgramError {
 
 fn normalize_rules(
     rules: Vec<RuleSpec>,
+    owner: &str,
     sequence_ids: &BTreeMap<String, SequenceId>,
     fixture_ids: &BTreeMap<String, ExecutableId>,
     external_ids: &BTreeMap<String, ExecutableId>,
@@ -565,6 +603,7 @@ fn normalize_rules(
                 .collect::<Result<Vec<_>, _>>()?;
             let executable = normalize_executable_list(
                 rule.exec,
+                (owner, &rule.exec_names),
                 sequence_ids,
                 fixture_ids,
                 external_ids,
@@ -575,6 +614,7 @@ fn normalize_rules(
                 matchers,
                 executable,
                 audit_source: rule.audit_source,
+                plugin_name: rule.plugin_name,
             })
         })
         .collect()
@@ -585,6 +625,7 @@ fn validate_matcher(input: MatcherSpecInput) -> Result<MatcherSpec, ProgramError
         matcher,
         reverse,
         dispatch_metadata,
+        name,
         unknown_kind,
     } = input;
     match matcher {
@@ -592,6 +633,7 @@ fn validate_matcher(input: MatcherSpecInput) -> Result<MatcherSpec, ProgramError
             matcher,
             reverse,
             dispatch_metadata,
+            name,
         }),
         None => match unknown_kind {
             Some(kind) => Err(ProgramError::UnknownMatcher(kind)),
@@ -602,6 +644,7 @@ fn validate_matcher(input: MatcherSpecInput) -> Result<MatcherSpec, ProgramError
 
 fn normalize_executable_list(
     exec: Option<Vec<ExecutableSpec>>,
+    (owner, exec_names): (&str, &[String]),
     sequence_ids: &BTreeMap<String, SequenceId>,
     fixture_ids: &BTreeMap<String, ExecutableId>,
     external_ids: &BTreeMap<String, ExecutableId>,
@@ -625,11 +668,15 @@ fn normalize_executable_list(
     let target = SequenceId(sequence_slots.len());
     sequence_slots.push(None);
     let mut inline_rules = Vec::with_capacity(exec.len());
-    for executable in exec {
-        inline_rules.push(RuleSpec::unconditional(Some(vec![executable])));
+    for (index, executable) in exec.into_iter().enumerate() {
+        let mut rule = RuleSpec::unconditional(Some(vec![executable]));
+        // Each executable of a multi-executable rule is reported as its own rule.
+        rule.plugin_name = exec_names.get(index).cloned();
+        inline_rules.push(rule);
     }
     let rules = normalize_rules(
         inline_rules,
+        owner,
         sequence_ids,
         fixture_ids,
         external_ids,
@@ -642,6 +689,7 @@ fn normalize_executable_list(
         id: target,
         name,
         synthetic: true,
+        trace_name: owner.to_owned(),
         rules,
     });
     Ok(Some(ValidatedExecutable::Inline { target }))
