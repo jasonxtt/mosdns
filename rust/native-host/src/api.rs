@@ -602,7 +602,16 @@ async fn process_connection(
                     // next save. Never makes the host unready.
                     "pending_cleanup": control
                         .as_ref()
-                        .map_or_else(Vec::new, |control| control.pending_cleanup())
+                        .map_or_else(Vec::new, |control| control.pending_cleanup()),
+                    // The kernel receive buffer each UDP listener was granted
+                    // (null when unreadable): queries that arrive while a
+                    // configuration save stalls the DNS thread wait there.
+                    "udp_receive_buffers": control
+                        .as_ref()
+                        .map_or_else(Vec::new, |control| control.udp_receive_buffers())
+                        .into_iter()
+                        .map(|(listen, bytes)| serde_json::json!({ "listen": listen.to_string(), "bytes": bytes }))
+                        .collect::<Vec<_>>()
                 }),
             )
         } else {

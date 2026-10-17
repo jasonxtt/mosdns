@@ -4,7 +4,7 @@ use crate::cache::CacheCatalog;
 use crate::config::{CompiledConfig, ListenerKind};
 use crate::observer::QueryObserver;
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -90,6 +90,9 @@ struct Control {
     /// Deleted special-group artifacts that could not be removed yet, relative
     /// to the configuration root. Non-fatal; the next sweep retries them.
     pending_cleanup: RefCell<Vec<String>>,
+    /// The receive buffer the kernel granted each live UDP listener (`None`
+    /// when it could not be read); shown by the health endpoint.
+    udp_receive_buffers: RefCell<BTreeMap<BindingKey, Option<usize>>>,
     observer: Arc<QueryObserver>,
     shutdown: RefCell<Option<mosdns_upstream_core::TransportCancellation>>,
     #[cfg(test)]
@@ -450,6 +453,7 @@ impl RuntimeControl {
             recovery_required: Cell::new(false),
             closed: Cell::new(false),
             pending_cleanup: RefCell::new(Vec::new()),
+            udp_receive_buffers: RefCell::new(BTreeMap::new()),
             observer,
             shutdown: RefCell::new(None),
             #[cfg(test)]
@@ -670,6 +674,29 @@ impl RuntimeControl {
 
     pub(crate) fn pending_cleanup(&self) -> Vec<String> {
         self.0.pending_cleanup.borrow().clone()
+    }
+
+    /// Records the receive buffer a freshly bound UDP listener was granted.
+    pub(crate) fn set_udp_receive_buffer(&self, key: BindingKey, bytes: Option<usize>) {
+        self.0.udp_receive_buffers.borrow_mut().insert(key, bytes);
+    }
+
+    /// Forgets a UDP listener that is gone (served to the end, or staged and dropped unused).
+    pub(crate) fn forget_udp_receive_buffer(&self, key: &BindingKey) {
+        self.0.udp_receive_buffers.borrow_mut().remove(key);
+    }
+
+    /// `(listen address, granted bytes)` of every live UDP listener, in address order.
+    pub(crate) fn udp_receive_buffers(&self) -> Vec<(std::net::SocketAddr, Option<usize>)> {
+        let mut buffers: Vec<_> = self
+            .0
+            .udp_receive_buffers
+            .borrow()
+            .iter()
+            .map(|((_, _, address), bytes)| (*address, *bytes))
+            .collect();
+        buffers.sort();
+        buffers
     }
 
     pub(crate) fn stop_host(&self) {

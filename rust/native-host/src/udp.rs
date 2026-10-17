@@ -35,6 +35,14 @@ pub struct UdpServer {
     listener_addr: SocketAddr,
 }
 
+impl Drop for UdpServer {
+    /// A listener that served to the end, or was staged for a configuration
+    /// apply that never published it, no longer appears in the health document.
+    fn drop(&mut self) {
+        self.control.forget_udp_receive_buffer(&self.binding_key());
+    }
+}
+
 impl UdpServer {
     /// Binds a UDP listener after strict configuration compilation. The
     /// supplied address is testable with port zero; the compiled graph still
@@ -55,7 +63,7 @@ impl UdpServer {
         let socket = crate::bind::udp(listen)
             .await
             .map_err(UdpServerError::Bind)?;
-        Ok(Self {
+        let server = Self {
             forwards: assembly.forwards_handle(),
             cache: assembly.cache_handle(),
             socket: Arc::new(socket),
@@ -64,7 +72,17 @@ impl UdpServer {
             control: assembly.control(),
             listener_tag: declared.tag.clone(),
             listener_addr: declared.listen,
-        })
+        };
+        server.publish_receive_buffer();
+        Ok(server)
+    }
+
+    /// Makes the receive buffer the kernel granted visible to the health endpoint.
+    fn publish_receive_buffer(&self) {
+        self.control.set_udp_receive_buffer(
+            self.binding_key(),
+            crate::bind::receive_buffer(&self.socket),
+        );
     }
 
     pub(crate) async fn bind_snapshot(
@@ -76,7 +94,7 @@ impl UdpServer {
         let bound = crate::bind::udp(declared.listen)
             .await
             .map_err(UdpServerError::Bind)?;
-        Ok(Self {
+        let server = Self {
             forwards: snapshot.forwards.clone(),
             cache: snapshot.cache.clone(),
             socket: Arc::new(bound),
@@ -85,7 +103,9 @@ impl UdpServer {
             control,
             listener_tag: declared.tag.clone(),
             listener_addr: declared.listen,
-        })
+        };
+        server.publish_receive_buffer();
+        Ok(server)
     }
 
     pub(crate) fn binding_key(&self) -> crate::runtime_snapshot::BindingKey {

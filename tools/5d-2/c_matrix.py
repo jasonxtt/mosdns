@@ -20,7 +20,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(root, freeze):
+def run(root, freeze, gate=False):
     if digest(freeze) != FROZEN:
         raise ValueError('the original byte-identical user freeze is required')
     five_d_1 = HERE.parent / '5d-1'
@@ -30,11 +30,12 @@ def run(root, freeze):
     paths += [p for p in (root / 'prepared').rglob('*') if p.is_file() and 'cache' not in p.parts]
     hashes = {str(p): digest(p) for p in paths}
     plan = []
+    matrices = ('gate',) if gate else ('main', 'ext')
     for repeat, seed in enumerate((501, 502, 503), 1):
-        for matrix in ('main', 'ext'):
+        for matrix in matrices:
             for role in (('go', 'native') if repeat != 2 else ('native', 'go')):
                 plan.append(dict(name=f'{role}-{matrix}-r{repeat}', role=role, matrix=matrix, seed=seed))
-    manifest = root / 'c-matrix.json'
+    manifest = root / ('c-gate.json' if gate else 'c-matrix.json')
     if manifest.exists():
         raise ValueError('retain every attempt: cannot overwrite or resume a matrix')
     evidence = dict(freeze_sha256=digest(freeze), hashes=hashes, plan=plan, attempts=[])
@@ -49,6 +50,8 @@ def run(root, freeze):
             argv += ['--oracle', str(root / 'prepared/native-oracle.json')]
         if item['matrix'] == 'ext':
             argv += ['--rates', '32000', '64000']
+        if item['matrix'] == 'gate':  # the frozen latency-gated stages only
+            argv += ['--rates', '20', '100', '500']
         print(json.dumps(dict(starting=item)), flush=True)
         with (root / (item['name'] + '.log')).open('x') as log:
             result = subprocess.run(argv, stdout=log, stderr=subprocess.STDOUT)
@@ -65,5 +68,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=pathlib.Path, required=True)
     parser.add_argument('--freeze-record', type=pathlib.Path, required=True)
+    parser.add_argument('--gate', action='store_true', help='only the 20/100/500 qps latency-gated stages (5D-2c)')
     args = parser.parse_args()
-    run(args.root.resolve(), args.freeze_record.resolve())
+    run(args.root.resolve(), args.freeze_record.resolve(), args.gate)

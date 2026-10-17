@@ -196,6 +196,14 @@ Correct: advance the facts generation only after successful CNAME normalization;
 compile generated providers as immutable snapshots and route later writes
 through the managed transaction coordinator.
 
+## Save pause
+
+Creating, changing or deleting a group compiles the candidate on the DNS thread,
+so DNS pauses for about 0.4–0.65 s (production rule set; 5D-2b/5D-2c). UDP queries
+that arrive meanwhile queue in the listener's enlarged kernel receive buffer and
+are not dropped within its capacity; see "UDP receive buffer and apply pause" in
+`native-webui-hosting.md`. Compiling off the DNS thread is the M2-3 backlog item.
+
 ## S2 runtime snapshot boundaries
 
 `HostAssembly::control()` exposes prepare/install/retire for immutable graph

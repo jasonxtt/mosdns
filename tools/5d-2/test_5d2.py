@@ -127,6 +127,16 @@ class Live(unittest.TestCase):
             self.assertEqual(len(events), 3)
 
 
+class WarmupProfile(unittest.TestCase):
+    def test_the_budget_figure_comes_from_the_warmup_stage_only(self):
+        import warmup_profile
+        stages = [dict(stage='q20', resources=dict(cpu_s=9, cpu_us_per_correct=9.0), stable=dict(correct_on_time=1), all=dict(statuses={})),
+                  dict(stage='warmup', resources=dict(cpu_s=0.2, cpu_us_per_correct=240.0), stable=dict(correct_on_time=833),
+                       all=dict(statuses={'correct': 1000}))]
+        self.assertEqual(warmup_profile.warmup_cpu(dict(stages=stages)),
+                         dict(cpu_s=0.2, cpu_us_per_correct=240.0, correct_on_time=833, statuses={'correct': 1000}))
+
+
 class Injected(unittest.TestCase):
     """The proof that a fault reached the mock's traffic, not merely the fault file."""
 
