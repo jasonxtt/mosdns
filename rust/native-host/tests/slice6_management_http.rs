@@ -1391,14 +1391,12 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                 "switches.manage",
                 "cache.requery",
                 "lists.remembered",
-                "appearance.server",
+                // An in-process test host has no captured restart target (only `main` captures one).
                 "system.restart",
-                "system.webui_port",
                 "system.config_management",
                 "system.update",
                 "system.domain_generation",
                 "system.global_overrides",
-                "metrics.process",
             ] {
                 assert_eq!(ops[id]["supported"], false, "{id}");
                 assert!(
@@ -1406,14 +1404,17 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                     "{id}"
                 );
             }
+            // System and appearance operations are real now (F-1): supported with the API.
+            for id in ["appearance.server", "system.webui_port", "metrics.process"] {
+                assert_eq!(ops[id]["supported"], true, "{id}");
+                assert!(ops[id]["reason"].is_null());
+            }
             for path in [
                 "/plugins/adguard/rules",
                 "/api/v1/capture/logs",
                 "/plugins/clientname",
                 "/plugins/switch3/show",
                 "/plugins/requery/status",
-                "/api/v1/appearance/text-color",
-                "/api/v1/system/webui-port",
                 "/api/v1/update/status",
                 "/api/v1/domain-generation",
                 "/api/v1/overrides",
@@ -1424,7 +1425,8 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                 http_request(api, &post("/api/v1/system/restart", "{}"))
                     .await
                     .status,
-                404
+                501,
+                "no captured executable: refused, nothing scheduled"
             );
             shutdown.cancel();
             task.await.unwrap().unwrap();

@@ -1,5 +1,12 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-17：F-1 系统与外观实现完成，待 Codex 审查结论与规划会话确认
+
+四项能力从“尚未实现”改为真实：**外观（服务端）**（背景上传/历史/文字与按钮颜色，状态文件与 Go 互通，用 Go 处理器做了 34 个请求的双向逐字节对比）、**WebUI 端口**（启动时覆盖 `api.http`，保存后重启生效，优先级同 Go）、
+**重启服务**（进程内原地重启：同 `SIGTERM` 的排空与最终保存后 `execve`，**PID 不变**，不依赖 systemd；生产形态配置实测 DNS 中断约 0.40 s）、**进程指标**（`/metrics` 的 `process_*` 与 `mosdns_process_threads`，不伪造 Go 专有项）。
+范围按用户决定只改 `/` 的 Vue UI，`/log` 未动；浏览器冒烟原生与 Go 各一次，并因此发现并修复 WebUI 端口面板在原生下被隐藏。记录见 [validation-records/10-17-f1](validation-records/10-17-f1/README.md)。
+`/log` 的移除、完整原生 `/metrics`（F-2）与 5D-3 仍未开始。
+
 ## 2026-10-17：5D-2c UDP 接收缓冲实现完成，待 Codex 审查结论与规划会话确认
 
 所有 UDP DNS 监听（三条绑定路径统一用 `socket2`）把接收缓冲调到有效 4 MiB（先 `SO_RCVBUF`，必要时 `SO_RCVBUFFORCE`；失败只告警），有效值在启动日志和 `GET /api/v1/system/health` 的 `udp_receive_buffers` 中可见。

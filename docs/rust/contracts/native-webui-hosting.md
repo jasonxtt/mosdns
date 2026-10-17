@@ -80,6 +80,64 @@ raise `net.core.rmem_max`. TCP listeners are unaffected (connection-level flow
 control). Removing the pause itself (compiling off the DNS thread) is the M2-3
 backlog item.
 
+## System and appearance operations (F-1)
+
+Four operations that were reported unsupported are real now; each is gated by its
+`ui_operations` entry and answers exactly the routes the maintained WebUI calls. Only the
+maintained shell at `/` is in scope; the compatibility shell at `/log` is untouched and
+scheduled for removal.
+
+**Appearance (`appearance.server`)** — `/api/v1/appearance/…` with the reference host's methods,
+status codes, bodies and state files under `webinfo/` (`appearance_settings.json`,
+`appearance_text_settings.json`, `appearance_button_settings.json`, `panel_background.bin`,
+`panel_background_history/<id>.<ext>`), so either host reads what the other wrote (verified in
+both directions with `tools/f1-interop`). Errors are `{"error": "..."}`. A save is a same-directory
+temporary file plus rename: a failure leaves the previous file. Uploads are multipart field `file`,
+at most 20 MiB (the request body may be 20 MiB + 1 KiB, the only route allowed more than 1 MiB),
+and the content must sniff as an image (ico/cursor, bmp, gif, webp, png, jpeg — the reference's
+detector; svg is not accepted). Only **one upload is read at a time**: the slot is claimed when
+the request head has been read, before the body, and the body must arrive within 120 s; a second
+concurrent upload is answered 503 at once. This bounds the memory a burst of 20 MiB bodies could
+take on the unauthenticated management listener (the body buffer becomes the request body without
+a second copy). The history has no entry limit (as in the reference); each upload
+is bounded. A corrupt state file reads as the defaults and is never rewritten by a read. Not
+reproduced: range and conditional requests for the image routes, and the reference's migration of
+state files from older locations (`state/`, the root) — only `webinfo/` is read.
+
+**WebUI port (`system.webui_port`)** — `GET/POST /api/v1/system/webui-port`. The port is saved in
+`webinfo/webui_port_settings.json` (`{"port": N}`) and **replaces the `api.http` port at the next
+start** (the saved port wins over YAML, as in the reference). Saving does not switch the running
+listener; `pending_restart` says so. `POST` rejects ports outside 1–65535 (400), a port that cannot
+be bound (409) and answers `target_addr`, `message`. The active address is the one the management
+listener actually bound.
+
+**Restart (`system.restart`)** — `POST /api/v1/system/restart {"delay_ms": N}` (`N<=0` → 300; at
+most 10 minutes) answers `{"status":"scheduled","delay_ms":N}` at once. The restart is **in place**:
+after the delay the host stops exactly as it does for `SIGTERM` (admission stops, in-flight queries
+finish or are cancelled, caches/domain lists/rule sources/audit settings are saved, listeners and
+upstream connections are closed), then the process image is replaced with `execve` of the same
+executable and arguments (the path recorded at start, so a binary upgraded in place is the one
+that runs). The **process id does not change**, so the service manager never sees the service stop
+— necessary because the production unit waits two minutes before restarting a stopped service.
+The request is refused up front (500 `{"error": …}`) when the executable is missing or not
+executable, and with 501 when the process did not record one. A final save that fails is logged and the
+restart goes ahead (the cache dump is a convenience; an exit would cost the restart delay). If the
+`execve` itself fails, the host starts again inside the same process and keeps serving. A
+termination signal during a pending restart wins. DNS is unavailable from the close of the listeners
+until the new process binds them (drain + save + `execve` + cold start with the loaded cache dump):
+unlike the 0.4–0.65 s pause of a configuration save (no listener is closed then), queries sent
+in between are lost. The measured gap is in the F-1 validation record.
+
+**Process metrics (`metrics.process`)** — the process section of `GET /metrics` (Prometheus text,
+read from `/proc/self`): `process_cpu_seconds_total`, `process_start_time_seconds`,
+`process_resident_memory_bytes`, `process_virtual_memory_bytes`, `process_open_fds`,
+`process_max_fds`, and the native gauge `mosdns_process_threads`. Go-runtime figures
+(`go_gc_*`, `go_goroutines`, `go_info`, `go_memstats_*`) and the system network counters of the
+reference's `process_network_*` do not exist in this runtime and are **not emitted**; the WebUI
+shows the available figures and marks the rest "不适用于 Rust 运行时". The start time is the
+process's (unchanged by an in-place restart, as in the reference). The complete native `/metrics`
+remains a later task.
+
 ## Capability discovery and UI
 
 Schema1 retains its existing keys and adds `ui_operations`: all 30 IDs from

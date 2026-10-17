@@ -248,6 +248,10 @@ async fn persist_and_publish_audit_capacity(
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 /// The largest request body accepted before the connection is rejected.
 const MAX_BODY_BYTES: usize = 1024 * 1024;
+/// The error text of a second concurrent image upload.
+const UPLOAD_BUSY: &str = "upload in progress";
+/// An image upload must arrive within this long once its head has been read.
+const UPLOAD_BODY_DEADLINE: Duration = Duration::from_secs(120);
 
 /// The host-owned management listener.
 pub struct ApiServer {
@@ -308,6 +312,9 @@ impl ApiServer {
     }
 
     pub(crate) fn with_control(mut self, control: crate::runtime_snapshot::RuntimeControl) -> Self {
+        if let Ok(address) = self.listener.local_addr() {
+            control.set_api_listen(address);
+        }
         self.control = Some(control);
         self
     }
@@ -443,6 +450,9 @@ struct Request {
     body: Vec<u8>,
 }
 
+/// Held while an image upload is being read and stored.
+type UploadPermit = Option<tokio::sync::SemaphorePermit<'static>>;
+
 struct Response {
     status: u16,
     content_type: Option<&'static str>,
@@ -564,7 +574,7 @@ async fn process_connection(
     external_ui: Arc<crate::external_ui::Registry>,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
-    let request = tokio::select! {
+    let (request, _upload_permit) = tokio::select! {
         biased;
         () = shutdown.cancelled() => return Ok(()),
         request = read_request(&mut stream) => match request {
@@ -572,12 +582,14 @@ async fn process_connection(
             // The client closed before sending a complete request.
             Ok(None) => return Ok(()),
             Err(error) => {
-                let status = if error.to_string() == "request body too large" {
-                    413
+                let message = error.to_string();
+                let response = if message == "request body too large" {
+                    Response::error(413, "bad request")
+                } else if message == UPLOAD_BUSY {
+                    Response::error(503, "another upload is in progress")
                 } else {
-                    400
+                    Response::error(400, "bad request")
                 };
-                let response = Response::error(status, "bad request");
                 let (_reader, mut writer) = stream.into_split();
                 return write_response(&mut writer, &response).await;
             }
@@ -781,7 +793,7 @@ where
 
 /// Reads one complete request head and its declared body. Returns `None` when
 /// the peer closed first, and an error when the request is unusable.
-async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Request>> {
+async fn read_request(stream: &mut TcpStream) -> io::Result<Option<(Request, UploadPermit)>> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 1024];
     let header_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
@@ -879,34 +891,63 @@ async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Request>> {
         }
     ) {
         crate::cache_dump::MAX_COMPRESSED
+    } else if target.split('?').next() == Some("/api/v1/appearance/panel-background/upload") {
+        crate::appearance::MAX_UPLOAD_BODY
     } else {
         MAX_BODY_BYTES
     };
     if content_length > body_limit {
         return Err(io::Error::other("request body too large"));
     }
+    // One image upload at a time, claimed before its body is read: a body can be 20 MiB and
+    // the management listener accepts any number of connections.
+    let is_upload = target.split('?').next() == Some("/api/v1/appearance/panel-background/upload");
+    let upload_permit = if is_upload {
+        Some(
+            crate::appearance::UPLOAD_SLOT
+                .try_acquire()
+                .map_err(|_| io::Error::other(UPLOAD_BUSY))?,
+        )
+    } else {
+        None
+    };
+    let body_deadline = is_upload.then(|| tokio::time::Instant::now() + UPLOAD_BODY_DEADLINE);
 
     let body_start = head_end + 4;
     while buffer.len() < body_start + content_length {
-        let read = stream.read(&mut chunk).await?;
+        let read = match body_deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline, stream.read(&mut chunk))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "upload body deadline"))??,
+            None => stream.read(&mut chunk).await?,
+        };
         if read == 0 {
             break;
         }
         buffer.extend_from_slice(&chunk[..read]);
     }
-    let body = buffer
-        .get(body_start..body_start + content_length)
-        .unwrap_or_default()
-        .to_vec();
-    Ok(Some(Request {
-        method,
-        target,
-        if_none_match,
-        content_type,
-        config_generation,
-        config_generation_duplicate,
-        body,
-    }))
+    // The buffer itself becomes the body (no second copy of a large upload); an incomplete
+    // body (the client went away) is an empty one.
+    let body = if buffer.len() >= body_start + content_length {
+        let mut body = buffer;
+        body.drain(..body_start);
+        body.truncate(content_length);
+        body
+    } else {
+        Vec::new()
+    };
+    Ok(Some((
+        Request {
+            method,
+            target,
+            if_none_match,
+            content_type,
+            config_generation,
+            config_generation_duplicate,
+            body,
+        },
+        upload_permit,
+    )))
 }
 
 fn head_end(buffer: &[u8]) -> Option<usize> {
@@ -2607,6 +2648,47 @@ async fn dispatch(
             headers: reply.headers,
         };
     }
+    // The `-d` root (where `webinfo/` lives), else the configuration file's directory.
+    let webinfo_root = config
+        .reload
+        .as_ref()
+        .map(|reload| reload.root_dir.as_path())
+        .or(state_root);
+    if let Some(reply) = crate::system_api::handle(
+        control,
+        config,
+        webinfo_root,
+        &request.method,
+        path,
+        &request.body,
+    ) {
+        return Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+            headers: reply.headers,
+        };
+    }
+    if let Some(reply) = match webinfo_root {
+        Some(root) => {
+            crate::appearance::handle(
+                root,
+                &request.method,
+                path,
+                request.content_type.as_deref(),
+                &request.body,
+            )
+            .await
+        }
+        None => None,
+    } {
+        return Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+            headers: reply.headers,
+        };
+    }
     match route(&request.target) {
         Route::Capabilities => {
             if request.method != "GET" {
@@ -2660,6 +2742,8 @@ async fn dispatch(
                     );
                 }
             }
+            // Process figures (CPU, memory, descriptors, threads); Go-runtime ones do not exist here.
+            text.push_str(&crate::process_metrics::metrics_text());
             Response {
                 status: 200,
                 content_type: Some("text/plain; version=0.0.4; charset=utf-8"),
@@ -3641,15 +3725,27 @@ fn ui_operations(
             "reason": if remembered { None } else { Some("当前配置没有 my_* 或 top_domains 的 domain_output 插件") }
         }),
     );
-    for id in [
-        "capture.logs",
-        "appearance.server",
-        "system.restart",
-        "system.webui_port",
-        "system.config_management",
-        "system.update",
-        "metrics.process",
+    let restart = crate::restart::target().is_some();
+    for (id, supported, reason) in [
+        ("appearance.server", true, ""),
+        ("system.webui_port", true, ""),
+        (
+            "system.restart",
+            restart,
+            "此进程没有记录可执行文件路径，无法原地重启",
+        ),
+        (
+            "metrics.process",
+            crate::process_metrics::AVAILABLE,
+            "当前平台无法读取进程指标",
+        ),
     ] {
+        operations.insert(
+            id.to_owned(),
+            serde_json::json!({"supported": supported, "reason": if supported { None } else { Some(reason) }}),
+        );
+    }
+    for id in ["capture.logs", "system.config_management", "system.update"] {
         operations.insert(
             id.to_owned(),
             serde_json::json!({"supported": false, "reason": "当前 Rust 原生运行时尚未实现此操作"}),

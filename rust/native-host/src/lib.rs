@@ -2,6 +2,7 @@
 #![allow(clippy::pedantic)]
 
 mod api;
+mod appearance;
 mod assembly;
 mod bind;
 pub mod build_identity;
@@ -23,7 +24,9 @@ mod memory;
 mod observer;
 mod plugins;
 mod policy;
+mod process_metrics;
 mod requery;
+mod restart;
 mod rewrite;
 mod rule_download;
 mod rule_sources;
@@ -38,6 +41,7 @@ mod switch;
 #[cfg(test)]
 mod switch_admission_tests;
 mod switch_state;
+mod system_api;
 mod tcp;
 mod transaction;
 mod udp;
@@ -72,6 +76,7 @@ pub use observer::{
     UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
     UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamTransport,
 };
+pub use restart::{RestartTarget, capture as capture_restart_target, captured as restart_target};
 pub use special_groups::{ManagedProfile, SpecialGroup, forward_entries, normalize_groups};
 pub use switch::SwitchDeclaration;
 pub use tcp::{TcpServer, TcpServerError};

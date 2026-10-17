@@ -410,7 +410,7 @@ function parseSystemMetrics(metricsText) {
       out.residentMemory = Number.parseFloat(line.split(" ")[1] || "0") || 0;
     } else if (line.startsWith("go_memstats_heap_idle_bytes")) {
       out.heapIdleMemory = Number.parseFloat(line.split(" ")[1] || "0") || 0;
-    } else if (line.startsWith("go_threads")) {
+    } else if (line.startsWith("go_threads") || line.startsWith("mosdns_process_threads")) {
       out.threads = Number.parseInt(line.split(" ")[1] || "0", 10) || 0;
     } else if (line.startsWith("process_open_fds")) {
       out.openFds = Number.parseInt(line.split(" ")[1] || "0", 10) || 0;
@@ -1973,7 +1973,7 @@ onBeforeUnmount(() => {
           :loading="switchLoading"
           @save="saveNativeSwitch"
         />
-        <div v-if="capabilityState.value?.kind !== 'native'" class="system-mini-stack">
+        <div class="system-mini-stack">
           <CapabilityBoundary v-if="capabilityState.value?.kind !== 'native'" operation="switches.manage">
 <SystemCoreModePanel
             :core-mode="coreMode"
