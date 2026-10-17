@@ -1,0 +1,1200 @@
+[
+ {
+  "run": "F1-go-r1",
+  "scenario": "F1",
+  "role": "go",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6980,
+   "servfail": 520
+  },
+  "recovery_s": {
+   "domestic": 6
+  },
+  "rss_peak_mib": 201.4,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F1-native-r1",
+  "scenario": "F1",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6900,
+   "servfail": 600
+  },
+  "recovery_s": {
+   "domestic": 6
+  },
+  "rss_peak_mib": 80.1,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F1-native-r2",
+  "scenario": "F1",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6900,
+   "servfail": 600
+  },
+  "recovery_s": {
+   "domestic": 6
+  },
+  "rss_peak_mib": 79.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F1-native-r3",
+  "scenario": "F1",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6900,
+   "servfail": 600
+  },
+  "recovery_s": {
+   "domestic": 6
+  },
+  "rss_peak_mib": 79.4,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2a-go-r1",
+  "scenario": "F2a",
+  "role": "go",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6296,
+   "servfail": 1204
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 187.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2a-native-r1",
+  "scenario": "F2a",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6298,
+   "servfail": 1202
+  },
+  "recovery_s": {
+   "foreign": 5,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 62.5,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2a-native-r2",
+  "scenario": "F2a",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6298,
+   "servfail": 1202
+  },
+  "recovery_s": {
+   "foreign": 5,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 63.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2a-native-r3",
+  "scenario": "F2a",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6299,
+   "servfail": 1201
+  },
+  "recovery_s": {
+   "foreign": 5,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 63.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2b-go-r1",
+  "scenario": "F2b",
+  "role": "go",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6298,
+   "servfail": 1202
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 181.1,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2b-native-r1",
+  "scenario": "F2b",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6300,
+   "servfail": 1200
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 63.7,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2b-native-r2",
+  "scenario": "F2b",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6300,
+   "servfail": 1200
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 63.2,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2b-native-r3",
+  "scenario": "F2b",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6301,
+   "servfail": 1199
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 63.6,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2c-go-r1",
+  "scenario": "F2c",
+  "role": "go",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6296,
+   "servfail": 1204
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 205.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2c-native-r1",
+  "scenario": "F2c",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6298,
+   "servfail": 1202
+  },
+  "recovery_s": {
+   "foreign": 5,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 63.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2c-native-r2",
+  "scenario": "F2c",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6297,
+   "servfail": 1203
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 62.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F2c-native-r3",
+  "scenario": "F2c",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6298,
+   "servfail": 1202
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 62.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F3-go-r1",
+  "scenario": "F3",
+  "role": "go",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "no_wrong_answers"
+  ],
+  "statuses": {
+   "correct": 7099,
+   "servfail": 1002,
+   "wrong": 399
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 193.4,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F3-native-r1",
+  "scenario": "F3",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 7101,
+   "servfail": 1399
+  },
+  "recovery_s": {
+   "domestic": 5,
+   "foreign": 5
+  },
+  "rss_peak_mib": 74.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F3-native-r2",
+  "scenario": "F3",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 7100,
+   "servfail": 1400
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 73.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F3-native-r3",
+  "scenario": "F3",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 7099,
+   "servfail": 1401
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 73.7,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4a-go-r1",
+  "scenario": "F4a",
+  "role": "go",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6296,
+   "servfail": 1204
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 205.4,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4a-native-r1",
+  "scenario": "F4a",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6295,
+   "servfail": 1205
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 62.8,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4a-native-r2",
+  "scenario": "F4a",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6297,
+   "servfail": 1203
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 62.5,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4a-native-r3",
+  "scenario": "F4a",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6297,
+   "servfail": 1203
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 5
+  },
+  "rss_peak_mib": 62.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4b-go-r1",
+  "scenario": "F4b",
+  "role": "go",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "recovery_within_10s",
+   "resources_return_to_baseline"
+  ],
+  "statuses": {
+   "correct": 5099,
+   "servfail": 2399,
+   "unsent": 2
+  },
+  "recovery_s": {
+   "foreign": null,
+   "foreignecs": null
+  },
+  "rss_peak_mib": 209.8,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4b-native-r1",
+  "scenario": "F4b",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6472,
+   "servfail": 1028
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 66.4,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4b-native-r2",
+  "scenario": "F4b",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6472,
+   "servfail": 1028
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 65.7,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F4b-native-r3",
+  "scenario": "F4b",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6472,
+   "servfail": 1028
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "foreignecs": 6
+  },
+  "rss_peak_mib": 66.5,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F5-go-r1",
+  "scenario": "F5",
+  "role": "go",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6900,
+   "fallback": 600
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "fb": 5
+  },
+  "rss_peak_mib": 163.1,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F5-native-r1",
+  "scenario": "F5",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6418,
+   "fallback": 599,
+   "servfail": 483
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "fb": 6
+  },
+  "rss_peak_mib": 76.2,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F5-native-r2",
+  "scenario": "F5",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6419,
+   "fallback": 599,
+   "servfail": 482
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "fb": 6
+  },
+  "rss_peak_mib": 72.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F5-native-r3",
+  "scenario": "F5",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 6420,
+   "fallback": 598,
+   "servfail": 482
+  },
+  "recovery_s": {
+   "foreign": 6,
+   "fb": 6
+  },
+  "rss_peak_mib": 75.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F6-go-r1",
+  "scenario": "F6",
+  "role": "go",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "rss_peak_below_256_mib"
+  ],
+  "statuses": {
+   "correct": 18998,
+   "unsent": 2
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 347.2,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F6-native-r1",
+  "scenario": "F6",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 19000
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 64.5,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F6-native-r2",
+  "scenario": "F6",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 18998,
+   "unsent": 2
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 68.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F6-native-r3",
+  "scenario": "F6",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 19000
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 67.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H1-native-r1",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 37370,
+   "timeout": 130
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 118.5,
+  "udp_drops53": 130,
+  "rcvbuf_errors": 130,
+  "root": "runs"
+ },
+ {
+  "run": "H1-native-r2",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 37458,
+   "timeout": 42
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 118.5,
+  "udp_drops53": 42,
+  "rcvbuf_errors": 42,
+  "root": "runs"
+ },
+ {
+  "run": "H1-native-r3",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 37430,
+   "timeout": 70
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 118.2,
+  "udp_drops53": 70,
+  "rcvbuf_errors": 70,
+  "root": "runs"
+ },
+ {
+  "run": "H1@100-native-r1",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 7500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 100.7,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H1@100-native-r2",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 7500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 106.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H1@100-native-r3",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 7500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 125.2,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H1@250-native-r1",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 250,
+  "passed": false,
+  "failed_checks": [
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 18750
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 120.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H1@250-native-r2",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 250,
+  "passed": false,
+  "failed_checks": [
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 18750
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 119.6,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H1@250-native-r3",
+  "scenario": "H1",
+  "role": "native",
+  "rate": 250,
+  "passed": false,
+  "failed_checks": [
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 18750
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 115.4,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H2-native-r1",
+  "scenario": "H2",
+  "role": "native",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 37500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 122.7,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H2-native-r2",
+  "scenario": "H2",
+  "role": "native",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 37500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 73.8,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H2-native-r3",
+  "scenario": "H2",
+  "role": "native",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 37500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 70.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H3-native-r1",
+  "scenario": "H3",
+  "role": "native",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 37421,
+   "timeout": 79
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 112.7,
+  "udp_drops53": 79,
+  "rcvbuf_errors": 79,
+  "root": "runs"
+ },
+ {
+  "run": "H3-native-r2",
+  "scenario": "H3",
+  "role": "native",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 37453,
+   "timeout": 47
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 111.9,
+  "udp_drops53": 47,
+  "rcvbuf_errors": 47,
+  "root": "runs"
+ },
+ {
+  "run": "H3-native-r3",
+  "scenario": "H3",
+  "role": "native",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 37466,
+   "timeout": 34
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 113.2,
+  "udp_drops53": 34,
+  "rcvbuf_errors": 34,
+  "root": "runs"
+ },
+ {
+  "run": "H4-go-r1",
+  "scenario": "H4",
+  "role": "go",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "rss_peak_below_256_mib"
+  ],
+  "statuses": {
+   "correct": 54003,
+   "wrong": 997
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 380.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H4-native-r1",
+  "scenario": "H4",
+  "role": "native",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 53970,
+   "wrong": 1030
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 140.6,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H4-native-r2",
+  "scenario": "H4",
+  "role": "native",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 53971,
+   "wrong": 1029
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 136.7,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "H4-native-r3",
+  "scenario": "H4",
+  "role": "native",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 53952,
+   "wrong": 1048
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 159.9,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs"
+ },
+ {
+  "run": "F3-go-r1",
+  "scenario": "F3",
+  "role": "go",
+  "rate": 100,
+  "passed": false,
+  "failed_checks": [
+   "no_wrong_answers",
+   "revisited_names_answer_correctly_after_faults"
+  ],
+  "statuses": {
+   "correct": 6951,
+   "servfail": 1001,
+   "wrong": 548
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 209.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-f3b"
+ },
+ {
+  "run": "F3-native-r1",
+  "scenario": "F3",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 7099,
+   "servfail": 1401
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 75.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-f3b"
+ },
+ {
+  "run": "F3-native-r2",
+  "scenario": "F3",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 7100,
+   "servfail": 1400
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 75.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-f3b"
+ },
+ {
+  "run": "F3-native-r3",
+  "scenario": "F3",
+  "role": "native",
+  "rate": 100,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 7100,
+   "servfail": 1400
+  },
+  "recovery_s": {
+   "domestic": 6,
+   "foreign": 5
+  },
+  "rss_peak_mib": 75.3,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-f3b"
+ },
+ {
+  "run": "H1-go-r1",
+  "scenario": "H1",
+  "role": "go",
+  "rate": 500,
+  "passed": true,
+  "failed_checks": [],
+  "statuses": {
+   "correct": 37500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 212.6,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-ref"
+ },
+ {
+  "run": "H2-go-r1",
+  "scenario": "H2",
+  "role": "go",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "rss_peak_below_256_mib"
+  ],
+  "statuses": {
+   "correct": 37500
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 367.2,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-ref"
+ },
+ {
+  "run": "H3-go-r1",
+  "scenario": "H3",
+  "role": "go",
+  "rate": 500,
+  "passed": false,
+  "failed_checks": [
+   "no_lost_queries",
+   "every_window_healthy"
+  ],
+  "statuses": {
+   "correct": 36142,
+   "timeout": 1358
+  },
+  "recovery_s": null,
+  "rss_peak_mib": 213.0,
+  "udp_drops53": 0,
+  "rcvbuf_errors": 0,
+  "root": "runs-ref"
+ }
+]
