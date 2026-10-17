@@ -51,12 +51,34 @@ Health GET `/api/v1/system/health` shares this exact version. JSON fields are
 `applied_config_schema:null`, `config_management_enabled:false`, and
 `pending_cleanup` (array of paths, relative to the configuration root, of deleted
 special-group files that could not be removed yet; empty normally, never affects
-`ready`; see native-special-groups.md). Null schemas do
+`ready`; see native-special-groups.md) and `udp_receive_buffers` (one
+`{listen, bytes}` per live UDP listener: the kernel receive buffer it was
+granted, `null` when unreadable; see "UDP receive buffer and apply pause"
+below; never affects `ready`). Null schemas do
 not mean YAML schema zero or disable native managed group/upstream operations.
 State values are `starting`, `ready`, `applying`, `recovery_required`, `stopping`,
 and `closed`. Health is read-only and crosses the admission rejection barrier without a lease.
 Only all-listener-ready lifecycle returns 200/ready:true; startup, applying,
 recovery-required, stopping and closed return 503/ready:false. Other methods405.
+
+## UDP receive buffer and apply pause
+
+Saving settings (`native-settings.md`) or a special group (`native-special-groups.md`)
+compiles the candidate configuration on the single DNS thread, so DNS answers
+pause for about 0.4–0.65 s (measured with the production rule set; the value
+grows with the rule set). UDP queries that arrive meanwhile wait in the kernel
+receive buffer of the listener and are answered when the thread resumes; they
+are not dropped as long as the buffer holds them. Every UDP DNS listener
+therefore asks for an effective receive buffer of 4 MiB (about 3 400 small
+packets, ten times the 500 qps × 0.65 s burst): first `SO_RCVBUF` (half of that,
+since Linux stores double), then, if `net.core.rmem_max` capped it, `SO_RCVBUFFORCE`
+(needs `CAP_NET_ADMIN`). Failure to reach the target never stops the host: the
+value the system granted is kept, a warning names it, and `udp_receive_buffers`
+in the health document shows it. On a host whose `rmem_max` is below 2 MiB and
+which cannot force the option, a longer burst can still overflow the buffer;
+raise `net.core.rmem_max`. TCP listeners are unaffected (connection-level flow
+control). Removing the pause itself (compiling off the DNS thread) is the M2-3
+backlog item.
 
 ## Capability discovery and UI
 

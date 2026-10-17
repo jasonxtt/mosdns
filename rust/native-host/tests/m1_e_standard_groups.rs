@@ -425,6 +425,15 @@ plugins:
         let (status, saved) = http(api, "POST", "/api/v1/special-groups", serde_json::json!({"name":"port","listen_port":dedicated,"custom_port_only":true,"upstream_sources":[{"kind":"group","plugin_tag":"normal"}]})).await;
         assert_eq!(status, 200, "{saved}"); assert_eq!(saved["slot"], 51);
         assert_eq!(query(dedicated, "chosen.example.com").await.last(), Some(&10));
+        // The dedicated UDP listener gets (and reports) an enlarged receive buffer too.
+        let listed_buffers = |state: &serde_json::Value| {
+            state["udp_receive_buffers"].as_array().unwrap().iter()
+                .filter(|entry| entry["listen"].as_str().unwrap().ends_with(&format!(":{dedicated}")))
+                .map(|entry| entry["bytes"].as_u64().unwrap())
+                .collect::<Vec<_>>()
+        };
+        let buffers = listed_buffers(&health(api).await.1);
+        assert!(buffers.len() == 1 && buffers[0] > 0, "{buffers:?}");
         let state = std::fs::read(tree.0.join("webinfo/special_upstream_groups.json")).unwrap();
         let generated = std::fs::read(tree.0.join("sub_config/special_groups.yaml")).unwrap();
         failed_saves_preserve_files(&tree, api, &state, &generated).await;
@@ -442,6 +451,7 @@ plugins:
         assert_eq!(status, 204);
         std::net::TcpListener::bind(("127.0.0.1", dedicated)).unwrap();
         std::net::UdpSocket::bind(("127.0.0.1", dedicated)).unwrap();
+        assert!(listed_buffers(&health(api).await.1).is_empty(), "a closed listener is no longer listed");
         scope.cancel(); serving.await.unwrap();
         // A stale derived file cannot resurrect a deleted group on restart.
         std::fs::write(tree.0.join("sub_config/special_groups.yaml"), generated).unwrap();
@@ -646,6 +656,16 @@ fn an_undeletable_orphan_at_startup_is_pending_not_fatal() {
             serde_json::json!(["srs/special_62.json"])
         );
         assert_eq!(query(dns, "start.example.com").await.last(), Some(&10));
+        // The kernel receive buffer of the UDP listener is visible (and was enlarged).
+        let buffers = state["udp_receive_buffers"].as_array().expect("array");
+        assert_eq!(buffers.len(), 1, "{state}");
+        assert!(
+            buffers[0]["listen"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!(":{dns}"))
+        );
+        assert!(buffers[0]["bytes"].as_u64().unwrap() > 0, "{state}");
         scope.cancel();
         serving.await.unwrap();
         cancel.cancel();
