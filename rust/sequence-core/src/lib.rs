@@ -6,7 +6,7 @@ mod state;
 
 pub use engine::{
     CancellationState, CancellationToken, ExecutionCompletion, ExecutionControl, ExecutionError,
-    ExecutionMachine, ExternalDispatch, MachineStep, RootFuelHandle, ScopeCompletion,
+    ExecutionMachine, ExternalDispatch, MachineStep, RootFuelHandle, ScopeCompletion, StepTrace,
     SuccessorRecipe, WatchToken, execute,
 };
 pub use program::{
@@ -2242,5 +2242,188 @@ mod slice5_shared_control_tests {
             ExecutionControl::with_shared_budget(root.clone(), CancellationToken::new());
         assert!(shared.try_consume().is_ok());
         assert_eq!(root.remaining(), 0);
+    }
+}
+
+#[cfg(test)]
+mod step_trace_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use mosdns_dns_core::{QueryHeader, QuestionInfo};
+
+    use crate::{
+        CancellationToken, DispatchMetadata, ExecutableSpec, ExecutionControl, ExecutionState,
+        Executor, ExecutorError, ExecutorOutcome, FixtureRef, FixtureSpec, MatchOutcome, Matcher,
+        MatcherError, MatcherSpecInput, ProgramSpec, RuleSpec, SequenceRef, SequenceSpec,
+        StepTrace, execute,
+    };
+
+    fn state() -> ExecutionState {
+        ExecutionState::new(
+            QueryHeader {
+                id: 7,
+                qr: false,
+                opcode: 0,
+                qdcount: 1,
+                ancount: 0,
+                nscount: 0,
+                arcount: 0,
+            },
+            QuestionInfo {
+                qname_wire: vec![0],
+                qtype: 1,
+                qclass: 1,
+            },
+        )
+    }
+
+    struct Fixed(bool);
+
+    impl Matcher for Fixed {
+        fn evaluate(&self, _state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
+            Ok(MatchOutcome::new(self.0, None))
+        }
+    }
+
+    struct Noop;
+
+    impl Executor for Noop {
+        fn execute(&self, _state: &mut ExecutionState) -> Result<ExecutorOutcome, ExecutorError> {
+            Ok(ExecutorOutcome::Continue)
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct Recorder {
+        events: RefCell<Vec<String>>,
+    }
+
+    impl StepTrace for Recorder {
+        fn matcher(&self, sequence: &str, name: &str, matched: bool, state: &ExecutionState) {
+            self.events.borrow_mut().push(format!(
+                "{sequence}|matcher|{name}|{matched}|{}",
+                state.query.header.id
+            ));
+        }
+
+        fn plugin(&self, sequence: &str, name: &str, state: &ExecutionState) {
+            self.events.borrow_mut().push(format!(
+                "{sequence}|plugin|{name}|{}",
+                state.query.header.id
+            ));
+        }
+    }
+
+    fn matcher(matched: bool, reverse: bool, name: &str) -> MatcherSpecInput {
+        MatcherSpecInput::new(Box::new(Fixed(matched)), reverse, DispatchMetadata::None)
+            .with_name(name)
+    }
+
+    fn fixture_exec(name: &str) -> ExecutableSpec {
+        ExecutableSpec::Fixture {
+            target: FixtureRef::new(name),
+        }
+    }
+
+    fn program() -> crate::ValidatedProgram {
+        ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![
+                        // The second matcher is false: the third is never evaluated, no action.
+                        RuleSpec::new(
+                            vec![
+                                matcher(true, false, "m1"),
+                                matcher(false, false, "m2"),
+                                matcher(true, false, "m3"),
+                            ],
+                            Some(vec![ExecutableSpec::Return]),
+                        )
+                        .with_trace_names("never".to_owned(), Vec::new()),
+                        // `!` is reported as its effective result; the action calls a sequence.
+                        RuleSpec::new(
+                            vec![matcher(false, true, "not(m4)")],
+                            Some(vec![ExecutableSpec::Call {
+                                target: SequenceRef::new("child"),
+                            }]),
+                        )
+                        .with_trace_names("call-child".to_owned(), Vec::new()),
+                        // An unnamed matcher and an unnamed rule are not reported.
+                        RuleSpec::new(
+                            vec![matcher(true, false, "")],
+                            Some(vec![fixture_exec("quiet")]),
+                        ),
+                        // Several executables: the rule, then each one from the inline sequence.
+                        RuleSpec::unconditional(Some(vec![fixture_exec("a"), fixture_exec("b")]))
+                            .with_trace_names(
+                                "multi_exec[a,b]".to_owned(),
+                                vec!["a".to_owned(), "b".to_owned()],
+                            ),
+                    ],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    // No executable: still reported, as the reference's `no_exec`.
+                    vec![
+                        RuleSpec::new(Vec::new(), None)
+                            .with_trace_names("no_exec".to_owned(), Vec::new()),
+                    ],
+                ),
+            ],
+            ["quiet", "a", "b"]
+                .into_iter()
+                .map(|name| FixtureSpec::new(name, Box::new(Noop)))
+                .collect(),
+        )
+        .validate()
+        .expect("valid program")
+    }
+
+    const EXPECTED: [&str; 7] = [
+        "main|matcher|m1|true|7",
+        "main|matcher|m2|false|7",
+        "main|matcher|not(m4)|true|7",
+        "main|plugin|call-child|7",
+        "child|plugin|no_exec|7",
+        "main|plugin|multi_exec[a,b]|7",
+        // The synthetic inline sequence reports under its enclosing sequence.
+        "main|plugin|a|7",
+    ];
+
+    #[test]
+    fn steps_are_reported_in_order_with_short_circuit_nesting_and_inline_names() {
+        let program = program();
+        let recorder = Rc::new(Recorder::default());
+        let mut control = ExecutionControl::with_fuel(64).with_step_trace(recorder.clone());
+        let mut state = state();
+        let entry = program.sequence_id("main").expect("main");
+        execute(&program, entry, &mut state, &mut control).expect("runs");
+        let events = recorder.events.borrow();
+        let mut expected: Vec<&str> = EXPECTED.to_vec();
+        expected.push("main|plugin|b|7");
+        assert_eq!(events.as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn a_forked_control_reports_to_the_same_trace_and_none_means_no_reports() {
+        let program = program();
+        let entry = program.sequence_id("main").expect("main");
+        let recorder = Rc::new(Recorder::default());
+        let parent = ExecutionControl::with_shared_budget(
+            crate::RootFuelHandle::new(64),
+            CancellationToken::new(),
+        )
+        .with_step_trace(recorder.clone());
+        let mut child = parent.fork_child(CancellationToken::new());
+        execute(&program, entry, &mut state(), &mut child).expect("runs");
+        assert_eq!(recorder.events.borrow().len(), EXPECTED.len() + 1);
+
+        // Without a trace the run is the same and nothing is reported anywhere.
+        let mut plain = ExecutionControl::with_fuel(64);
+        let mut state = state();
+        execute(&program, entry, &mut state, &mut plain).expect("runs");
+        assert_eq!(recorder.events.borrow().len(), EXPECTED.len() + 1);
     }
 }

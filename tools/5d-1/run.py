@@ -83,7 +83,9 @@ def run(args):
             if mock.poll() is not None or time.monotonic()>end: raise RuntimeError('mock not ready')
             time.sleep(.1)
         host=spawn(0,['unshare','--mount','--propagation','private','sh','-c','mount --bind "$1" /tmp; shift; exec "$@"','5d1',root/'tmp',args.binary,'start','-d',root,'-c','config_custom.yaml'],'host.log')
-        port=load(root/'webinfo/webui_port_settings.json')['port'] if args.role=='go' else 9099
+        # Go and the native host since F-1 listen on the saved WebUI port when there is one.
+        saved=root/'webinfo/webui_port_settings.json'
+        port=load(saved)['port'] if saved.exists() else 9099
         startup=[]; end=time.monotonic()+90
         while True:
             startup.append(dict(time=time.monotonic(),**resource(host.pid)))

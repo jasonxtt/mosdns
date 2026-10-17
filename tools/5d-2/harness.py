@@ -32,10 +32,10 @@ class Env:
     """Context manager: `with Env(...) as env:` leaves nothing behind."""
 
     def __init__(self, work, role, binary, output, prepare_root=None, seed=501, saved_port_applies=None):
-        # The Go host and the F-1 native host start the management listener on the port saved in
-        # `webinfo/webui_port_settings.json` (the production snapshot has one); earlier native
-        # builds ignore it. Default: Go only, as in the 5D-2 runs.
-        self.saved_port_applies = (role == 'go') if saved_port_applies is None else saved_port_applies
+        # The Go host and the native host since F-1 start the management listener on the port saved
+        # in `webinfo/webui_port_settings.json` (the production snapshot has one). Default: every
+        # role applies it; pass False only for a native build older than F-1.
+        self.saved_port_applies = True if saved_port_applies is None else saved_port_applies
         if os.geteuid() != 0:
             raise ValueError('VM root required')
         self.work, self.role, self.binary, self.output = work, role, pathlib.Path(binary), pathlib.Path(output)

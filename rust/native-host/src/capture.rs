@@ -16,9 +16,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Most lines kept; the oldest is dropped first.
-pub(crate) const MAX_LINES: usize = 4096;
+/// (One query's step trace is ~10-20 lines.)
+pub(crate) const MAX_LINES: usize = 32768;
 /// Most serialized bytes kept across all lines.
-pub(crate) const MAX_BYTES: usize = 1 << 20;
+pub(crate) const MAX_BYTES: usize = 8 << 20;
 /// Longest string value in a line, in characters; longer values are cut.
 const MAX_VALUE_CHARS: usize = 256;
 
@@ -26,6 +27,7 @@ const MAX_VALUE_CHARS: usize = 256;
 pub(crate) enum Field<'a> {
     Str(&'a str),
     Uint(u64),
+    Bool(bool),
 }
 
 #[derive(Default)]
@@ -167,6 +169,7 @@ fn render(
         let value = match value {
             Field::Str(text) => Value::String(cut(text)),
             Field::Uint(number) => Value::from(*number),
+            Field::Bool(flag) => Value::from(*flag),
         };
         map.insert((*key).to_owned(), value);
     }

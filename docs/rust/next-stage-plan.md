@@ -1,5 +1,12 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-18：F-2b 日志抓取的逐步流程实现完成，待 Codex 审查结论与规划会话确认
+
+抓取期间引擎在每个有名字的 matcher 求值后、每条规则执行动作前，写出与 Go `chain.go` 相同 msg 与字段的行（`dns query flows through matcher` / `… plugin`；`trace_id` 与汇总行一致），
+覆盖嵌套序列、`call`/`goto`/`jump`、多 exec、fallback/preference；`matcher_name`/`plugin_name` 按 Go 的生成规则在编译期生成并保存（`anonymous_match(type: args)`、`not(...)`、`no_exec`、`multi_exec[...]`）。
+未抓取时每步只多一次 `Option` 判断（门槛复测 20/100/500 qps 通过）；开启时 CPU 约 ×1.9、缓冲 32768 行/8 MiB 有界。与 Go 的逐步对照除 `jump` 目标的 logger 名外逐行一致；UI 无需改动。
+顺带修了 5D 工具对已保存 WebUI 端口的处理。记录见 [validation-records/10-18-f2b](validation-records/10-18-f2b/README.md)。
+
 ## 2026-10-17：F-2 诊断（日志抓取、指标对齐、pprof 决定）实现完成，待 Codex 审查结论与规划会话确认
 
 - **日志抓取**：`POST /api/v1/capture/start`、`GET /api/v1/capture/logs` 按 Go 契约（默认 120 s、1–600 s、读一次即清空、重叠 start 重置）。抓取期间诊断阈值临时降到 debug，到点自动回到**配置的** `log.level`（Go 硬恢复 INFO，原生不改写配置级别）；

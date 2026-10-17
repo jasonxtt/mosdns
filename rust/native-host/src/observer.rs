@@ -990,11 +990,18 @@ pub(crate) struct ExecutionCheckpoint {
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
     completed_observation: Option<TerminalObservation>,
+    /// The step trace of a running diagnostic capture, set at admission.
+    step_trace: Option<Rc<dyn mosdns_sequence_core::StepTrace>>,
 }
 
 impl ExecutionCheckpoint {
+    pub(crate) fn step_trace(&self) -> Option<Rc<dyn mosdns_sequence_core::StepTrace>> {
+        self.step_trace.clone()
+    }
+
     pub(crate) fn new(capture_audit_details: bool) -> Self {
         Self {
+            step_trace: None,
             capture_audit_details,
             response: ResponseState::NoResponse,
             response_details: ResponseDetails::no_response(),
@@ -1581,6 +1588,10 @@ impl QueryObserver {
             qclass: question.qclass,
             trace_id,
         });
+        let mut execution_checkpoint = Box::new(ExecutionCheckpoint::new(enabled || traced));
+        if let Some(context) = audit_context.as_ref().filter(|_| traced) {
+            execution_checkpoint.step_trace = Some(Rc::new(QueryTrace::new(&context.trace_id)));
+        }
         self.admit_query();
         Ok(AdmittedQueryGuard {
             observer: std::sync::Arc::clone(self),
@@ -1588,7 +1599,7 @@ impl QueryObserver {
             audit_context,
             audit: enabled,
             cancellation,
-            execution_checkpoint: Box::new(ExecutionCheckpoint::new(enabled || traced)),
+            execution_checkpoint,
             finalized: false,
         })
     }
@@ -1848,6 +1859,61 @@ impl Drop for AdmittedQueryGuard {
             observation.elapsed = self.admitted_at.elapsed();
             self.record(observation);
         }
+    }
+}
+
+/// The step trace of one audited query during a diagnostic capture: a debug line per named
+/// matcher evaluation and per rule action, with the reference's messages and field names
+/// (`dns query flows through matcher` / `... plugin`), under the same `trace_id` as the
+/// query's summary line. Like the summary line they go to the capture buffer only.
+#[derive(Debug)]
+struct QueryTrace {
+    trace_id: String,
+}
+
+impl QueryTrace {
+    fn new(trace_id: &str) -> Self {
+        Self {
+            trace_id: trace_id.to_owned(),
+        }
+    }
+}
+
+impl mosdns_sequence_core::StepTrace for QueryTrace {
+    fn matcher(
+        &self,
+        sequence: &str,
+        name: &str,
+        matched: bool,
+        state: &mosdns_sequence_core::ExecutionState,
+    ) {
+        use crate::capture::Field;
+        let qname = render_qname(&state.query.question.qname_wire);
+        crate::capture::record(
+            sequence,
+            "dns query flows through matcher",
+            &[
+                ("trace_id", Field::Str(&self.trace_id)),
+                ("domain", Field::Str(qname.trim_end_matches('.'))),
+                ("matcher_name", Field::Str(name)),
+                ("match_result", Field::Bool(matched)),
+            ],
+        );
+    }
+
+    fn plugin(&self, sequence: &str, name: &str, state: &mosdns_sequence_core::ExecutionState) {
+        use crate::capture::Field;
+        let qname = render_qname(&state.query.question.qname_wire);
+        crate::capture::record(
+            sequence,
+            "dns query flows through plugin",
+            &[
+                ("trace_id", Field::Str(&self.trace_id)),
+                ("query_id", Field::Uint(u64::from(state.query.header.id))),
+                ("domain", Field::Str(qname.trim_end_matches('.'))),
+                ("plugin_name", Field::Str(name)),
+            ],
+        );
     }
 }
 
