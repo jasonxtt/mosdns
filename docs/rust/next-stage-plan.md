@@ -1,5 +1,10 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-18：F-3b 首次 Go→Rust 切换与回滚（实施与 VM 验证，待外部 Claude 审查）
+
+新增 `scripts/cutover/{go-to-rust.sh,rust-to-go.sh,cutover.py}`：Go schema-4 受管原文校验、显式逐文件放行差异、保留用户数据、typed-settings 迁移、原生增量包状态、空间/inode 预检、停服最终快照、原子程序/整根替换、健康失败自动回滚与中断后的显式恢复。
+切换 worker 独立于 SSH 会话，回滚保存 Rust 阶段数据；不自动清理现场文件。不改 Rust 源码、不构建本机程序、不连接生产或 mos-test、不发布。操作见 [cutover.md](cutover.md)，逐项结果与失败过程见 [F-3b 记录](validation-records/10-18-f3b/README.md)。本任务不做自我审查轮次，外部审查请求在本地任务 `research/review-request.md`。
+
 ## 2026-10-18：Phase 6b 退役 `native_management`（待 Codex 审查结论与规划会话确认）
 
 删除托管模式的全部代码：开关解析、`ManagedProfile`/候选 profile、`ManagedStore` 事务日志与 staging/retired/lock、`compile_managed_candidate`/`apply_candidate` 及 `apply_config` 里的托管分支、托管版 special-groups / upstream / diversion / 手工规则 HTTP 处理、仅为它存在的测试与示例；共享的 `blocking_io` 工作线程、`CandidateInputSet`、`sha256`、`lexical_path`、`FileCommit` 提交路径与标准模式（M1-e special_groups、typed settings）原样保留。配置里写 `native_management` 现在加载/`check`/`start` 都明确失败（`native_management was removed; use the standard special_groups configuration`）；`webinfo/native_management.*` 残留文件不读不删。同时去掉不再成立的 `check` 输出行 `SKIPPED managed-store …`。清单、测试数量变化与验证见 [validation-records/10-18-p6b](validation-records/10-18-p6b/README.md)。
