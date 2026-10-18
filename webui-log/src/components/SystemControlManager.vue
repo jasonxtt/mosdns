@@ -363,7 +363,7 @@ function formatConfigVersionDisplay(schema) {
 }
 
 const configVersionInfo = computed(() => {
-  if (capabilityState.value?.kind === 'native') return { versionText: '不适用', statusText: operationReason('system.config_management') }
+  if (capabilityState.value?.kind === 'native' && !supportsOperation('system.config_management')) return { versionText: '不适用', statusText: operationReason('system.config_management') }
   const applied = Number(update.status?.config_schema_applied || 0);
   const required = Number(update.status?.config_schema_required || 0);
   if (!applied && !required) {

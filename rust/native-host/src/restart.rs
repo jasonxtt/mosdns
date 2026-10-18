@@ -9,8 +9,8 @@
 
 use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 /// What to execute: the file the process was started from and its original `argv`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,9 +18,36 @@ pub struct RestartTarget {
     exe: PathBuf,
     /// `argv` as received, `argv[0]` included.
     args: Vec<OsString>,
+    /// Set when this target is the update guard of a staged transaction.
+    transaction: Option<PathBuf>,
 }
 
 static TARGET: OnceLock<RestartTarget> = OnceLock::new();
+/// The target the next restart runs instead of the captured one (an update guard).
+static PENDING: Mutex<Option<RestartTarget>> = Mutex::new(None);
+
+/// Makes the next restart `exec` `target` instead of this program again.
+pub(crate) fn set_pending(target: RestartTarget) {
+    *PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(target);
+}
+
+/// Forgets a pending target (the restart it was for could not be scheduled).
+pub(crate) fn clear_pending() {
+    *PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
+/// Takes the pending target, if any (for `main`, once a restart was requested).
+#[must_use]
+pub fn take_pending() -> Option<RestartTarget> {
+    PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+}
 
 /// Linux appends this to `/proc/self/exe` when the file was replaced or removed
 /// after the process started. The path still names the file a new binary was
@@ -39,7 +66,46 @@ fn without_deleted_suffix(path: PathBuf) -> PathBuf {
 
 impl RestartTarget {
     pub(crate) fn new(exe: PathBuf, args: Vec<OsString>) -> Self {
-        Self { exe, args }
+        Self {
+            exe,
+            args,
+            transaction: None,
+        }
+    }
+
+    /// The update guard for a staged transaction: `exe` is the old program's copy and the
+    /// arguments are `update-guard --transaction <file>`.
+    pub(crate) fn guard(exe: PathBuf, transaction: PathBuf) -> Self {
+        let args = vec![
+            exe.clone().into_os_string(),
+            OsString::from("update-guard"),
+            OsString::from("--transaction"),
+            transaction.clone().into_os_string(),
+        ];
+        Self {
+            exe,
+            args,
+            transaction: Some(transaction),
+        }
+    }
+
+    /// The staged update transaction this target hands over to, if it is a guard.
+    #[must_use]
+    pub fn transaction(&self) -> Option<&Path> {
+        self.transaction.as_deref()
+    }
+
+    /// The program the process was started from.
+    pub(crate) fn executable(&self) -> &Path {
+        &self.exe
+    }
+
+    /// `argv` as the process was started, as text (`None` when an argument is not UTF-8).
+    pub(crate) fn arguments(&self) -> Option<Vec<String>> {
+        self.args
+            .iter()
+            .map(|arg| arg.to_str().map(str::to_owned))
+            .collect()
     }
 
     /// Checks, before anything is stopped, that the executable can plausibly be run.

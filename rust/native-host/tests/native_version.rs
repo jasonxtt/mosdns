@@ -9,7 +9,11 @@ fn version_is_a_bounded_standalone_command() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        format!("{}\n", option_env!("MOSDNS_BUILD_VERSION").unwrap_or("dev"))
+        format!(
+            "{}\n",
+            option_env!("MOSDNS_BUILD_VERSION")
+                .unwrap_or(concat!("rust-v", env!("CARGO_PKG_VERSION")))
+        )
     );
     let extra = std::process::Command::new(env!("CARGO_BIN_EXE_mosdns"))
         .args(["version", "extra"])

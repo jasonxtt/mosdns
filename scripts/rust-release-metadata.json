@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "channel": "rust",
+  "required_config_schema": 1,
+  "config_package_id": "rust-config-schema-1",
+  "config": {
+    "url": "",
+    "sha256": ""
+  }
+}

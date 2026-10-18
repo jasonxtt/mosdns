@@ -376,24 +376,27 @@ impl ApiServer {
                             let static_slots = self.static_slots.clone();
                             let external_ui = self.external_ui.clone();
                             let connection_shutdown = shutdown.child_token();
-                            tasks.spawn_local(async move {
-                                let _ = process_connection(
-                                    stream,
-                                    control,
-                                    config,
-                                    cache,
-                                    observer,
-                                    state_root,
-                                    audit_persist_lock,
-                                    audit_persistence_faults,
-                                    audit_clock,
-                                    audit_read_slots,
-                                    static_slots,
-                                    external_ui,
-                                    connection_shutdown,
-                                )
-                                .await;
-                            });
+                            tasks.spawn_local(crate::update::api::HOLD.scope(
+                                Default::default(),
+                                async move {
+                                    let _ = process_connection(
+                                        stream,
+                                        control,
+                                        config,
+                                        cache,
+                                        observer,
+                                        state_root,
+                                        audit_persist_lock,
+                                        audit_persistence_faults,
+                                        audit_clock,
+                                        audit_read_slots,
+                                        static_slots,
+                                        external_ui,
+                                        connection_shutdown,
+                                    )
+                                    .await;
+                                },
+                            ));
                         }
                         Err(error) => {
                             accept_error = Some(error);
@@ -598,6 +601,11 @@ async fn process_connection(
     // Exact read-only health is available through admission pause. It takes no
     // lease and cannot resume admission or trigger recovery shutdown.
     if request.target.split('?').next() == Some("/api/v1/system/health") {
+        let update_root: Option<PathBuf> = config
+            .reload
+            .as_ref()
+            .map(|reload| reload.root_dir.clone())
+            .or_else(|| state_root.clone());
         let response = if request.method == "GET" {
             let state = control
                 .as_ref()
@@ -607,8 +615,12 @@ async fn process_connection(
                 &serde_json::json!({
                     "ready": state == "ready", "state": state, "runtime": "rust",
                     "version": crate::build_identity::VERSION,
-                    "required_config_schema": null, "applied_config_schema": null,
-                    "config_management_enabled": false,
+                    "required_config_schema": crate::update::REQUIRED_CONFIG_SCHEMA,
+                    "applied_config_schema": update_root
+                        .as_deref()
+                        .map(|root| crate::update::package::load_state(root).applied_schema),
+                    "config_management_enabled": crate::update::api::config_management_unsupported(update_root.is_some()).is_none(),
+                    "update": update_root.as_deref().map_or(serde_json::Value::Null, crate::update::health_summary),
                     // Deleted special-group files that could not be removed
                     // yet (relative to the configuration root); retried on the
                     // next save. Never makes the host unready.
@@ -2742,6 +2754,26 @@ async fn dispatch(
             headers: reply.headers,
         };
     }
+    if let Some(reply) = crate::update::api::handle(
+        &crate::update::api::Context {
+            control,
+            config,
+            root: webinfo_root,
+            shutdown,
+        },
+        &request.method,
+        path,
+        &request.body,
+    )
+    .await
+    {
+        return Response {
+            status: reply.status,
+            content_type: reply.content_type,
+            body: reply.body,
+            headers: reply.headers,
+        };
+    }
     if let Some(reply) = match webinfo_root {
         Some(root) => {
             crate::appearance::handle(
@@ -3842,10 +3874,22 @@ fn ui_operations(
         "capture.logs".to_owned(),
         serde_json::json!({"supported": true, "reason": null}),
     );
-    for id in ["system.config_management", "system.update"] {
+    // Update and configuration management need the configuration root (the directory of
+    // `webinfo/`) and a captured executable to hand over to the update guard.
+    let root_known = config.reload.is_some();
+    for (id, reason) in [
+        (
+            "system.update",
+            crate::update::api::update_unsupported(root_known),
+        ),
+        (
+            "system.config_management",
+            crate::update::api::config_management_unsupported(root_known),
+        ),
+    ] {
         operations.insert(
             id.to_owned(),
-            serde_json::json!({"supported": false, "reason": "当前 Rust 原生运行时尚未实现此操作"}),
+            serde_json::json!({"supported": reason.is_none(), "reason": reason}),
         );
     }
     serde_json::Value::Object(operations)
@@ -4253,8 +4297,11 @@ mod tests {
             assert_eq!(health["ready"], true);
             assert_eq!(health["runtime"], "rust");
             assert_eq!(health["version"], crate::build_identity::VERSION);
-            assert!(health["required_config_schema"].is_null());
-            assert!(health["applied_config_schema"].is_null());
+            assert_eq!(health["required_config_schema"], 1);
+            assert!(
+                health["applied_config_schema"].is_null(),
+                "no configuration root here"
+            );
             assert_eq!(health["config_management_enabled"], false);
             control.pause_admission().unwrap();
             let (status, health) = probe(address, "GET").await;

@@ -1559,7 +1559,6 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                 "/plugins/clientname",
                 "/plugins/switch3/show",
                 "/plugins/requery/status",
-                "/api/v1/update/status",
                 "/api/v1/domain-generation",
                 "/api/v1/overrides",
             ] {
