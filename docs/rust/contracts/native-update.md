@@ -47,5 +47,38 @@ Why this does not depend on `systemd`: the guard *is* the service's main process
 
 Interruption table: before `installing` nothing live has changed; during `installing` any prefix of the file writes is undone from the backup; the program swap is one rename; from `testing` on, the candidate is on trial and any interruption rolls back; `verified` is written only after the candidate proved healthy, so a kill after it leaves a consistent new installation.
 
+## First Go → Rust installation (F-3b)
+
+`scripts/cutover/go-to-rust.sh` and `rust-to-go.sh` are Linux amd64 root/systemd
+operator tools, separate from the running host's updater. They use the native
+`config_rust_up.zip` manifest and Go schema-4 `config_up.zip` + `config_all.zip`
+reference bytes. Managed differences require per-path explicit acceptance of
+the native package version; all unmanaged data is copied unchanged. Existing
+native settings/state refuses a first installation. The settings migration must
+exit 0 and candidate `check` must report zero gaps/cascades/globals.
+
+The new root receives `webinfo/rust_config_update_state.json` with format 1,
+applied/required schema 1, success status, native package ID/hash and candidate
+version. Go's state file is preserved independently. Package defaults only
+create missing switch files; they never replace user state.
+
+Preparation is online; after stopping Go a final complete snapshot and new
+migration/check preserve shutdown-time data. Binary replacement uses same-dir
+atomic rename; the configuration root is renamed as a whole. Each intent and
+result is fsynced to a private retained transaction. A detached transient systemd
+worker survives SSH disconnection. Ordinary failures restore Go automatically;
+an interrupted/killed worker is recovered by the explicit rollback command,
+not a permanent boot hook. Both entry points exclude concurrent transaction
+workers. Health requires the expected version, service active and three real
+DNS answers; native additionally requires runtime Rust and schema 1.
+
+Rollback restores the Go root/program/unit/environment and retains the entire
+post-cutover Rust root separately. Later Rust changes are not merged into Go.
+Hash failures and unexpected unit/drop-in sets refuse recovery; data and
+transaction directories are never automatically removed. Space is budgeted
+before staging and again before stopping; refusal does not clean user files.
+See [the Chinese operator guide](../cutover.md) and
+[F-3b evidence](../validation-records/10-18-f3b/README.md).
+
 ## Not provided
 Windows/other platforms; HTML scraping of release pages (the API only); GitHub tokens; `prefer_v3`; a Go-compatible `config_update_state.json`.
