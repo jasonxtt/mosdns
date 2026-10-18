@@ -41,7 +41,7 @@
 mod fixtures;
 
 use std::future::Future;
-use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -376,18 +376,27 @@ impl Doh3Server {
         mut release: Option<oneshot::Receiver<()>>,
         probe_tcp: bool,
     ) -> Self {
-        // Reserving the port over TCP and then binding QUIC over UDP on the same
-        // number lets the probe observe any TCP fallback attempt.
-        let (tcp_probe, port) = if probe_tcp {
-            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind tcp probe");
-            listener
-                .set_nonblocking(true)
-                .expect("tcp probe non-blocking");
-            let port = listener.local_addr().expect("tcp probe address").port();
-            (Some(listener), port)
-        } else {
-            (None, 0)
-        };
+        // Hold the UDP socket until QUIC takes ownership in its runtime. A TCP
+        // reservation alone cannot prevent another test from taking the UDP port.
+        let (tcp_probe, socket) = (0..5)
+            .find_map(|_| {
+                let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind QUIC socket");
+                socket.set_nonblocking(true).expect("QUIC non-blocking");
+                if !probe_tcp {
+                    return Some((None, socket));
+                }
+                match TcpListener::bind(socket.local_addr().expect("UDP address")) {
+                    Ok(listener) => {
+                        listener
+                            .set_nonblocking(true)
+                            .expect("tcp probe non-blocking");
+                        Some((Some(listener), socket))
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
+                    Err(error) => panic!("bind TCP probe: {error}"),
+                }
+            })
+            .expect("TCP/UDP pair still occupied after 5 attempts");
 
         let (address_tx, address_rx) = std::sync::mpsc::channel::<SocketAddr>();
         let accepts = Arc::new(AtomicUsize::new(0));
@@ -399,9 +408,13 @@ impl Doh3Server {
                 .build()
                 .expect("build server runtime");
             runtime.block_on(async move {
-                let bind = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-                let endpoint = quinn::Endpoint::server(config, bind)
-                    .expect("bind the ephemeral loopback QUIC endpoint");
+                let endpoint = quinn::Endpoint::new(
+                    quinn::EndpointConfig::default(),
+                    Some(config),
+                    socket,
+                    Arc::new(quinn::TokioRuntime),
+                )
+                .expect("bind the ephemeral loopback QUIC endpoint");
                 let address = endpoint.local_addr().expect("the bound address");
                 address_tx
                     .send(address)

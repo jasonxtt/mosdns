@@ -1,4 +1,5 @@
 //! Real native DNS and HTTP cache lifecycle contract.
+mod common;
 use mosdns_native_host::{CacheTestClock, HostAssembly, HostOptions, compile_yaml_with_base};
 use mosdns_upstream_core::TransportCancellation;
 use std::net::{SocketAddr, TcpListener, UdpSocket};
@@ -333,39 +334,24 @@ fn native_process_sigterm_drains_owners_and_reports_all_final_save_failures_with
     use std::process::{Command, Stdio};
     let root = std::env::temp_dir().join(format!("cache-signal-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let api_port = free_port();
-    let dns_port = free_port();
-    let yaml = format!(
-        "log: {{level: error}}\napi: {{http: '127.0.0.1:{api_port}'}}\nplugins:\n  - tag: alpha\n    type: cache\n    args: {{dump_file: missing/alpha.gz}}\n  - tag: beta\n    type: cache\n    args: {{dump_file: missing/beta.gz}}\n  - tag: f\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:25999'}}]}}\n  - tag: main\n    type: sequence\n    args: [{{exec: $alpha}}, {{exec: $beta}}, {{exec: $f}}]\n  - tag: dns\n    type: udp_server\n    args: {{listen: '127.0.0.1:{dns_port}', entry: main, enable_audit: false}}\n"
-    );
-    let config = root.join("config.yaml");
-    std::fs::write(&config, yaml).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mosdns"))
-        .args(["start", "-c"])
-        .arg(&config)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut ready = false;
-    for _ in 0..200 {
-        if std::net::TcpStream::connect(("127.0.0.1", api_port)).is_ok() {
-            ready = true;
-            break;
-        }
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    if !ready {
-        let _ = child.kill();
-        let output = child.wait_with_output().unwrap();
-        panic!(
-            "native startup failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+    let (mut child, stderr) = common::ports::retry_addr_in_use(|| {
+        let api_port = free_port();
+        let dns_port = free_port();
+        let yaml = format!(
+            "log: {{level: error}}\napi: {{http: '127.0.0.1:{api_port}'}}\nplugins:\n  - tag: alpha\n    type: cache\n    args: {{dump_file: missing/alpha.gz}}\n  - tag: beta\n    type: cache\n    args: {{dump_file: missing/beta.gz}}\n  - tag: f\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:25999'}}]}}\n  - tag: main\n    type: sequence\n    args: [{{exec: $alpha}}, {{exec: $beta}}, {{exec: $f}}]\n  - tag: dns\n    type: udp_server\n    args: {{listen: '127.0.0.1:{dns_port}', entry: main, enable_audit: false}}\n"
         );
-    }
+        let config = root.join("config.yaml");
+        std::fs::write(&config, yaml).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mosdns"));
+        command
+            .args(["start", "-c"])
+            .arg(&config)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        common::ports::spawn_ready(&mut command, Duration::from_secs(1), || {
+            std::net::TcpStream::connect(("127.0.0.1", api_port)).is_ok()
+        })
+    });
     assert!(
         Command::new("kill")
             .args(["-TERM", &child.id().to_string()])
@@ -382,7 +368,8 @@ fn native_process_sigterm_drains_owners_and_reports_all_final_save_failures_with
     if child.try_wait().unwrap().is_none() {
         child.kill().unwrap();
     }
-    let output = child.wait_with_output().unwrap();
+    let mut output = child.wait_with_output().unwrap();
+    output.stderr = common::ports::collected_stderr(&stderr);
     let diagnostic = String::from_utf8(output.stderr).unwrap();
     assert_eq!(output.status.code(), Some(2), "{diagnostic}");
     assert!(diagnostic.contains("cache 0:"));

@@ -6,6 +6,8 @@
 #![cfg(unix)]
 #![allow(clippy::pedantic)]
 
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::os::unix::fs::PermissionsExt;
@@ -71,8 +73,9 @@ struct Stub {
 }
 
 impl Stub {
-    fn start(port: u16) -> Self {
-        let socket = UdpSocket::bind(("127.0.0.1", port)).unwrap();
+    fn start() -> (Self, u16) {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = socket.local_addr().unwrap().port();
         socket
             .set_read_timeout(Some(Duration::from_millis(50)))
             .unwrap();
@@ -86,10 +89,13 @@ impl Stub {
                 }
             }
         });
-        Self {
-            stop,
-            handle: Some(handle),
-        }
+        (
+            Self {
+                stop,
+                handle: Some(handle),
+            },
+            port,
+        )
     }
 
     fn stop(&mut self) {
@@ -181,13 +187,18 @@ struct Host {
 
 impl Host {
     fn start(name: &str) -> Self {
+        common::ports::retry_addr_in_use(|| Self::try_start(name))
+    }
+
+    fn try_start(name: &str) -> Result<Self, String> {
         let root = std::env::temp_dir().join(format!("f2-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let exe = root.join("mosdns");
         std::fs::copy(env!("CARGO_BIN_EXE_mosdns"), &exe).unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let (api, dns, upstream) = (free_port(), free_udp_port(), free_udp_port());
+        let (stub, upstream) = Stub::start();
+        let (api, dns) = (free_port(), free_udp_port());
         // `log.level: error`: debug lines reach stderr only while a capture runs.
         std::fs::write(
             root.join("config.yaml"),
@@ -196,7 +207,6 @@ impl Host {
             ),
         )
         .unwrap();
-        let stub = Stub::start(upstream);
         // Another test thread copying its own binary at the same moment can leave this file
         // briefly open for writing in a forked child ("Text file busy"): retry the spawn.
         let mut attempt = 0;
@@ -227,7 +237,7 @@ impl Host {
                 }
             }
         });
-        let host = Self {
+        let mut host = Self {
             root,
             child,
             stderr,
@@ -236,24 +246,16 @@ impl Host {
             upstream,
             stub,
         };
-        host.wait_ready();
-        host
-    }
-
-    fn wait_ready(&self) {
-        let end = Instant::now() + Duration::from_secs(20);
-        while Instant::now() < end {
-            if http(self.api, "GET", "/api/v1/system/health", b"")
-                .is_some_and(|reply| reply.status == 200)
-            {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        panic!(
-            "host not ready; stderr: {:?}",
-            self.stderr.try_iter().collect::<Vec<_>>()
-        );
+        common::ports::wait_ready(
+            &mut host.child,
+            &host.stderr,
+            Duration::from_secs(20),
+            || {
+                http(api, "GET", "/api/v1/system/health", b"")
+                    .is_some_and(|reply| reply.status == 200)
+            },
+        )?;
+        Ok(host)
     }
 
     fn api(&self, method: &str, path: &str, body: &[u8]) -> Reply {

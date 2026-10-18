@@ -6,6 +6,8 @@
 #![cfg(unix)]
 #![allow(clippy::pedantic)]
 
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::os::unix::fs::PermissionsExt;
@@ -71,8 +73,9 @@ struct Stub {
 }
 
 impl Stub {
-    fn start(port: u16) -> Self {
-        let socket = UdpSocket::bind(("127.0.0.1", port)).unwrap();
+    fn start() -> (Self, u16) {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = socket.local_addr().unwrap().port();
         socket
             .set_read_timeout(Some(Duration::from_millis(50)))
             .unwrap();
@@ -86,10 +89,13 @@ impl Stub {
                 }
             }
         });
-        Self {
-            stop,
-            handle: Some(handle),
-        }
+        (
+            Self {
+                stop,
+                handle: Some(handle),
+            },
+            port,
+        )
     }
 
     fn stop(&mut self) {
@@ -190,6 +196,10 @@ impl Host {
 
     /// `dump_directory = false` makes the cache's final save fail.
     fn start_with(name: &str, dump_directory: bool) -> Self {
+        common::ports::retry_addr_in_use(|| Self::try_start_with(name, dump_directory))
+    }
+
+    fn try_start_with(name: &str, dump_directory: bool) -> Result<Self, String> {
         let root = std::env::temp_dir().join(format!("f1-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         // The cache's final save needs its directory (a failed save is an exit-2 stop).
@@ -200,7 +210,8 @@ impl Host {
         let exe = root.join("mosdns");
         std::fs::copy(env!("CARGO_BIN_EXE_mosdns"), &exe).unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let (api, dns, upstream) = (free_port(), free_udp_port(), free_udp_port());
+        let (stub, upstream) = Stub::start();
+        let (api, dns) = (free_port(), free_udp_port());
         std::fs::write(
             root.join("config.yaml"),
             format!(
@@ -208,7 +219,6 @@ impl Host {
             ),
         )
         .unwrap();
-        let stub = Stub::start(upstream);
         let mut command = Command::new(&exe);
         command
             .args(["start", "-d"])
@@ -227,7 +237,7 @@ impl Host {
                 }
             }
         });
-        let host = Self {
+        let mut host = Self {
             root,
             child,
             stderr,
@@ -235,8 +245,16 @@ impl Host {
             dns,
             stub,
         };
-        host.wait_ready(api);
-        host
+        common::ports::wait_ready(
+            &mut host.child,
+            &host.stderr,
+            Duration::from_secs(20),
+            || {
+                http(api, "GET", "/api/v1/system/health", None, b"")
+                    .is_some_and(|reply| reply.0 == 200)
+            },
+        )?;
+        Ok(host)
     }
 
     fn wait_ready(&self, api: u16) {
@@ -448,6 +466,10 @@ fn a_failed_exec_keeps_the_same_process_serving() {
 
 #[test]
 fn a_saved_webui_port_takes_effect_at_the_next_start_and_beats_the_yaml_port() {
+    common::ports::retry_addr_in_use(saved_webui_port_scenario);
+}
+
+fn saved_webui_port_scenario() -> Result<(), String> {
     let mut host = Host::start("webui-port");
     let before = json(&host.api("GET", "/api/v1/system/webui-port", b""));
     assert_eq!(before["active_port"], host.api);
@@ -487,7 +509,15 @@ fn a_saved_webui_port_takes_effect_at_the_next_start_and_beats_the_yaml_port() {
         200
     );
     host.wait_line("restarting in place");
-    host.wait_ready(target);
+    common::ports::wait_ready(
+        &mut host.child,
+        &host.stderr,
+        Duration::from_secs(20),
+        || {
+            http(target, "GET", "/api/v1/system/health", None, b"")
+                .is_some_and(|reply| reply.0 == 200)
+        },
+    )?;
     let after = http(target, "GET", "/api/v1/system/webui-port", None, b"").unwrap();
     assert_eq!(json(&after)["active_port"], target);
     assert_eq!(json(&after)["pending_restart"], false);
@@ -503,6 +533,7 @@ fn a_saved_webui_port_takes_effect_at_the_next_start_and_beats_the_yaml_port() {
     );
     drop(taken);
     assert!(host.terminate().success());
+    Ok(())
 }
 
 fn multipart(content: &[u8]) -> (String, Vec<u8>) {
