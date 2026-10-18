@@ -1,4 +1,4 @@
-name: Test mosdns
+name: Test mosdns (Rust)
 
 on:
   push:
@@ -14,47 +14,7 @@ on:
   workflow_dispatch:
 
 jobs:
-
-  build:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          check-latest: true
-
-      - name: Build
-        run: go build -v ./...
-
-      - name: Go vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test ./...
-
-      - name: Focused matcher tests
-        run: >-
-          go test -count=1
-          ./pkg/matcher/domain ./pkg/matcher/netlist
-          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
-          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
-          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
-          ./plugin/matcher/base_domain ./plugin/matcher/base_ip
-
-      - name: Focused matcher race tests
-        run: >-
-          go test -race -count=1
-          ./pkg/matcher/domain ./pkg/matcher/netlist
-          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
-          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
-          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
-          ./plugin/matcher/base_domain ./plugin/matcher/base_ip
-
-  rust-foundation:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+  rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,88 +22,26 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - name: Check pure Rust foundation
+      - name: Format, lint and test
+        working-directory: rust
         run: |
-          cargo fmt --manifest-path rust/Cargo.toml --all --check
-          cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --all-features --locked
-          cargo clippy --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --no-fail-fast --locked
 
-  rust-runtime-experimental:
-    if: github.event_name == 'workflow_dispatch'
+  webui:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          check-latest: true
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: webui-log/package-lock.json
-      - name: Check unified Rust runtime
-        run: |
-          cargo fmt --manifest-path rust/Cargo.toml --all --check
-          cargo test --manifest-path rust/Cargo.toml --all-targets --locked
-          cargo test --manifest-path rust/Cargo.toml -p mosdns-runtime --test abi_contract --locked checked_in_header_matches_abi_constants_and_entrypoints
-          cargo test --manifest-path rust/Cargo.toml -p mosdns-runtime --test valued_abi --locked
-          cargo clippy --manifest-path rust/Cargo.toml --all-targets --locked -- -D warnings
-      - name: Build unified Rust runtime static library
-        run: scripts/build-rust-cache.sh
-      - name: Test real Linux cgo bridge
-        env:
-          CGO_ENABLED: '1'
-        run: go test -tags mosdns_rust ./plugin/executable/cache ./pkg/matcher/... ./plugin/matcher/... -count=1
-      - name: Test Linux matcher cgo bridge
-        env:
-          CGO_ENABLED: '1'
-          MOSDNS_MATCHER_BACKEND: rust
-        run: >-
-          go test -tags mosdns_rust
-          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
-          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
-          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
-          ./plugin/matcher/... -count=1
-      - name: Test Linux matcher cgo bridge with race detector
-        env:
-          CGO_ENABLED: '1'
-          MOSDNS_MATCHER_BACKEND: rust
-        run: >-
-          go test -race -tags mosdns_rust
-          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
-          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
-          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
-          ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1
-      - name: Benchmark Linux matcher cgo bridge
-        env:
-          CGO_ENABLED: '1'
-          MOSDNS_MATCHER_BACKEND: rust
-          BENCHTIME: 100ms
-          COUNT: '1'
-        run: scripts/benchmark-rust-matchers.sh
-      - name: Install UI dependencies
+      - name: Test and build the WebUI
         working-directory: webui-log
-        run: npm ci
-      - name: Build experimental unified Rust runtime binary with embedded UI
-        env:
-          OUTPUT: ./dist/mosdns-rust-runtime
-        run: scripts/build-rust-experimental.sh
-      - name: Build default Go-only fallback binary
-        env:
-          CGO_ENABLED: '0'
-          OUTPUT: ./dist/mosdns-go-only
-        run: SKIP_UI_BUILD=1 scripts/build-local.sh
-      - name: Install isolated smoke dependencies
-        run: sudo apt-get update && sudo apt-get install -y dnsutils
-      - name: Run isolated mos-test matcher smoke
-        env:
-          MOSDNS_RUST_BINARY: ./dist/mosdns-rust-runtime
-          MOSDNS_GO_ONLY_BINARY: ./dist/mosdns-go-only
-        run: scripts/smoke-rust-matcher-mos-test.sh
+        run: |
+          npm ci --include=dev
+          node --test tests/*.test.mjs
+          npm run build

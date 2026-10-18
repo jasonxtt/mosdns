@@ -59,8 +59,3 @@ test('the WebUI port panel is not hidden on the native runtime (only the Go-spec
   assert.match(control, /<CapabilityBoundary v-if="capabilityState\.value\?\.kind !== 'native'" operation="switches\.manage">\s*<SystemCoreModePanel/)
   assert.match(control, /<CapabilityBoundary operation="system\.webui_port">\s*<SystemWebuiPortPanel/)
 })
-
-test('the compatibility shell is untouched by the F-1 work', () => {
-  const log1 = read('../src-log1/SystemControlManager.vue')
-  assert.doesNotMatch(log1, /mosdns_process_threads/)
-})

@@ -11,34 +11,36 @@ operator workflow around:
 - query and audit visibility
 - the maintained Vue WebUI
 
-The Rust branch must preserve these **product contracts** while moving toward a
-pure Rust-native host. The opt-in/versioned Go↔Rust boundaries already present
-in cache, matcher, and query foundation are transitional migration scaffolding,
-not the final architecture and not a pattern to extend automatically into new
-Phase 3B+ modules.
+The `rust` branch is a **pure Rust project** (since Phase 6a it has no Go source and
+needs no Go toolchain). It must preserve these **product contracts** while the
+Rust-native host moves toward replacing the production Go program. The Go MosDNS
+lives on `main` and in `/Users/tom/github/mosdns`; it is used only as the
+behavioural reference (see `tools/go-reference/README.md`).
 
 ## Repository map
 
-- `coremain/`: HTTP/API server, runtime state, audit endpoints, and embedded assets under `coremain/www/`
-- `plugin/`: executable plugins and sequence/routing behavior
-- `pkg/`: shared DNS and query-context utilities
-- `webui-log/`: active Vue frontend workspace; `src/` builds the maintained UI (built in at `/`, or as an external package for any `ui/<name>/` with `npm run build:external`) and `src-log1/` builds the compatibility UI (Go only)
-- `rust/`: experimental Rust cores, runtime, ABI, and adapters
+- `rust/`: the Cargo workspace. `native-host` is the product (`mosdns` binary, built-in `/` UI, management API, update guard); `dns-core`, `cache-core`, `matcher-core`, `sequence-core`, `upstream-core` are its libraries
+- `rust/native-host/ui/`: the built `/` UI (checked in; produced from `webui-log/src` by `npm run build`, embedded by `rust/native-host/build.rs`)
+- `webui-log/`: active Vue frontend workspace (historical name); `src/` builds the maintained UI (built in at `/`, or as an external package for any `ui/<name>/` with `npm run build:external`)
+- `scripts/`: Rust build and release scripts (`build-rust-native.sh`, `build-rust-release.sh`, `generate-rust-update-manifest.sh`) and measurement helpers
+- `tools/`: differential and evidence tools (Python, plus thin Go wrappers built from the Go repository by `tools/go-reference/build.sh`)
+- `tests/phase5a-baseline/`: workload/config fixtures read by Rust tests, and the standalone Go load-generator helper (own `go.mod`, not needed by the Rust build)
 - `docs/rust/contracts/`: public product and migration contracts
 - `docs/rust/validation-summary.md`: accepted scope, validation evidence and limitations
 - `.trellis/`, `.agents/`, `.codex/`: optional local-only development tools, not tracked or required for builds
-- `docs/`: fork notes, release documentation, and Rust migration evidence
+- `docs/`: fork notes, Go release documentation (history), and Rust migration evidence
 
 ## UI topology
 
 The normal route contract is:
 
-- `/` → maintained Vue UI (Go and Rust-native)
-- `/log` → compatibility UI (**Go only**; the Rust-native host serves no `/log`)
+- `/` → maintained Vue UI (built in)
+- `/log` → does not exist on the Rust-native host (the Go repository's compatibility UI)
 - `/<name>/` → optional external UI package from `<config root>/ui/<name>/`, any directory name (Rust-native; see `docs/rust/external-ui.md`)
 
-Do not infer the route from a directory name. Verify `coremain/mosdns.go`, the
-embedded HTML files, and the Vite configuration before changing UI behavior.
+Do not infer the route from a directory name. Verify `rust/native-host/build.rs`,
+`rust/native-host/src/static_ui.rs`, `rust/native-host/ui/index.html` and the Vite
+configuration before changing UI behavior.
 
 ## Compatibility contracts
 

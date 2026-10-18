@@ -191,7 +191,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ -z "${HELPER_BINARY}" ]]; then
-  (cd "${ROOT_DIR}" && go build -trimpath -o "${HELPER_TMP}" ./tests/phase5a-baseline/cmd/phase5a-baseline)
+  (cd "${ROOT_DIR}/tests/phase5a-baseline" && go build -trimpath -o "${HELPER_TMP}" ./cmd/phase5a-baseline)
   HELPER_BINARY="${HELPER_TMP}"
 fi
 if [[ ! -x "${HELPER_BINARY}" ]]; then

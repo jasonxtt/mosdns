@@ -26,26 +26,25 @@ if (mode === 'stamp') {
       files.set(relative,hash(relative))
     } else throw new Error(`non-regular build input: ${relative}`)
   }
-  // The native host embeds the maintained UI only; the compatibility UI (`/log`, src-log1) is Go's.
+  // The native host embeds the maintained UI (`rust/native-host/ui`) only.
   for (const dir of ['rust','webui-log/src']) collect(dir)
   for (const file of ['webui-log/package.json','webui-log/package-lock.json','webui-log/vite.config.js','webui-log/index.html','scripts/build-rust-native.sh','scripts/native-build-manifest.mjs']) collect(file)
-  for (const name of readdirSync(path.join(root,'coremain/www/assets')).sort()) {
-    if (name === 'vue-log1') continue
-    collect(`coremain/www/assets/${name}`,true)
+  for (const name of readdirSync(path.join(root,'rust/native-host/ui/assets')).sort()) {
+    collect(`rust/native-host/ui/assets/${name}`,true)
   }
-  for (const file of ['log.html']) {
-    collect(`coremain/www/${file}`,true)
-    const html=readFileSync(`coremain/www/${file}`,'utf8')
+  for (const file of ['index.html']) {
+    collect(`rust/native-host/ui/${file}`,true)
+    const html=readFileSync(`rust/native-host/ui/${file}`,'utf8')
     const refs=[...html.matchAll(/["'](\/assets\/[^"']+)["']/g)].map(m=>m[1])
     if (!refs.some(ref=>ref.includes('/app.js?')) || !refs.some(ref=>ref.includes('/app.css?'))) throw new Error(`missing UI roots: ${file}`)
     for (const ref of refs) {
       const url=new URL(ref,'http://build.invalid')
-      if (!files.has(`coremain/www${url.pathname}`)) throw new Error(`missing root asset: ${ref}`)
+      if (!files.has(`rust/native-host/ui${url.pathname}`)) throw new Error(`missing root asset: ${ref}`)
       if (/\/app\.(js|css)$/.test(url.pathname) && url.searchParams.get('v')!==version) throw new Error(`version stamp mismatch: ${ref}`)
     }
   }
   const source=Object.fromEntries([...files].sort(([a],[b])=>a.localeCompare(b)))
-  const assets=Object.fromEntries(Object.entries(source).filter(([p])=>p.startsWith('coremain/www/')))
+  const assets=Object.fromEntries(Object.entries(source).filter(([p])=>p.startsWith('rust/native-host/ui/')))
   writeFileSync(manifestPath,JSON.stringify({schema_version:1,runtime:'rust',version,source_id:process.env.BUILD_SOURCE_ID||null,source,assets,source_manifest_sha256:createHash('sha256').update(JSON.stringify(source)).digest('hex'),artifact:null},null,2)+'\n')
 } else if (mode === 'finish') {
   const manifest=JSON.parse(readFileSync(manifestPath,'utf8'))

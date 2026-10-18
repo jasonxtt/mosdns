@@ -4,8 +4,6 @@
 //! regex) and their `MixMatcher` combination with precedence
 //! full → domain → regex → keyword. Normalization matches Go's
 //! `NormalizeDomain` (lowercase + strip trailing dot).
-//!
-//! This crate is an `rlib` linked by `mosdns-runtime` (the sole `staticlib`).
 
 #![allow(clippy::pedantic)]
 
@@ -27,11 +25,7 @@ pub use normalize::normalize;
 pub use regex::{RegexBuildError, RegexMatcher, check_go_regexp};
 pub use srs::{DomainSrs, IpSrs, MAX_INFLATED_BYTES, SrsError, decode_domain_srs, decode_ip_srs};
 pub use trie::DomainSuffixMatcher;
-pub use valued::{
-    ValuedBuildError, ValuedDomainMatcher, ValuedEncodingError, ValuedMatchResult, ValuedRule,
-    decode_valued_match_result, decode_valued_rule_batch, encode_valued_match_result,
-    encode_valued_rule_batch,
-};
+pub use valued::{ValuedBuildError, ValuedDomainMatcher, ValuedMatchResult, ValuedRule};
 
 /// Domain matcher trait, generic over the result value.
 ///

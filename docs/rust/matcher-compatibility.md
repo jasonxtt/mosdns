@@ -1,5 +1,7 @@
 # Rust matcher compatibility matrix
 
+> **Historical evidence (Phase 6a, 2026-10-18).** This document describes the Go↔Rust hybrid stage. The Go source, the cgo bridge (`rust/runtime`), the `MOSDNS_*_BACKEND` selectors and the scripts it names were removed from the `rust` branch (they remain in git history and, for Go, in the Go repository). The text below is kept unchanged as evidence.
+
 Status: Slices 0–5 of `08-13-rust-matcher-phase2-expansion` are implemented,
 reviewed, and verified. Rust remains experimental and default builds remain
 Go-only. Linux+cgo and isolated `mos-test` results are recorded separately and

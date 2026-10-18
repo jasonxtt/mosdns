@@ -116,7 +116,9 @@ no actionable issue, matched all129 source/manifests locally/remotely and reran
 - Base commit `3896a4a7e0ce4311b40a7e4c80c93f2c8b3b4f1d`, base release `v0.7.1`.
 - Do not switch to `main` merely from the folder name. `main` stays Go-only; the
   `rust` branch is a future pure Rust-native replacement, not an intermediate
-  production runtime.
+  production runtime. Since Phase 6a (2026-10-18) the `rust` branch contains no Go
+  source or cgo bridge; Go references are built from `/Users/tom/github/mosdns` with
+  `tools/go-reference/build.sh`.
 
 ## Status as of 2026-09-24
 
@@ -172,10 +174,9 @@ Completed milestones (all archived; each archive holds its own evidence):
 | Phase 5A W1/W2/W3 host | Strict native YAML subset, W1 UDP/TCP forwarding, W2 simple cache, and W3 bounded routing, each with scoped Linux correctness gates. | `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-forwarding/`, `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-cache/`, `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-routing/` |
 | Phase 5A first process comparison | Frozen paired W1/W2/W3 Go/Rust run with retained invalid attempts and explicit uncertainty. | `.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/` |
 
-The workspace also holds `rust/runtime`, the transitional single `staticlib`
-from the earlier hybrid work. New Phase 3B+ modules compose as plain Rust
-libraries for the future host and must not add ABI symbols to extend the hybrid
-shape or create a second runtime.
+The transitional `rust/runtime` `staticlib` of the earlier hybrid work was removed
+in Phase 6a. New modules compose as plain Rust libraries for the host and must not
+add ABI symbols to extend the hybrid shape or create a second runtime.
 
 ### Secure upstream status and caveats
 

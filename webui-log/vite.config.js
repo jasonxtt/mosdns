@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const assetVersion = process.env.MOSDNS_ASSET_VERSION || new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
-const outDir = path.resolve(__dirname, '../coremain/www/assets/vue-log')
-const rootHtmlPath = path.resolve(__dirname, '../coremain/www/log.html')
+const outDir = path.resolve(__dirname, '../rust/native-host/ui/assets/vue-log')
+const rootHtmlPath = path.resolve(__dirname, '../rust/native-host/ui/index.html')
 const devProxyTarget = process.env.MOSDNS_DEV_TARGET || 'http://10.0.0.91'
 
 export default defineConfig({

@@ -32,11 +32,6 @@ fn collect(directory: &Path, root: &Path, assets: &mut BTreeMap<String, PathBuf>
         let kind = entry.file_type().expect("embedded asset type");
         assert!(!kind.is_symlink(), "embedded symlink: {}", path.display());
         if kind.is_dir() {
-            // The compatibility UI (`/log`) is served by the Go host only; the native host
-            // embeds the maintained UI alone.
-            if path == root.join("assets/vue-log1") {
-                continue;
-            }
             collect(&path, root, assets);
         } else {
             regular(&path);
@@ -62,12 +57,11 @@ fn main() {
         );
         println!("cargo:rustc-env=MOSDNS_BUILD_VERSION={version}");
     }
-    let root =
-        PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../coremain/www");
+    let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("ui");
     let mut assets = BTreeMap::new();
     collect(&root.join("assets"), &root, &mut assets);
     // The one embedded root: the maintained UI at `/`.
-    let path = root.join("log.html");
+    let path = root.join("index.html");
     regular(&path);
     let html = std::fs::read_to_string(&path).expect("embedded HTML");
     for fragment in html.split(['"', '\'']) {

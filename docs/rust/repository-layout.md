@@ -12,15 +12,27 @@ excluded from Git tracking. A fresh clone does not require them to build MosDNS.
 - Old `.superpowers/` and `docs/superpowers/` design drafts: backed up outside the repository and removed from the current tree.
 - Root `proxy.o`: obsolete eBPF object removed; nft/eBPF remains excluded by [upstream policy](../../UPSTREAM_SYNC.md).
 
-## WebUI retained
+## WebUI
 
-`/` serves `coremain/www/log.html`, built from `webui-log/src` into
-`coremain/www/assets/vue-log`. `/log` serves `coremain/www/log1.html`, built from
-`webui-log/src-log1` into `coremain/www/assets/vue-log1`. The Go host embeds
-`coremain/www/*`; existing build/release workflows build both bundles. None of
-these sources/assets/routes/workflows were removed or modified by this cleanup.
-`webui-blog/` also remains pending a separate removal decision. No current build
-or route reference to it was found; its output path is assets/vue-blog.
+`/` serves `rust/native-host/ui/index.html`, built from `webui-log/src` into
+`rust/native-host/ui/assets/vue-log` (checked in, embedded by
+`rust/native-host/build.rs`). Since Phase 6a the `rust` branch has no Go host and no
+`/log` compatibility UI (`webui-log/src-log1` was removed; it lives in the Go
+repository). The leftover Go-era `webui-blog/` source was removed on 2026-10-18 (user
+decision); it remains in git history and in the Go repository.
+
+## Pure Rust branch (Phase 6a)
+
+Removed from this branch: all Go source and module files (`coremain/`, `plugin/`,
+`pkg/`, `mlog/`, `main.go`, `go.mod`, `go.sum`, `tools/*.go`), the Go build/release files
+(`Dockerfile*`, `release.py`, `minify_safe.py`, `postcss.config.js`, the Go workflows),
+the cgo bridge (`rust/runtime`, `scripts/build-rust-cache.sh` and the other hybrid
+scripts) and the `/log` sources. The Go MosDNS stays on `main` and in
+`/Users/tom/github/mosdns`; `tools/go-reference/build.sh` builds the Go reference
+binary and the Go-side comparison tools from a pinned commit of it. The Phase 5a load
+generator `tests/phase5a-baseline/cmd/phase5a-baseline` remains as a standalone Go
+module (its configs and workloads are fixtures of Rust tests). Details and the full
+list: `docs/rust/validation-records/10-18-p6a/README.md`.
 
 ## Git history
 

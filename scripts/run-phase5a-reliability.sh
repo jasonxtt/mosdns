@@ -50,7 +50,7 @@ trap cleanup EXIT INT TERM
 
 if [[ -z "${HELPER_BINARY}" ]]; then
   HELPER_BINARY="${TMP_DIR}/phase5a-baseline-helper"
-  (cd "${ROOT_DIR}" && go build -trimpath -o "${HELPER_BINARY}" ./tests/phase5a-baseline/cmd/phase5a-baseline)
+  (cd "${ROOT_DIR}/tests/phase5a-baseline" && go build -trimpath -o "${HELPER_BINARY}" ./cmd/phase5a-baseline)
 fi
 if [[ ! -x "${HELPER_BINARY}" ]]; then
   echo "HELPER_BINARY is not executable: ${HELPER_BINARY}" >&2

@@ -87,8 +87,7 @@ test('both system shells preserve exact native switch whitespace on reload', asy
  assert.equal(switchValueFromResponse(raw,'native'),raw)
  assert.equal(switchValueFromResponse(raw,'legacy'),'A')
  for (const path of [
-  new URL('../src/components/SystemControlManager.vue', import.meta.url),
-  new URL('../src-log1/SystemControlManager.vue', import.meta.url)
+  new URL('../src/components/SystemControlManager.vue', import.meta.url)
  ]) {
   const source=await readFile(path,'utf8')
   assert.match(source,/switchValueFromResponse\(item\.value, capabilityState\.value\?\.kind\)/)

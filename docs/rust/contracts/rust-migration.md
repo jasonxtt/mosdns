@@ -1,5 +1,7 @@
 # Rust Migration
 
+> **Historical evidence (Phase 6a, 2026-10-18).** This document describes the Go↔Rust hybrid stage. The Go source, the cgo bridge (`rust/runtime`), the `MOSDNS_*_BACKEND` selectors and the scripts it names were removed from the `rust` branch (they remain in git history and, for Go, in the Go repository). The text below is kept unchanged as evidence.
+
 The complete architecture and phase gates are in `docs/ai/rust-rewrite-plan.md`. That document overrides abbreviated notes here.
 
 ## Architecture

@@ -7,7 +7,7 @@ select the production/default binary or close the full native migration gate.
 
 `api.http` serves the maintained Vue UI at `/` and its recursively embedded
 `/assets/...` from the executable. **The native host serves no `/log`**: the
-compatibility UI (`/log`, `webui-log/src-log1/`, `assets/vue-log1`) belongs to the Go
+compatibility UI (`/log`, `assets/vue-log1`; its sources were removed from this branch in Phase 6a) belongs to the Go
 host only; `/log`, `/log/`, `/log1` and `/assets/vue-log1/...` are plain 404s here
 and the native build neither builds nor embeds that UI (`scripts/build-rust-native.sh`
 runs `npm run build` only). No Go, Node, frontend proxy, source

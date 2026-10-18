@@ -1,5 +1,7 @@
 # Backend Development Guidelines
 
+Paths such as `coremain/*.go` or `plugin/…` in these files name the Go repository (`main`, `/Users/tom/github/mosdns`); the `rust` branch has had no Go source since Phase 6a.
+
 These files are short, source-backed rules for MosDNS-T backend and Rust migration work. The detailed project sources of truth remain `AGENTS.md` and `docs/ai/`.
 
 ## Guidelines index
