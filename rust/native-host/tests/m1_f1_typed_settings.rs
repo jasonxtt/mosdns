@@ -1396,39 +1396,6 @@ fn a_generation_list_the_yaml_disables_is_reported_off() {
 }
 
 #[test]
-fn managed_mode_does_not_serve_the_settings_routes() {
-    let tree = Tree::new("managed");
-    let ports = ports();
-    tree.write(
-        "config.yaml",
-        &format!(
-            "log: {{level: error}}\nnative_management: {{special_groups: true}}\napi: {{http: '127.0.0.1:{}'}}\nplugins:\n  - tag: main_proxy\n    type: socks5_proxy\n    args: {{addr: '127.0.0.1:9'}}\n  - tag: default_forward\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:9'}}]}}\n  - tag: main_entry\n    type: sequence\n    args: [{{exec: $special_upstream_matcher}}, {{exec: $default_forward}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: main_entry, listen: '127.0.0.1:{}', enable_audit: true}}\n",
-            ports.api, ports.dns
-        ),
-    );
-    let config = mosdns_native_host::load_and_compile(&tree.path("config.yaml")).expect("compiles");
-    let host = HostAssembly::with_options_and_state_root(config, HostOptions::default(), &tree.0)
-        .expect("assembles");
-    host.block_on(async {
-        let (shutdown, task) = serve(&host).await;
-        // The objects exist, but the managed profile owns changes (M1-e).
-        let reply = api(
-            ports.api,
-            "POST",
-            "/api/v1/overrides",
-            r#"{"socks5":"127.0.0.1:10"}"#,
-        )
-        .await;
-        assert_eq!(reply.status, 404, "{}", reply.body);
-        let reply = api(ports.api, "GET", "/api/v1/settings/effective", "").await;
-        assert_eq!(reply.status, 200, "{}", reply.body);
-        assert_eq!(tree.text("webinfo/settings.json"), "");
-        shutdown.cancel();
-        task.await.unwrap();
-    });
-}
-
-#[test]
 fn an_empty_proxy_address_means_no_proxy() {
     let tree = Tree::new("empty-proxy");
     let ports = ports();

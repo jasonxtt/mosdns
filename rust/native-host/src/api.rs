@@ -1115,7 +1115,6 @@ enum Route<'a> {
     Upstream(UpstreamRoute<'a>),
     DiversionCatalog {
         slot: Option<u32>,
-        action: DiversionCatalogAction<'a>,
     },
     CacheInventory,
     Metrics,
@@ -1128,12 +1127,6 @@ enum UpstreamRoute<'a> {
     Tags,
     Config,
     Runtime(std::borrow::Cow<'a, str>),
-}
-
-enum DiversionCatalogAction<'a> {
-    List,
-    Source(Result<std::borrow::Cow<'a, str>, ()>),
-    Unsupported,
 }
 
 #[derive(Clone, Copy)]
@@ -1177,100 +1170,6 @@ pub(crate) fn decode_plugin_tag(tag: &str) -> Option<std::borrow::Cow<'_, str>> 
         }
     }
     String::from_utf8(bytes).ok().map(std::borrow::Cow::Owned)
-}
-
-fn safe_catalog_name(name: &str) -> bool {
-    !name.trim().is_empty()
-        && name != "."
-        && name != ".."
-        && !name.contains('/')
-        && !name.contains('\\')
-        && !name.chars().any(char::is_control)
-}
-
-fn special_manual_slot(tag: &str) -> Option<u32> {
-    let suffix = tag.strip_prefix("special_manual_")?;
-    let slot = suffix.parse::<u32>().ok()?;
-    (slot >= 50 && slot.to_string() == suffix).then_some(slot)
-}
-
-fn managed_manual_slot(config: &CompiledConfig, tag: &str) -> Option<u32> {
-    let slot = special_manual_slot(tag)?;
-    config
-        .managed_profile
-        .as_ref()?
-        .groups
-        .iter()
-        .any(|group| group.slot == slot)
-        .then_some(slot)
-}
-
-fn manual_rule_text(profile: &crate::special_groups::ManagedProfile, slot: u32) -> String {
-    let submitted = profile
-        .manual_rules
-        .get(&slot)
-        .into_iter()
-        .flat_map(|text| text.lines().map(str::to_owned))
-        .collect::<Vec<_>>();
-    let accepted = crate::managed::normalized_rules(&submitted);
-    if accepted.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", accepted.join("\n"))
-    }
-}
-
-fn manual_rule_bytes(values: &[String]) -> (usize, Vec<u8>) {
-    let safe_values = values
-        .iter()
-        .filter(|value| !value.contains('\n') && !value.contains('\r'))
-        .cloned()
-        .collect::<Vec<_>>();
-    let accepted = crate::managed::normalized_rules(&safe_values);
-    let count = accepted.len();
-    let bytes = if accepted.is_empty() {
-        Vec::new()
-    } else {
-        format!("{}\n", accepted.join("\n")).into_bytes()
-    };
-    (count, bytes)
-}
-
-fn disabled_source_is_supported(
-    source: &serde_json::Value,
-    name: &str,
-    group: &crate::special_groups::SpecialGroup,
-) -> bool {
-    let Some(object) = source.as_object() else {
-        return false;
-    };
-    if object.keys().any(|key| {
-        !matches!(
-            key.as_str(),
-            "enabled" | "name" | "type" | "url" | "auto_update" | "enable_regexp" | "files"
-        )
-    }) {
-        return false;
-    }
-    if object.get("enabled").and_then(serde_json::Value::as_bool) != Some(false)
-        || object.get("name").and_then(serde_json::Value::as_str) != Some(name)
-        || object.get("type").and_then(serde_json::Value::as_str) != Some(group.key().as_str())
-    {
-        return false;
-    }
-    if ["url", "auto_update", "enable_regexp"].iter().any(|key| {
-        object
-            .get(*key)
-            .is_some_and(|value| !(value.is_null() || value == false || value == 0 || value == ""))
-    }) {
-        return false;
-    }
-    object
-        .get("files")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|file| {
-            !file.is_empty() && Path::new(file).extension().and_then(|s| s.to_str()) == Some("txt")
-        })
 }
 
 fn route(target: &str) -> Route<'_> {
@@ -1323,30 +1222,14 @@ fn route(target: &str) -> Route<'_> {
         };
     }
     if let Some(rest) = path.strip_prefix("/plugins/") {
-        if let Some((raw_tag, action)) = rest.split_once('/') {
+        if let Some((raw_tag, _action)) = rest.split_once('/') {
             if let Some(decoded_tag) = decode_plugin_tag(raw_tag) {
                 if let Some(slot_text) = decoded_tag.strip_prefix("special_route_") {
                     let slot = slot_text
                         .parse::<u32>()
                         .ok()
                         .filter(|slot| *slot >= 50 && slot.to_string() == slot_text);
-                    let action = if action == "config" {
-                        DiversionCatalogAction::List
-                    } else if action == "update" || action == "download" || action == "reload" {
-                        DiversionCatalogAction::Unsupported
-                    } else if let Some(raw_name) = action.strip_prefix("config/") {
-                        let name = if raw_name.contains('/') {
-                            Err(())
-                        } else {
-                            decode_plugin_tag(raw_name)
-                                .and_then(|name| safe_catalog_name(name.as_ref()).then_some(name))
-                                .ok_or(())
-                        };
-                        DiversionCatalogAction::Source(name)
-                    } else {
-                        DiversionCatalogAction::Unsupported
-                    };
-                    return Route::DiversionCatalog { slot, action };
+                    return Route::DiversionCatalog { slot };
                 }
             }
         }
@@ -1395,14 +1278,11 @@ fn route(target: &str) -> Route<'_> {
 
 fn request_mutates_managed_state(request: &Request) -> bool {
     match route(&request.target) {
+        Route::Plugin { action: "post", .. } => request.method == "POST",
         Route::Plugin {
-            tag,
-            action: "post",
-        } => request.method == "POST" && special_manual_slot(tag.as_ref()).is_none(),
-        Route::Plugin {
-            tag,
             action: "save" | "flush",
-        } => request.method == "GET" && special_manual_slot(tag.as_ref()).is_none(),
+            ..
+        } => request.method == "GET",
         Route::Plugin {
             action: "load_dump",
             ..
@@ -1475,11 +1355,9 @@ async fn plugin_response(
 }
 
 /// Whether upstream edits go to the typed settings: a file-backed
-/// configuration without `native_management` that has `aliapi` groups.
+/// configuration that has `aliapi` groups.
 fn settings_upstreams(config: &CompiledConfig) -> bool {
-    config.managed_profile.is_none()
-        && config.reload.is_some()
-        && !config.effective_upstreams.is_empty()
+    config.reload.is_some() && !config.effective_upstreams.is_empty()
 }
 
 /// The reply of [`local_plugin_request`].
@@ -3017,14 +2895,6 @@ async fn dispatch(
             Response::error(404, "404 page not found")
         }
         Route::Plugin { tag, action } => match (request.method.as_str(), action) {
-            ("GET", "show") if managed_manual_slot(config, tag.as_ref()).is_some() => {
-                let slot = managed_manual_slot(config, tag.as_ref()).expect("guarded manual slot");
-                let profile = config
-                    .managed_profile
-                    .as_ref()
-                    .expect("guarded managed profile");
-                Response::text(manual_rule_text(profile, slot))
-            }
             ("GET", "show") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => {
@@ -3036,12 +2906,6 @@ async fn dispatch(
                     Response::text(body)
                 }
             },
-            ("GET", "save") if managed_manual_slot(config, tag.as_ref()).is_some() => {
-                // Generated manual providers are immutable snapshot inputs. Their
-                // canonical file is already durable; a Go-compatible save call
-                // therefore succeeds without writing around the transaction log.
-                Response::empty(200)
-            }
             ("GET", "save") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => match provider.save().await {
@@ -3049,34 +2913,6 @@ async fn dispatch(
                     Err(error) => Response::error(500, &error.to_string()),
                 },
             },
-            ("POST", "post") if managed_manual_slot(config, tag.as_ref()).is_some() => {
-                let payload: PostPayload = match serde_json::from_slice(&request.body) {
-                    Ok(payload) => payload,
-                    Err(_) => return Response::error(400, "invalid JSON"),
-                };
-                let Some(control) = control else {
-                    return Response::error(503, "managed runtime control is unavailable");
-                };
-                let current = control.view();
-                let Some(slot) = managed_manual_slot(&current.config, tag.as_ref()) else {
-                    return Response::error(404, "manual provider not found");
-                };
-                let profile = current
-                    .config
-                    .managed_profile
-                    .as_ref()
-                    .expect("managed manual slot requires a profile");
-                let (count, bytes) = manual_rule_bytes(&payload.values);
-                let config_path = match managed_config_path(profile) {
-                    Ok(path) => path,
-                    Err(response) => return response,
-                };
-                let path = PathBuf::from(format!("rule/special_{slot}.txt"));
-                match apply_managed_files(control, config_path, vec![(path, Some(bytes))]).await {
-                    Ok(()) => Response::text(format!("domain_set replaced with {count} entries")),
-                    Err(response) => response,
-                }
-            }
             ("POST", "post") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => {
@@ -3095,148 +2931,36 @@ async fn dispatch(
             // Any other method on a registered, mounted path, as chi replies.
             _ => Response::empty(405),
         },
+        // The managed special-groups profile was removed; without the standard profile (served
+        // before this point) there are no groups.
         Route::SpecialGroups { slot: None } => match request.method.as_str() {
-            "GET" => {
-                let groups: Vec<_> = config
-                    .managed_profile
-                    .as_ref()
-                    .map(|profile| {
-                        profile
-                            .groups
-                            .iter()
-                            .map(crate::special_groups::SpecialGroup::view)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                Response::json(&groups)
-            }
+            "GET" => Response::json(&Vec::<serde_json::Value>::new()),
             "POST" => {
-                let mutation: GroupMutation = match serde_json::from_slice(&request.body) {
-                    Ok(mutation) => mutation,
-                    Err(_) => return Response::error(400, "invalid special group JSON"),
-                };
-                let Some(control) = control else {
-                    return Response::error(503, "managed runtime control is unavailable");
-                };
-                let current = control.view();
-                let Some(profile) = current.config.managed_profile.as_ref() else {
-                    return Response::error(400, "native special_groups profile is disabled");
-                };
-                let slot = if mutation.slot == 0 {
-                    first_unused_group_slot(&profile.groups).unwrap_or_default()
-                } else {
-                    mutation.slot
-                };
-                let mut group = crate::special_groups::SpecialGroup {
-                    slot,
-                    name: mutation.name,
-                    listen_port: mutation.listen_port,
-                    custom_port_only: mutation.custom_port_only,
-                };
-                if group.slot < 50 || group.name.trim().is_empty() {
-                    return Response::error(400, "invalid special group slot or name");
+                if serde_json::from_slice::<GroupMutation>(&request.body).is_err() {
+                    return Response::error(400, "invalid special group JSON");
                 }
-                if group.listen_port == 53 {
-                    return Response::error(400, "special group listen port 53 is reserved");
+                if control.is_none() {
+                    return Response::error(503, "runtime control is unavailable");
                 }
-                let mut groups = profile.groups.clone();
-                if let Some(existing) = groups.iter_mut().find(|item| item.slot == group.slot) {
-                    *existing = group.clone();
-                } else {
-                    groups.push(group.clone());
-                }
-                if groups.iter().any(|item| {
-                    item.slot != group.slot && item.name.eq_ignore_ascii_case(group.name.trim())
-                }) {
-                    return Response::error(409, "special group name already exists");
-                }
-                if group.listen_port != 0
-                    && groups.iter().any(|item| {
-                        item.slot != group.slot && item.listen_port == group.listen_port
-                    })
-                {
-                    return Response::error(409, "special group listen port already exists");
-                }
-                if let Err(error) = crate::special_groups::normalize_groups(&mut groups) {
-                    return Response::error(400, &error.to_string());
-                }
-                group = groups
-                    .iter()
-                    .find(|item| item.slot == slot)
-                    .expect("validated group remains in candidate")
-                    .clone();
-                let bytes = match serde_json::to_vec(&groups) {
-                    Ok(bytes) => bytes,
-                    Err(error) => return Response::error(500, &error.to_string()),
-                };
-                let config_path = match managed_config_path(profile) {
-                    Ok(path) => path,
-                    Err(response) => return response,
-                };
-                let changes = vec![(
-                    PathBuf::from("webinfo/special_upstream_groups.json"),
-                    Some(bytes),
-                )];
-                match apply_managed_files(control, config_path, changes).await {
-                    Ok(()) => Response::json(&group.view()),
-                    Err(response) => response,
-                }
+                Response::error(400, "native special_groups profile is disabled")
             }
             _ => Response::method_not_allowed(),
         },
         Route::SpecialGroups { slot: Some(slot) } => match request.method.as_str() {
             "DELETE" => {
-                let Ok(slot) = slot.parse::<u32>() else {
+                if slot.parse::<u32>().is_err() {
                     return Response::error(400, "invalid special group slot");
-                };
-                let Some(control) = control else {
-                    return Response::error(503, "managed runtime control is unavailable");
-                };
-                let current = control.view();
-                let Some(profile) = current.config.managed_profile.as_ref() else {
-                    return Response::error(400, "native special_groups profile is disabled");
-                };
-                let Some(group) = profile.groups.iter().find(|item| item.slot == slot) else {
-                    return Response::error(404, "special group not found");
-                };
-                let mut groups = profile.groups.clone();
-                groups.retain(|item| item.slot != slot);
-                let mut overrides = profile.overrides.clone();
-                overrides.remove(&format!("special_upstream_{slot}"));
-                let group_path = PathBuf::from("webinfo/special_upstream_groups.json");
-                let overrides_path = PathBuf::from("webinfo/upstream_overrides.json");
-                let sources_path = PathBuf::from(format!("srs/{}.json", group.key()));
-                let manual_path = PathBuf::from(format!("rule/{}.txt", group.key()));
-                let changes = [
-                    serde_json::to_vec(&groups)
-                        .map(|bytes| (group_path, Some(bytes)))
-                        .map_err(|error| error.to_string()),
-                    serde_json::to_vec(&overrides)
-                        .map(|bytes| (overrides_path, Some(bytes)))
-                        .map_err(|error| error.to_string()),
-                ]
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>();
-                let mut changes = match changes {
-                    Ok(changes) => changes,
-                    Err(error) => return Response::error(500, &error),
-                };
-                changes.push((sources_path, None));
-                changes.push((manual_path, None));
-                let config_path = match managed_config_path(profile) {
-                    Ok(path) => path,
-                    Err(response) => return response,
-                };
-                match apply_managed_files(control, config_path, changes).await {
-                    Ok(()) => Response::empty(204),
-                    Err(response) => response,
                 }
+                if control.is_none() {
+                    return Response::error(503, "runtime control is unavailable");
+                }
+                Response::error(400, "native special_groups profile is disabled")
             }
             _ => Response::method_not_allowed(),
         },
         Route::Upstream(route) => match route {
             UpstreamRoute::Tags if request.method == "GET" => {
-                // Without `native_management` the settable groups are the `aliapi` ones.
+                // The settable groups are the `aliapi` ones.
                 let tags = if settings_upstreams(config) {
                     config
                         .effective_upstreams
@@ -3252,23 +2976,8 @@ async fn dispatch(
                 };
                 Response::json(&tags)
             }
-            UpstreamRoute::Config
-                if request.method == "GET" && config.managed_profile.is_none() =>
-            {
-                Response::json(&crate::settings_api::upstream_config(config))
-            }
             UpstreamRoute::Config if request.method == "GET" => {
-                let overrides = config
-                    .managed_profile
-                    .as_ref()
-                    .map(|profile| &profile.overrides);
-                match overrides {
-                    Some(overrides) => Response::json(overrides),
-                    None => Response::json(&std::collections::BTreeMap::<
-                        String,
-                        Vec<serde_json::Value>,
-                    >::new()),
-                }
+                Response::json(&crate::settings_api::upstream_config(config))
             }
             UpstreamRoute::Runtime(tag) if request.method == "GET" => {
                 let Some(definition_index) = config
@@ -3281,12 +2990,7 @@ async fn dispatch(
                 let override_config = if settings_upstreams(config) {
                     crate::settings_api::override_config(config, tag.as_ref())
                 } else {
-                    config
-                        .managed_profile
-                        .as_ref()
-                        .and_then(|profile| profile.overrides.get(tag.as_ref()))
-                        .cloned()
-                        .unwrap_or_default()
+                    Vec::new()
                 };
                 let mut runtime_targets = Vec::new();
                 if let Some(snapshot) = runtime_snapshot {
@@ -3329,10 +3033,10 @@ async fn dispatch(
                     return Response::error(400, "plugin_tag is required");
                 }
                 let Some(control) = control else {
-                    return Response::error(503, "managed runtime control is unavailable");
+                    return Response::error(503, "runtime control is unavailable");
                 };
-                let current = control.view();
-                if !current
+                if !control
+                    .view()
                     .config
                     .forward_definitions
                     .iter()
@@ -3340,179 +3044,20 @@ async fn dispatch(
                 {
                     return Response::error(404, "upstream tag not found");
                 }
-                let Some(profile) = current.config.managed_profile.as_ref() else {
-                    return Response::error(400, "native special_groups profile is disabled");
-                };
-                let mut overrides = profile.overrides.clone();
-                overrides.insert(mutation.plugin_tag, mutation.upstreams);
-                let bytes = match serde_json::to_vec(&overrides) {
-                    Ok(bytes) => bytes,
-                    Err(error) => return Response::error(500, &error.to_string()),
-                };
-                let changes = vec![(
-                    PathBuf::from("webinfo/upstream_overrides.json"),
-                    Some(bytes),
-                )];
-                let config_path = match managed_config_path(profile) {
-                    Ok(path) => path,
-                    Err(response) => return response,
-                };
-                match apply_managed_files(control, config_path, changes).await {
-                    Ok(()) => Response::json(&serde_json::json!({
-                        "message":"Upstream configuration saved."
-                    })),
-                    Err(response) => response,
-                }
+                Response::error(400, "native special_groups profile is disabled")
             }
             UpstreamRoute::Tags | UpstreamRoute::Config | UpstreamRoute::Runtime(_) => {
                 Response::method_not_allowed()
             }
         },
-        Route::DiversionCatalog { slot, action } => {
-            let Some(slot) = slot else {
+        Route::DiversionCatalog { slot } => {
+            if slot.is_none() {
                 return Response::error(404, "diversion group not found");
-            };
-            let Some(control) = control else {
-                if !matches!(action, DiversionCatalogAction::List) {
-                    return Response::error(503, "managed runtime control is unavailable");
-                }
-                return Response::error(503, "managed runtime snapshot is unavailable");
-            };
-            let current = control.view();
-            let Some(profile) = current.config.managed_profile.as_ref() else {
-                return Response::error(400, "native special_groups profile is disabled");
-            };
-            let Some(group) = profile.groups.iter().find(|group| group.slot == slot) else {
-                return Response::error(404, "diversion group not found");
-            };
-            match action {
-                DiversionCatalogAction::List if request.method == "GET" => {
-                    let sources: Vec<_> = profile
-                        .sources
-                        .get(&slot)
-                        .into_iter()
-                        .flat_map(|sources| sources.values().cloned())
-                        .collect();
-                    Response::json(&sources)
-                }
-                DiversionCatalogAction::Source(Err(())) => {
-                    Response::error(400, "invalid diversion source name or path")
-                }
-                DiversionCatalogAction::Source(Ok(path_name)) if request.method == "PUT" => {
-                    let source: serde_json::Value = match serde_json::from_slice(&request.body) {
-                        Ok(source) => source,
-                        Err(_) => return Response::error(400, "invalid diversion source JSON"),
-                    };
-                    let Some(name) = source.get("name").and_then(serde_json::Value::as_str) else {
-                        return Response::error(400, "diversion source name is required");
-                    };
-                    if !safe_catalog_name(name) {
-                        return Response::error(400, "invalid diversion source name");
-                    }
-                    let mut sources = profile.sources.get(&slot).cloned().unwrap_or_default();
-                    let existed = sources.contains_key(path_name.as_ref());
-                    if !existed && name != path_name.as_ref() {
-                        return Response::error(404, "diversion source not found");
-                    }
-                    if let Some(existing) = sources.get(path_name.as_ref()) {
-                        if existing.get("enabled").and_then(serde_json::Value::as_bool)
-                            == Some(false)
-                            && existing != &source
-                            && !disabled_source_is_supported(existing, path_name.as_ref(), group)
-                        {
-                            return Response::error(
-                                400,
-                                "unsupported disabled diversion source is read-only",
-                            );
-                        }
-                    }
-                    let enabled = source.get("enabled").and_then(serde_json::Value::as_bool);
-                    if enabled == Some(false) {
-                        let Some(existing) = sources.get(path_name.as_ref()) else {
-                            return Response::error(400, "new diversion sources must be enabled");
-                        };
-                        let mut disabled = existing.clone();
-                        if let Some(object) = disabled.as_object_mut() {
-                            object.insert("enabled".into(), serde_json::Value::Bool(false));
-                        }
-                        if disabled != source {
-                            return Response::error(400, "disabled diversion source is read-only");
-                        }
-                        if existing == &source {
-                            return Response::json_with_status(200, &source);
-                        }
-                    } else if enabled != Some(true) {
-                        return Response::error(400, "diversion source enabled must be boolean");
-                    }
-                    if name != path_name.as_ref() && sources.contains_key(name) {
-                        return Response::error(409, "diversion source name already exists");
-                    }
-                    sources.remove(path_name.as_ref());
-                    sources.insert(name.to_owned(), source.clone());
-                    let bytes = match serde_json::to_vec(&sources) {
-                        Ok(bytes) => bytes,
-                        Err(error) => return Response::error(500, &error.to_string()),
-                    };
-                    let config_path = match managed_config_path(profile) {
-                        Ok(path) => path,
-                        Err(response) => return response,
-                    };
-                    let catalog_path = PathBuf::from(format!("srs/{}.json", group.key()));
-                    match apply_managed_files(
-                        control,
-                        config_path,
-                        vec![(catalog_path, Some(bytes))],
-                    )
-                    .await
-                    {
-                        Ok(()) => {
-                            let status = if existed { 200 } else { 201 };
-                            Response::json_with_status(status, &source)
-                        }
-                        Err(response) => response,
-                    }
-                }
-                DiversionCatalogAction::Source(Ok(path_name)) if request.method == "DELETE" => {
-                    let mut sources = profile.sources.get(&slot).cloned().unwrap_or_default();
-                    let Some(existing) = sources.get(path_name.as_ref()) else {
-                        return Response::error(404, "diversion source not found");
-                    };
-                    if existing.get("enabled").and_then(serde_json::Value::as_bool) == Some(false)
-                        && !disabled_source_is_supported(existing, path_name.as_ref(), group)
-                    {
-                        return Response::error(
-                            400,
-                            "unsupported disabled diversion source is read-only",
-                        );
-                    }
-                    sources.remove(path_name.as_ref());
-                    let bytes = match serde_json::to_vec(&sources) {
-                        Ok(bytes) => bytes,
-                        Err(error) => return Response::error(500, &error.to_string()),
-                    };
-                    let config_path = match managed_config_path(profile) {
-                        Ok(path) => path,
-                        Err(response) => return response,
-                    };
-                    let catalog_path = PathBuf::from(format!("srs/{}.json", group.key()));
-                    match apply_managed_files(
-                        control,
-                        config_path,
-                        vec![(catalog_path, Some(bytes))],
-                    )
-                    .await
-                    {
-                        Ok(()) => Response::empty(204),
-                        Err(response) => response,
-                    }
-                }
-                DiversionCatalogAction::Unsupported => {
-                    Response::error(405, "diversion source operation is unsupported")
-                }
-                DiversionCatalogAction::List | DiversionCatalogAction::Source(_) => {
-                    Response::method_not_allowed()
-                }
             }
+            if control.is_none() {
+                return Response::error(503, "runtime control is unavailable");
+            }
+            Response::error(400, "native special_groups profile is disabled")
         }
         // Mirrors Go's `http.NotFound` for an unmatched route.
         Route::Unknown => Response::error(404, "404 page not found"),
@@ -3632,6 +3177,7 @@ async fn dispatch_switch(
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // validated for shape only: the managed profile that consumed it was removed
 struct UpstreamConfigMutation {
     plugin_tag: String,
     upstreams: Vec<serde_json::Value>,
@@ -3639,6 +3185,7 @@ struct UpstreamConfigMutation {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)] // validated for shape only: the managed profile that consumed it was removed
 struct GroupMutation {
     #[serde(default)]
     slot: u32,
@@ -3649,87 +3196,16 @@ struct GroupMutation {
     custom_port_only: bool,
 }
 
-fn first_unused_group_slot(groups: &[crate::special_groups::SpecialGroup]) -> Option<u32> {
-    let used = groups
-        .iter()
-        .map(|group| group.slot)
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut candidate = 50;
-    while used.contains(&candidate) {
-        candidate = candidate.checked_add(1)?;
-    }
-    Some(candidate)
-}
-
-async fn apply_managed_files(
-    control: &crate::runtime_snapshot::RuntimeControl,
-    config_path: PathBuf,
-    changes: Vec<(PathBuf, Option<Vec<u8>>)>,
-) -> Result<(), Response> {
-    let candidate = control
-        .compile_managed_candidate(&config_path, changes)
-        .map_err(transaction_error_response)?;
-    control
-        .apply_candidate(candidate)
-        .await
-        .map(|_| ())
-        .map_err(apply_failure_response)
-}
-
-fn managed_config_path(
-    profile: &crate::special_groups::ManagedProfile,
-) -> Result<PathBuf, Response> {
-    profile
-        .config_path
-        .clone()
-        .ok_or_else(|| Response::error(503, "managed root configuration path is unavailable"))
-}
-
-fn transaction_error_response(error: crate::transaction::TransactionError) -> Response {
-    use crate::transaction::TransactionError;
-    match error {
-        TransactionError::Busy(error) => Response::error(409, &error.to_string()),
-        TransactionError::Conflict(path) => Response::error(409, &path.display().to_string()),
-        TransactionError::Invalid(reason) => Response::error(400, &reason),
-        TransactionError::CommitAmbiguous(reason) => Response::error(503, &reason),
-        TransactionError::Io(error) => Response::error(500, &error.to_string()),
-    }
-}
-
-fn apply_failure_response(error: crate::runtime_snapshot::ApplyFailure) -> Response {
-    use crate::runtime_snapshot::ApplyFailure;
-    match error {
-        ApplyFailure::Busy(reason) => Response::error(409, &reason),
-        ApplyFailure::Conflict(path) => Response::error(409, &path.display().to_string()),
-        ApplyFailure::ResourceConflict(reason) => Response::error(409, &reason),
-        ApplyFailure::Invalid(reason) => Response::error(400, &reason),
-        ApplyFailure::Failed(reason) => Response::error(500, &reason),
-        ApplyFailure::Shutdown => Response::error(503, "host is shutting down"),
-        ApplyFailure::RecoveryRequired(reason) => Response::error(503, &reason),
-        ApplyFailure::CommittedCleanup { generation, reason } => Response::error(
-            500,
-            &format!("generation {generation} committed but cleanup failed: {reason}"),
-        ),
-    }
-}
-
 fn ui_operations(
     config: &CompiledConfig,
     switches: Option<&crate::switch_state::SwitchRegistry>,
 ) -> serde_json::Value {
     use crate::rule_sources::Kind;
-    let managed = config.managed_profile.is_some();
-    // Without `native_management`, upstream edits go to the typed settings of
-    // the `aliapi` groups.
-    let settings_upstreams =
-        !managed && config.reload.is_some() && !config.effective_upstreams.is_empty();
+    // Upstream edits go to the typed settings of the `aliapi` groups.
+    let settings_upstreams = config.reload.is_some() && !config.effective_upstreams.is_empty();
     let local = config.domain_sets.iter().any(|set| set.managed.is_some())
-        || config.rule_sources.has_postable_light()
-        || config
-            .managed_profile
-            .as_ref()
-            .is_some_and(|profile| !profile.groups.is_empty());
-    let diversion = managed || config.rule_sources.has_kind(&[Kind::Sd, Kind::Si]);
+        || config.rule_sources.has_postable_light();
+    let diversion = config.rule_sources.has_kind(&[Kind::Sd, Kind::Si]);
     // The UI addresses AdGuard through the fixed `/plugins/adguard/...` path.
     let adguard = config
         .rule_sources
@@ -3763,7 +3239,7 @@ fn ui_operations(
         ),
         (
             "groups.manage",
-            managed || config.standard_groups.is_some(),
+            config.standard_groups.is_some(),
             "专用组编辑需要包含生成配置的文件配置",
         ),
         (
@@ -3773,13 +3249,13 @@ fn ui_operations(
         ),
         (
             "upstreams.manage",
-            managed || settings_upstreams,
-            "上游编辑需要原生托管配置或带 aliapi 的文件配置",
+            settings_upstreams,
+            "上游编辑需要带 aliapi 的文件配置",
         ),
         (
             "rules.diversion",
             diversion,
-            "当前配置没有在线分流规则 provider，且未启用原生托管配置",
+            "当前配置没有在线分流规则 provider",
         ),
         (
             "rules.adguard",
@@ -3899,9 +3375,8 @@ fn capabilities(
     config: &CompiledConfig,
     runtime_snapshot: Option<&crate::runtime_snapshot::RuntimeSnapshot>,
 ) -> serde_json::Value {
-    let enabled = config.managed_profile.is_some() || config.standard_groups.is_some();
-    // Upstream edits are available with the managed profile or, without it,
-    // on a file-backed configuration that has `aliapi` groups.
+    let enabled = config.standard_groups.is_some();
+    // Upstream edits are available on a file-backed configuration that has `aliapi` groups.
     let upstream_edit = enabled || settings_upstreams(config);
     let protocols = if upstream_edit {
         vec!["udp", "tcp", "dot", "doh"]

@@ -9,13 +9,11 @@ use std::path::{Path, PathBuf};
 
 use super::{
     CompileSources, ConfigError, ConfigErrorKind, LogLevel, ROOT_FIELDS, RawMap, RawPlugin,
-    RawValue, apply_managed_definitions, compile_api, compile_log, decode_plugin, expect_map,
-    expect_sequence, expect_string, finish_compile, included_plugins, load_yaml, managed_opt_in,
-    parse_yaml, read_included, reject_generated_include, resolve_relative,
+    RawValue, compile_api, compile_log, decode_plugin, expect_map, expect_sequence, expect_string,
+    finish_compile, included_plugins, load_yaml, parse_yaml, read_included,
+    reject_removed_management, resolve_relative,
 };
 
-const SKIPPED: &str =
-    "SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)";
 const NOTE_FIRST_ERROR: &str =
     "NOTE first-error-per-definition; rerun after fixing to see further gaps";
 const NOTE_SEQUENCE: &str = "NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues";
@@ -103,7 +101,6 @@ impl fmt::Display for CheckReport {
                 item.kind, item.object, item.field, item.value, item.source
             )?;
         }
-        writeln!(formatter, "{SKIPPED}")?;
         writeln!(formatter, "{NOTE_FIRST_ERROR}")?;
         writeln!(formatter, "{NOTE_SEQUENCE}")?;
         writeln!(
@@ -204,6 +201,10 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
         label: path.display().to_string(),
         findings: Vec::new(),
     };
+    if let Err(error) = reject_removed_management(&raw) {
+        checker.global(&error);
+        return Ok(report(checker, 0));
+    }
     let root_value = match expect_map(&raw, "$", "top level must be a mapping") {
         Ok(root) => RawValue::Map(root.clone()),
         Err(error) => {
@@ -231,21 +232,6 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
     let api = root
         .get("api")
         .and_then(|value| checker.tolerate(value.clone(), "$.api", compile_api));
-    let managed = match managed_opt_in(&root_value) {
-        Ok(true) => match crate::special_groups::ManagedProfile::load(base_dir) {
-            Ok(profile) => Some(profile),
-            Err(error) => {
-                checker.global(&error);
-                return Ok(report(checker, 0));
-            }
-        },
-        Ok(false) => None,
-        Err(error) => {
-            checker.global(&error);
-            None
-        }
-    };
-
     let mut decoded = Decoded::default();
     let mut include_paths: Vec<PathBuf> = Vec::new();
     let mut standard = false;
@@ -263,15 +249,9 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
                 }
             };
             include_paths.push(resolve_relative(&expression, base_dir));
-            if managed.is_none() && super::is_standard_include(&expression, base_dir) {
+            if super::is_standard_include(&expression, base_dir) {
                 standard = true;
                 continue;
-            }
-            if let Some(profile) = &managed {
-                if let Err(error) = reject_generated_include(profile, &expression) {
-                    checker.global(&error);
-                    continue;
-                }
             }
             let (path, raw) = read_included(&expression, base_dir, None)?;
             let included = match included_plugins(&path, &raw) {
@@ -301,27 +281,10 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
     decoded.decode(&mut checker, main_plugins, "$", &label, root_dir);
     let Decoded {
         mut plugins,
-        mut origins,
+        origins,
         mut removed,
         undecoded,
     } = decoded;
-    if let Some(profile) = &managed {
-        let before = plugins.len();
-        if let Err(error) = apply_managed_definitions(profile, &mut plugins) {
-            checker.global(&error);
-            return Ok(report(checker, plugins.len() + undecoded));
-        }
-        for plugin in &plugins[before..] {
-            let (source, local) = plugin
-                .source_path
-                .split_once('.')
-                .unwrap_or(("@managed-generated", &plugin.source_path));
-            origins.push(Origin {
-                source: source.to_owned(),
-                local: local.to_owned(),
-            });
-        }
-    }
 
     let total = plugins.len();
     let declared = total + undecoded;
@@ -351,15 +314,7 @@ pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, 
             .filter(|(_, active)| **active)
             .map(|(plugin, _)| plugin.clone())
             .collect();
-        let error = match finish_compile(
-            log,
-            api.clone(),
-            current,
-            managed.clone(),
-            None,
-            None,
-            &sources,
-        ) {
+        let error = match finish_compile(log, api.clone(), current, None, &sources) {
             Ok(compiled) => {
                 let mut finished = report(checker, declared);
                 if let Some(profile) = &compiled.standard_groups {

@@ -1476,8 +1476,8 @@ async fn exercise_ui_swaps(api: SocketAddr, fixture: &Fixture) {
 
 #[test]
 fn capability_matrix_is_complete_and_matches_host_eligibility() {
-    for (managed, local) in [(false, true), (true, true), (false, false), (true, false)] {
-        let fixture = capability_fixture(managed, local);
+    for local in [true, false] {
+        let fixture = capability_fixture(local);
         let host = assembly_for(&fixture);
         host.block_on(async {
             let bound = host.bind_host().await.unwrap();
@@ -1489,8 +1489,8 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                     .unwrap();
             assert_eq!(payload["schema_version"], 1);
             assert_eq!(payload["runtime"], "rust");
-            assert_eq!(payload["special_groups"]["enabled"], managed);
-            assert_eq!(payload["endpoints"]["manual_rules"]["post"], managed);
+            assert_eq!(payload["special_groups"]["enabled"], false);
+            assert_eq!(payload["endpoints"]["manual_rules"]["post"], false);
             let ops = payload["ui_operations"]
                 .as_object()
                 .expect("complete operations");
@@ -1522,7 +1522,7 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                 );
             }
             for id in ["groups.manage", "upstreams.manage", "rules.diversion"] {
-                assert_eq!(ops[id]["supported"], managed, "{id}");
+                assert_eq!(ops[id]["supported"], false, "{id}");
             }
             for id in [
                 "groups.upstreams",
@@ -1577,28 +1577,12 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
     }
 }
 
-fn capability_fixture(managed: bool, local: bool) -> Fixture {
-    if managed || !local {
-        let fixture = Fixture::new("capabilities-managed");
-        fixture.write("config.yaml", &format!("log: {{level: error}}\nnative_management: {{special_groups: true}}\napi: {{http: '127.0.0.1:{}'}}\nplugins:\n  - tag: default_forward\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:9'}}]}}\n  - tag: main_entry\n    type: sequence\n    args: [{{exec: $special_upstream_matcher}}, {{exec: $default_forward}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: main_entry, listen: '127.0.0.1:{}', enable_audit: true}}\n",free_tcp_port(),free_udp_port()));
-        if managed && local {
-            fs::create_dir_all(fixture.root.join("cache")).unwrap();
-            fixture.write(
-                "webinfo/special_upstream_groups.json",
-                r#"[{"slot":50,"name":"actual","listen_port":0,"custom_port_only":false}]"#,
-            );
-            fixture.write("webinfo/upstream_overrides.json", r#"{"special_upstream_50":[{"tag":"fixture","enabled":true,"protocol":"udp","addr":"127.0.0.1:9"}]}"#);
-        }
-        if !managed {
-            let yaml = fixture
-                .read("config.yaml")
-                .replace("special_groups: true", "special_groups: false")
-                .replace("{{exec: $special_upstream_matcher}}, ", "")
-                .replace("{exec: $special_upstream_matcher}, ", "");
-            fixture.write("config.yaml", &yaml);
-        }
-        fixture
-    } else {
+fn capability_fixture(local: bool) -> Fixture {
+    if local {
         fixture("capabilities-unmanaged", free_udp_port(), free_tcp_port())
+    } else {
+        let fixture = Fixture::new("capabilities-no-local-rules");
+        fixture.write("config.yaml", &format!("log: {{level: error}}\napi: {{http: '127.0.0.1:{}'}}\nplugins:\n  - tag: default_forward\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:9'}}]}}\n  - tag: main_entry\n    type: sequence\n    args: [{{exec: $default_forward}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: main_entry, listen: '127.0.0.1:{}', enable_audit: true}}\n",free_tcp_port(),free_udp_port()));
+        fixture
     }
 }

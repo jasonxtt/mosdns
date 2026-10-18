@@ -2,7 +2,7 @@
 
 ## 1. Scope / trigger
 
-Pure-YAML behavior of three plugins available without `native_management`. Loading the runtime override files
+Pure-YAML behavior of three plugins (always available since `native_management` was removed in Phase 6b). Loading the runtime override files
 (`config_overrides.json`, `upstream_overrides.json`) is **not** part of this contract: it is paused until the settings layer
 is redesigned (gap list M1-f). `aliapi` takes its values from YAML only.
 

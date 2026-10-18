@@ -67,15 +67,12 @@ fn bindings(config: &CompiledConfig) -> BTreeSet<BindingKey> {
         .collect()
 }
 struct Control {
-    state_writer: RefCell<Option<Arc<std::sync::Mutex<crate::transaction::ManagedStore>>>>,
     updates: Rc<ListenerMailbox>,
     retiring_bindings: RefCell<BTreeSet<BindingKey>>,
     listeners_drained: Notify,
     current: RefCell<Rc<RuntimeSnapshot>>,
     retired: RefCell<Option<Rc<RuntimeSnapshot>>>,
     preparing: Cell<bool>,
-    // Bounds transaction filesystem work submitted to the owned I/O worker.
-    store_io_gate: Arc<tokio::sync::Semaphore>,
     retirement_gate: tokio::sync::Mutex<()>,
     admitting: Cell<bool>,
     /// Set while only management is paused (a settings apply): DNS keeps
@@ -102,10 +99,6 @@ struct Control {
     signal_stop: Cell<bool>,
     observer: Arc<QueryObserver>,
     shutdown: RefCell<Option<mosdns_upstream_core::TransportCancellation>>,
-    #[cfg(test)]
-    apply_commit_test_gate: RefCell<Option<Arc<ApplyCommitTestGate>>>,
-    #[cfg(test)]
-    apply_marker_test_gate: RefCell<Option<Arc<ApplyCommitTestGate>>>,
 }
 
 pub(crate) struct ManagementLease(RuntimeControl);
@@ -158,30 +151,6 @@ async fn wait_for_shutdown(token: Option<mosdns_upstream_core::TransportCancella
         token.cancelled().await;
     } else {
         std::future::pending::<()>().await;
-    }
-}
-
-#[cfg(test)]
-pub(crate) struct ApplyCommitTestGate {
-    reached: Notify,
-    release: Notify,
-}
-
-#[cfg(test)]
-impl ApplyCommitTestGate {
-    pub(crate) fn new() -> Self {
-        Self {
-            reached: Notify::new(),
-            release: Notify::new(),
-        }
-    }
-
-    pub(crate) async fn wait_until_reached(&self) {
-        self.reached.notified().await;
-    }
-
-    pub(crate) fn release(&self) {
-        self.release.notify_one();
     }
 }
 
@@ -385,20 +354,6 @@ impl Drop for PreparedSnapshot {
     }
 }
 
-#[cfg(test)]
-fn coordinator_crash_boundary(name: &str) {
-    if std::env::var("MOSDNS_TEST_APPLY_CRASH_AFTER").as_deref() != Ok(name) {
-        return;
-    }
-    let ready = std::path::PathBuf::from(
-        std::env::var_os("MOSDNS_TEST_APPLY_READY").expect("crash probe ready path"),
-    );
-    std::fs::write(ready, name).expect("publish apply crash boundary");
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-}
-
 pub(crate) struct AdmittedSnapshot {
     pub snapshot: Rc<RuntimeSnapshot>,
     pub options: HostOptions,
@@ -431,7 +386,6 @@ impl RuntimeControl {
                 ))
             })?;
         let control = Self(Rc::new(Control {
-            state_writer: RefCell::new(None),
             updates: Rc::new(ListenerMailbox {
                 open: Cell::new(false),
                 pending: RefCell::new(None),
@@ -450,7 +404,6 @@ impl RuntimeControl {
             })),
             retired: RefCell::new(None),
             preparing: Cell::new(false),
-            store_io_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             retirement_gate: tokio::sync::Mutex::new(()),
             admitting: Cell::new(true),
             management_only: Cell::new(false),
@@ -467,10 +420,6 @@ impl RuntimeControl {
             signal_stop: Cell::new(false),
             observer,
             shutdown: RefCell::new(None),
-            #[cfg(test)]
-            apply_commit_test_gate: RefCell::new(None),
-            #[cfg(test)]
-            apply_marker_test_gate: RefCell::new(None),
         }));
         control
             .0
@@ -483,100 +432,6 @@ impl RuntimeControl {
 
     pub fn generation(&self) -> u64 {
         self.0.current.borrow().config.generation
-    }
-
-    /// Compiles a complete candidate from the current managed files plus staged writes.
-    pub(crate) fn compile_managed_candidate(
-        &self,
-        config_path: &std::path::Path,
-        changes: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
-    ) -> Result<crate::transaction::CompiledCandidate, crate::transaction::TransactionError> {
-        let writer = self.0.state_writer.borrow().clone().ok_or_else(|| {
-            crate::transaction::TransactionError::Invalid(
-                "managed state writer is not attached".into(),
-            )
-        })?;
-        let writer = writer.try_lock().map_err(|error| {
-            crate::transaction::TransactionError::Busy(std::io::Error::other(error.to_string()))
-        })?;
-        writer.compile_candidate(config_path, changes)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn inject_apply_commit_test_gate(&self, gate: Arc<ApplyCommitTestGate>) {
-        *self.0.apply_commit_test_gate.borrow_mut() = Some(gate);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn inject_apply_marker_test_gate(&self, gate: Arc<ApplyCommitTestGate>) {
-        *self.0.apply_marker_test_gate.borrow_mut() = Some(gate);
-    }
-
-    pub(crate) fn attach_managed_store(
-        &self,
-        store: crate::transaction::ManagedStore,
-    ) -> Result<(), AssemblyError> {
-        let current = self.0.current.borrow();
-        if self.0.state_writer.borrow().is_some()
-            || current
-                .config
-                .managed_profile
-                .as_ref()
-                .is_none_or(|profile| profile.base_dir != store.root())
-        {
-            return Err(AssemblyError::Runtime(
-                "managed writer root or owner mismatch".into(),
-            ));
-        }
-        *self.0.state_writer.borrow_mut() = Some(Arc::new(std::sync::Mutex::new(store)));
-        Ok(())
-    }
-
-    /// Runs durable-store work on the bounded worker without blocking the host runtime.
-    pub(crate) async fn with_managed_store<T, F>(
-        &self,
-        operation: F,
-    ) -> Result<T, crate::transaction::TransactionError>
-    where
-        T: Send + 'static,
-        F: FnOnce(
-                &mut crate::transaction::ManagedStore,
-            ) -> Result<T, crate::transaction::TransactionError>
-            + Send
-            + 'static,
-    {
-        let writer = self.0.state_writer.borrow().clone().ok_or_else(|| {
-            crate::transaction::TransactionError::Invalid(
-                "managed state writer is not attached".into(),
-            )
-        })?;
-        let permit = self
-            .0
-            .store_io_gate
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| {
-                crate::transaction::TransactionError::Invalid("managed I/O worker is closed".into())
-            })?;
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            crate::transaction::blocking_io(move || {
-                let mut writer = writer.lock().map_err(|error| {
-                    crate::transaction::TransactionError::Invalid(format!(
-                        "managed writer lock poisoned: {error}"
-                    ))
-                })?;
-                operation(&mut writer)
-            })
-            .map_err(crate::transaction::TransactionError::Io)?
-        })
-        .await
-        .map_err(|error| {
-            crate::transaction::TransactionError::Io(std::io::Error::other(format!(
-                "managed I/O worker join failed: {error}"
-            )))
-        })?
     }
 
     /// Closes DNS and management admission before a durable transaction.
@@ -761,16 +616,6 @@ impl RuntimeControl {
             ));
         }
         let current = self.0.current.borrow().clone();
-        match (&current.config.managed_profile, &config.managed_profile) {
-            (Some(previous), Some(next)) if previous.base_dir == next.base_dir => {}
-            // Without `native_management` the opt-in must stay absent (a settings apply).
-            (None, None) => {}
-            _ => {
-                return Err(AssemblyError::Runtime(
-                    "managed opt-in and canonical root must remain frozen".into(),
-                ));
-            }
-        }
         match (&current.config.standard_groups, &config.standard_groups) {
             (Some(old), Some(next)) if old.base == next.base => {}
             (None, None) => {}
@@ -1076,54 +921,12 @@ impl RuntimeControl {
         original: ApplyFailure,
         prepared: PreparedSnapshot,
         cache_gate: crate::cache::PolicyTransactionGate,
-        managed: bool,
     ) -> ApplyFailure {
-        if !managed {
-            // Nothing durable was staged: only admission needs to resume.
-            drop(prepared);
-            drop(cache_gate);
-            self.resume_admission();
-            return original;
-        }
-        let recovery = self.with_managed_store(|store| store.recover()).await;
+        // Nothing durable was staged: only admission needs to resume.
         drop(prepared);
         drop(cache_gate);
-        match recovery {
-            Ok(()) => {
-                self.resume_admission();
-                original
-            }
-            Err(error) => {
-                self.enter_recovery_required();
-                self.stop_host();
-                ApplyFailure::RecoveryRequired(format!(
-                    "{original}; rollback/recovery failed: {error}"
-                ))
-            }
-        }
-    }
-
-    fn map_transaction_error(error: crate::transaction::TransactionError) -> ApplyFailure {
-        use crate::transaction::TransactionError;
-        match error {
-            TransactionError::Busy(error) => ApplyFailure::Busy(error.to_string()),
-            TransactionError::Conflict(path) => ApplyFailure::Conflict(path),
-            TransactionError::Invalid(reason) => ApplyFailure::Invalid(reason),
-            TransactionError::CommitAmbiguous(reason) => ApplyFailure::RecoveryRequired(reason),
-            TransactionError::Io(error) => ApplyFailure::Failed(error.to_string()),
-        }
-    }
-
-    /// Applies an already compiled candidate under the host-owned transaction
-    /// lifecycle. The caller's HTTP cancellation is intentionally not passed
-    /// here: only root host shutdown can abort work before the commit marker.
-    /// Applies a compiled candidate under the host-owned transaction lifecycle.
-    pub(crate) async fn apply_candidate(
-        &self,
-        candidate: crate::transaction::CompiledCandidate,
-    ) -> Result<u64, ApplyFailure> {
-        let (config, persistence) = candidate.into_parts();
-        self.apply_config(config, Some(persistence), None).await
+        self.resume_admission();
+        original
     }
 
     /// Recompiles the running configuration with `settings` and publishes it as
@@ -1133,18 +936,7 @@ impl RuntimeControl {
         &self,
         settings: crate::config::settings::Settings,
     ) -> Result<u64, ApplyFailure> {
-        let (reload, managed) = {
-            let current = self.0.current.borrow();
-            (
-                current.config.reload.clone(),
-                current.config.managed_profile.is_some(),
-            )
-        };
-        if managed {
-            return Err(ApplyFailure::Invalid(
-                "settings cannot be changed through the API in native_management mode".into(),
-            ));
-        }
+        let reload = self.0.current.borrow().config.reload.clone();
         let Some(reload) = reload else {
             return Err(ApplyFailure::Invalid(
                 "this configuration was not loaded from a file".into(),
@@ -1162,7 +954,7 @@ impl RuntimeControl {
             derived: DerivedFile::of(&config)?,
             inputs: config.compile_inputs.clone(),
         };
-        self.apply_config(config, None, Some(commit)).await
+        self.apply_config(config, Some(commit)).await
     }
 
     pub(crate) async fn apply_groups(
@@ -1207,30 +999,24 @@ impl RuntimeControl {
             .expect("candidate groups")
             .expected_state = Some(bytes);
         drop(current);
-        self.apply_config(config, None, Some(commit)).await
+        self.apply_config(config, Some(commit)).await
     }
 
-    /// The shared whole-generation publication path. Exactly one of `managed`
-    /// (journaled managed-store commit) and `files` (plain files written at the
-    /// commit point) is given.
+    /// The shared whole-generation publication path; `files` are the plain files written at
+    /// the commit point.
     async fn apply_config(
         &self,
         config: crate::config::CompiledConfig,
-        mut managed: Option<crate::transaction::CandidatePersistence>,
         mut files: Option<FileCommit>,
     ) -> Result<u64, ApplyFailure> {
         let cache_dump_replacements = {
             let current = self.0.current.borrow();
             CacheCatalog::invalidated_dump_paths(&current.config, &config)
         };
-        if let Some(persistence) = &mut managed {
-            persistence.replace_cache_dumps(cache_dump_replacements);
-        } else if let Some(commit) = &mut files {
+        if let Some(commit) = &mut files {
             commit.cache_dumps = cache_dump_replacements;
         }
-        let is_managed = managed.is_some();
-        let old_generation = self.generation();
-        let new_generation = old_generation
+        self.generation()
             .checked_add(1)
             .ok_or_else(|| ApplyFailure::Invalid("generation exhausted".into()))?;
         let prepared = self
@@ -1243,12 +1029,7 @@ impl RuntimeControl {
         self.validate_install(&prepared)
             .map_err(|error| ApplyFailure::Busy(error.to_string()))?;
 
-        let paused = if is_managed {
-            self.pause_admission()
-        } else {
-            self.pause_management()
-        };
-        if let Err(error) = paused {
+        if let Err(error) = self.pause_management() {
             drop(prepared);
             return Err(ApplyFailure::Busy(error.to_string()));
         }
@@ -1314,93 +1095,30 @@ impl RuntimeControl {
             return Err(ApplyFailure::Shutdown);
         }
         drop(old_cache);
-        if let Some(persistence) = managed.take() {
-            let stage = self
-                .with_managed_store(move |store| {
-                    store.prepare_candidate(old_generation, new_generation, &persistence)
-                })
-                .await;
-            if let Err(error) = stage {
-                return Err(self
-                    .abort_precommit(
-                        Self::map_transaction_error(error),
-                        prepared,
-                        cache_gate,
-                        true,
-                    )
-                    .await);
-            }
-        }
         if self.shutdown_requested() {
             return Err(self
-                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate, is_managed)
+                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate)
                 .await);
         }
 
-        if is_managed {
-            let replacement = self
-                .with_managed_store(|store| store.replace_prepared())
-                .await;
-            if let Err(error) = replacement {
-                return Err(self
-                    .abort_precommit(
-                        Self::map_transaction_error(error),
-                        prepared,
-                        cache_gate,
-                        true,
-                    )
-                    .await);
-            }
-        }
         if self.shutdown_requested() {
             return Err(self
-                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate, is_managed)
+                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate)
                 .await);
         }
         if let Err(error) = self.validate_install(&prepared) {
             return Err(self
-                .abort_precommit(
-                    ApplyFailure::Busy(error.to_string()),
-                    prepared,
-                    cache_gate,
-                    is_managed,
-                )
+                .abort_precommit(ApplyFailure::Busy(error.to_string()), prepared, cache_gate)
                 .await);
         }
 
-        #[cfg(test)]
-        let test_gate = self.0.apply_commit_test_gate.borrow_mut().take();
-        #[cfg(test)]
-        if let Some(gate) = test_gate {
-            gate.reached.notify_one();
-            gate.release.notified().await;
-        }
         if self.shutdown_requested() {
             return Err(self
-                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate, is_managed)
+                .abort_precommit(ApplyFailure::Shutdown, prepared, cache_gate)
                 .await);
         }
 
-        if is_managed {
-            let marker = self
-                .with_managed_store(|store| store.mark_committed())
-                .await;
-            if let Err(error) = marker {
-                let failure = Self::map_transaction_error(error);
-                if let ApplyFailure::RecoveryRequired(reason) = failure {
-                    self.enter_recovery_required();
-                    self.stop_host();
-                    drop(cache_gate);
-                    drop(prepared);
-                    return Err(ApplyFailure::RecoveryRequired(format!(
-                        "commit marker outcome is ambiguous: {reason}"
-                    )));
-                }
-                return Err(self
-                    .abort_precommit(failure, prepared, cache_gate, true)
-                    .await);
-            }
-        } else if let Some(commit) = files.take() {
+        if let Some(commit) = files.take() {
             // The commit point of a settings apply: the invalidated cache dumps,
             // then the settings file. A failure here publishes nothing.
             let outcome = tokio::task::spawn_blocking(move || commit.write())
@@ -1413,25 +1131,11 @@ impl RuntimeControl {
                     self.stop_host();
                     return Err(failure);
                 }
-                return Err(self
-                    .abort_precommit(failure, prepared, cache_gate, false)
-                    .await);
+                return Err(self.abort_precommit(failure, prepared, cache_gate).await);
             }
         }
 
-        #[cfg(test)]
-        coordinator_crash_boundary("marker");
-
-        #[cfg(test)]
-        let marker_test_gate = self.0.apply_marker_test_gate.borrow_mut().take();
-        #[cfg(test)]
-        if let Some(gate) = marker_test_gate {
-            gate.reached.notify_one();
-            gate.release.notified().await;
-        }
-
         // A panic here is an invariant failure after the point of no return.
-        // Keep the journal and stop; startup will complete the committed state.
         let publication = catch_unwind(AssertUnwindSafe(|| self.install_committed(prepared)));
         let (generation, listener_published) = match publication {
             Ok(value) => value,
@@ -1452,9 +1156,6 @@ impl RuntimeControl {
                 "listener supervisor closed after the durable marker".into(),
             ));
         }
-
-        #[cfg(test)]
-        coordinator_crash_boundary("swap");
 
         self.resume_admission();
         drop(cache_gate);
@@ -1493,25 +1194,6 @@ impl RuntimeControl {
             }
         });
 
-        #[cfg(test)]
-        coordinator_crash_boundary("retirement");
-
-        if is_managed {
-            if let Err(error) = self
-                .with_managed_store(|store| store.finish_retirement())
-                .await
-            {
-                self.enter_recovery_required();
-                self.stop_host();
-                return Err(ApplyFailure::CommittedCleanup {
-                    generation,
-                    reason: error.to_string(),
-                });
-            }
-        }
-
-        #[cfg(test)]
-        coordinator_crash_boundary("cleanup");
         Ok(generation)
     }
 
@@ -1641,1299 +1323,7 @@ impl RuntimeControl {
 #[cfg(test)]
 mod admission_tests {
     use std::rc::Rc;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    static MANAGED_FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
-
-    fn managed_fixture() -> (crate::HostAssembly, std::path::PathBuf) {
-        let root = std::env::temp_dir().join(format!(
-            "native-managed-apply-{}-{}",
-            std::process::id(),
-            MANAGED_FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(root.join("webinfo")).unwrap();
-        std::fs::create_dir_all(root.join("cache")).unwrap();
-        let path = root.join("config.yaml");
-        std::fs::write(
-            &path,
-            include_str!("../../../docs/rust/examples/native-managed-empty/config.yaml"),
-        )
-        .unwrap();
-        std::fs::write(root.join("webinfo/special_upstream_groups.json"), b"[]\n").unwrap();
-        std::fs::write(root.join("webinfo/upstream_overrides.json"), b"{}\n").unwrap();
-        (crate::HostAssembly::from_config_file(&path).unwrap(), root)
-    }
-
-    fn managed_cache_fixture() -> (crate::HostAssembly, std::path::PathBuf) {
-        managed_cache_fixture_with(15455, 15456, 15457, 15458, 0, None)
-    }
-
-    fn managed_cache_fixture_with(
-        default_upstream: u16,
-        sibling_upstream: u16,
-        main_listener: u16,
-        sibling_listener: u16,
-        group_listener: u16,
-        group_upstream: Option<u16>,
-    ) -> (crate::HostAssembly, std::path::PathBuf) {
-        let root = std::env::temp_dir().join(format!(
-            "native-managed-cache-{}-{}",
-            std::process::id(),
-            MANAGED_FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(root.join("webinfo")).unwrap();
-        std::fs::create_dir_all(root.join("cache")).unwrap();
-        std::fs::create_dir_all(root.join("rule")).unwrap();
-        std::fs::write(
-            root.join("webinfo/special_upstream_groups.json"),
-            format!(r#"[{{"slot":50,"name":"managed","listen_port":{group_listener}}}]"#)
-                .into_bytes(),
-        )
-        .unwrap();
-        let overrides = group_upstream.map_or_else(
-            || "{}\n".to_owned(),
-            |port| {
-                format!(
-                    r#"{{"special_upstream_50":[{{"tag":"local","enabled":true,"protocol":"udp","addr":"127.0.0.1:{port}"}}]}}"#
-                )
-            },
-        );
-        std::fs::write(root.join("webinfo/upstream_overrides.json"), overrides).unwrap();
-        std::fs::write(root.join("rule/special_50.txt"), b"full:example.test\n").unwrap();
-        let path = root.join("config.yaml");
-        let yaml = r#"log: {level: error}
-native_management: {special_groups: true}
-plugins:
-  - tag: default_upstream
-    type: forward
-    args: {upstreams: [{addr: "udp://127.0.0.1:15455"}]}
-  - tag: cache_all
-    type: cache
-    args: {size: 64, lazy_cache_ttl: 0, dump_file: "cache/cache_all.dump"}
-  - tag: sibling_cache
-    type: cache
-    args: {size: 64, lazy_cache_ttl: 0, dump_file: "cache/sibling.dump"}
-  - tag: sibling_upstream
-    type: forward
-    args: {upstreams: [{addr: "udp://127.0.0.1:15456"}]}
-  - tag: main_entry
-    type: sequence
-    args: [{exec: $cache_all}, {exec: 'cache 64'}, {exec: $special_upstream_matcher}, {exec: $default_upstream}]
-  - tag: sibling_entry
-    type: sequence
-    args: [{exec: $sibling_cache}, {exec: $sibling_upstream}]
-  - tag: main_udp
-    type: udp_server
-    args: {entry: main_entry, listen: "127.0.0.1:15457", enable_audit: false}
-  - tag: sibling_udp
-    type: udp_server
-    args: {entry: sibling_entry, listen: "127.0.0.1:15458", enable_audit: false}
-"#
-        .replace("127.0.0.1:15455", &format!("127.0.0.1:{default_upstream}"))
-        .replace("127.0.0.1:15456", &format!("127.0.0.1:{sibling_upstream}"))
-        .replace("127.0.0.1:15457", &format!("127.0.0.1:{main_listener}"))
-        .replace("127.0.0.1:15458", &format!("127.0.0.1:{sibling_listener}"));
-        std::fs::write(&path, yaml).unwrap();
-        (crate::HostAssembly::from_config_file(&path).unwrap(), root)
-    }
-
-    fn seed_cache(adapter: &crate::cache::NativeCacheAdapter, name: &str) {
-        let wire = cache_query(name);
-        let response = cache_response(&wire);
-        assert!(
-            adapter
-                .begin_store(&wire)
-                .unwrap()
-                .unwrap()
-                .publish(&response)
-                .unwrap()
-        );
-    }
-
-    fn cache_query(name: &str) -> Vec<u8> {
-        let mut query = hickory_proto::op::Message::new();
-        query
-            .set_id(71)
-            .set_message_type(hickory_proto::op::MessageType::Query)
-            .add_query(hickory_proto::op::Query::query(
-                hickory_proto::rr::Name::from_ascii(name).unwrap(),
-                hickory_proto::rr::RecordType::A,
-            ));
-        query.to_vec().unwrap()
-    }
-
-    fn cache_response(wire: &[u8]) -> Vec<u8> {
-        let (header, question) = mosdns_dns_core::parse_query(wire).unwrap();
-        mosdns_dns_core::synthesize_response(&header, &question, 0).unwrap()
-    }
-
-    fn start_controlled_peer(
-        socket: std::net::UdpSocket,
-        rcode: u8,
-        requests: std::sync::Arc<AtomicUsize>,
-        stop: mosdns_upstream_core::TransportCancellation,
-    ) -> tokio::task::JoinHandle<()> {
-        socket.set_nonblocking(true).unwrap();
-        let socket = tokio::net::UdpSocket::from_std(socket).unwrap();
-        tokio::task::spawn_local(async move {
-            let mut wire = [0; 512];
-            loop {
-                let received = tokio::select! {
-                    () = stop.cancelled() => break,
-                    received = socket.recv_from(&mut wire) => received,
-                };
-                let (length, address) = received.unwrap();
-                requests.fetch_add(1, Ordering::Relaxed);
-                let (header, question) = mosdns_dns_core::parse_query(&wire[..length]).unwrap();
-                let response =
-                    mosdns_dns_core::synthesize_response(&header, &question, rcode).unwrap();
-                socket.send_to(&response, address).await.unwrap();
-            }
-        })
-    }
-
-    async fn dns_exchange(socket: &tokio::net::UdpSocket, port: u16, query: &[u8]) -> u16 {
-        socket.send_to(query, ("127.0.0.1", port)).await.unwrap();
-        let mut response = [0; 512];
-        let (_length, _) = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            socket.recv_from(&mut response),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        response[3] as u16 & 0x0f
-    }
-
-    #[test]
-    fn managed_policy_change_replaces_only_affected_cache_owners() {
-        let (host, root) = managed_cache_fixture();
-        let control = host.control();
-        let old = control.view();
-        let id = |config: &crate::config::CompiledConfig, tag: &str| {
-            config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id
-        };
-        let all_id = id(&old.config, "cache_all");
-        let sibling_id = id(&old.config, "sibling_cache");
-        let group_id = id(&old.config, "cache_special_50");
-        let quick_tag = old
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.kind == crate::config::CacheKind::Quick)
-            .unwrap()
-            .tag
-            .clone();
-        let all = old.cache.get(all_id).unwrap();
-        let sibling = old.cache.get(sibling_id).unwrap();
-        let group = old.cache.get(group_id).unwrap();
-        seed_cache(all, "example.test.");
-        seed_cache(sibling, "sibling.test.");
-        seed_cache(group, "example.test.");
-
-        let candidate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("rule/special_50.txt"),
-                    Some(b"full:other.test\n".to_vec()),
-                )],
-            )
-            .unwrap();
-        let (config, _persistence) = candidate.into_parts();
-        let prepared = control.prepare(config).unwrap();
-        let next = prepared.snapshot.as_ref().unwrap();
-        let next_all = next.cache.get(id(&next.config, "cache_all")).unwrap();
-        let next_sibling = next.cache.get(id(&next.config, "sibling_cache")).unwrap();
-        let next_group = next
-            .cache
-            .get(id(&next.config, "cache_special_50"))
-            .unwrap();
-        let next_quick = next.cache.get(id(&next.config, &quick_tag)).unwrap();
-
-        assert!(
-            next_all.is_empty(),
-            "the router-wrapping cache is policy-dependent"
-        );
-        assert_eq!(
-            next_sibling.len(),
-            1,
-            "the disjoint sibling owner must survive"
-        );
-        assert!(
-            next_group.is_empty(),
-            "the changed group route closure must be fenced"
-        );
-        assert!(
-            next_quick.is_empty(),
-            "quick caches depend on their downstream policy closure"
-        );
-        drop(prepared);
-        drop(old);
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_group_upstream_edit_invalidates_its_cache_closure_only() {
-        let (host, root) = managed_cache_fixture();
-        let control = host.control();
-        let old = control.view();
-        let quick_tag = old
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.kind == crate::config::CacheKind::Quick)
-            .unwrap()
-            .tag
-            .clone();
-        for tag in [
-            "cache_all",
-            "sibling_cache",
-            "cache_special_50",
-            quick_tag.as_str(),
-        ] {
-            let id = old
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id;
-            seed_cache(old.cache.get(id).unwrap(), "example.test.");
-        }
-
-        let candidate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                managed_changes("127.0.0.1:15459"),
-            )
-            .unwrap();
-        let (config, _persistence) = candidate.into_parts();
-        let prepared = control.prepare(config).unwrap();
-        let next = prepared.snapshot.as_ref().unwrap();
-        for tag in ["cache_all", "cache_special_50", quick_tag.as_str()] {
-            let id = next
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id;
-            assert!(next.cache.get(id).unwrap().is_empty(), "{tag}");
-        }
-        let sibling_id = next
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.tag == "sibling_cache")
-            .unwrap()
-            .id;
-        assert_eq!(next.cache.get(sibling_id).unwrap().len(), 1);
-
-        drop(prepared);
-        host.block_on(control.close()).unwrap();
-        drop(old);
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn custom_port_only_membership_change_invalidates_group_and_ancestor_caches() {
-        let (host, root) = managed_cache_fixture_with(15455, 15456, 15457, 15458, 15575, None);
-        let control = host.control();
-        let old = control.view();
-        for tag in ["cache_all", "sibling_cache", "cache_special_50"] {
-            let id = old
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id;
-            seed_cache(old.cache.get(id).unwrap(), "example.test.");
-        }
-
-        let candidate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("webinfo/special_upstream_groups.json"),
-                    Some(br#"[{"slot":50,"name":"managed","listen_port":15575,"custom_port_only":true}]"#.to_vec()),
-                )],
-            )
-            .unwrap();
-        let (config, _persistence) = candidate.into_parts();
-        let prepared = control.prepare(config).unwrap();
-        let next = prepared.snapshot.as_ref().unwrap();
-        for tag in ["cache_all", "cache_special_50"] {
-            let id = next
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id;
-            assert!(next.cache.get(id).unwrap().is_empty(), "{tag}");
-        }
-        let sibling_id = next
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.tag == "sibling_cache")
-            .unwrap()
-            .id;
-        assert_eq!(next.cache.get(sibling_id).unwrap().len(), 1);
-
-        drop(prepared);
-        host.block_on(control.close()).unwrap();
-        drop(old);
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_policy_commit_replaces_affected_dumps_and_keeps_sibling_dump() {
-        let (host, root) = managed_cache_fixture();
-        let control = host.control();
-        let old = control.view();
-        let cache = |tag: &str| {
-            let id = old
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id;
-            old.cache.get(id).unwrap()
-        };
-        let all = cache("cache_all");
-        let sibling = cache("sibling_cache");
-        let group = cache("cache_special_50");
-        seed_cache(all, "example.test.");
-        seed_cache(sibling, "sibling.test.");
-        seed_cache(group, "example.test.");
-        host.block_on(all.save()).unwrap();
-        host.block_on(sibling.save()).unwrap();
-        host.block_on(group.save()).unwrap();
-        let sibling_dump = std::fs::read(root.join("cache/sibling.dump")).unwrap();
-        assert_eq!(crate::cache_dump::decode(&sibling_dump).unwrap().len(), 1);
-
-        let candidate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("rule/special_50.txt"),
-                    Some(b"full:other.test\n".to_vec()),
-                )],
-            )
-            .unwrap();
-        host.block_on(control.apply_candidate(candidate)).unwrap();
-
-        for path in ["cache/cache_all.dump", "cache/cache_special_50.dump"] {
-            let bytes = std::fs::read(root.join(path)).unwrap();
-            assert!(
-                crate::cache_dump::decode(&bytes).unwrap().is_empty(),
-                "impacted durable cache must be replaced with a valid empty dump: {path}"
-            );
-        }
-        assert_eq!(
-            std::fs::read(root.join("cache/sibling.dump")).unwrap(),
-            sibling_dump,
-            "a disjoint owner dump must remain byte-for-byte unchanged"
-        );
-        host.block_on(control.close()).unwrap();
-        drop(old);
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_policy_commit_fences_changed_misses_but_keeps_disjoint_miss() {
-        let (host, root) = managed_cache_fixture();
-        let control = host.control();
-        let old = control.view();
-        let cache = |tag: &str| {
-            let id = old
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == tag)
-                .unwrap()
-                .id;
-            old.cache.get(id).unwrap()
-        };
-        let all_query = cache_query("example.test.");
-        let sibling_query = cache_query("sibling.test.");
-        let group_query = cache_query("example.test.");
-        let all_miss = cache("cache_all").begin_store(&all_query).unwrap().unwrap();
-        let sibling_miss = cache("sibling_cache")
-            .begin_store(&sibling_query)
-            .unwrap()
-            .unwrap();
-        let group_miss = cache("cache_special_50")
-            .begin_store(&group_query)
-            .unwrap()
-            .unwrap();
-        let candidate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("rule/special_50.txt"),
-                    Some(b"full:other.test\n".to_vec()),
-                )],
-            )
-            .unwrap();
-        host.block_on(control.apply_candidate(candidate)).unwrap();
-
-        assert!(!all_miss.publish(&cache_response(&all_query)).unwrap());
-        assert!(!group_miss.publish(&cache_response(&group_query)).unwrap());
-        assert!(
-            sibling_miss
-                .publish(&cache_response(&sibling_query))
-                .unwrap()
-        );
-        host.block_on(control.close()).unwrap();
-        drop(old);
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_rule_edit_changes_real_dns_and_preserves_disjoint_warm_answer() {
-        let group_socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let default_socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let sibling_socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let group_port = group_socket.local_addr().unwrap().port();
-        let default_port = default_socket.local_addr().unwrap().port();
-        let sibling_port = sibling_socket.local_addr().unwrap().port();
-        let main_port = free_pair();
-        let sibling_listener = free_pair();
-        let (host, root) = managed_cache_fixture_with(
-            default_port,
-            sibling_port,
-            main_port,
-            sibling_listener,
-            0,
-            Some(group_port),
-        );
-
-        host.block_on(async {
-            let group_requests = std::sync::Arc::new(AtomicUsize::new(0));
-            let default_requests = std::sync::Arc::new(AtomicUsize::new(0));
-            let sibling_requests = std::sync::Arc::new(AtomicUsize::new(0));
-            let peer_stop = mosdns_upstream_core::TransportCancellation::new();
-            let group_task = start_controlled_peer(
-                group_socket,
-                0,
-                group_requests.clone(),
-                peer_stop.child_token(),
-            );
-            let default_task = start_controlled_peer(
-                default_socket,
-                3,
-                default_requests.clone(),
-                peer_stop.child_token(),
-            );
-            let sibling_task = start_controlled_peer(
-                sibling_socket,
-                0,
-                sibling_requests.clone(),
-                peer_stop.child_token(),
-            );
-            let bound = host.bind_host().await.unwrap();
-            let stop = mosdns_upstream_core::TransportCancellation::new();
-            let serving = tokio::task::spawn_local(bound.serve(stop.clone()));
-            let client = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-            let group_query = cache_query("example.test.");
-            let sibling_query = cache_query("sibling.test.");
-
-            assert_eq!(dns_exchange(&client, main_port, &group_query).await, 0);
-            assert_eq!(dns_exchange(&client, main_port, &group_query).await, 0);
-            assert_eq!(group_requests.load(Ordering::Relaxed), 1);
-            assert_eq!(
-                dns_exchange(&client, sibling_listener, &sibling_query).await,
-                0
-            );
-            assert_eq!(
-                dns_exchange(&client, sibling_listener, &sibling_query).await,
-                0
-            );
-            assert_eq!(sibling_requests.load(Ordering::Relaxed), 1);
-
-            let candidate = host
-                .control()
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    vec![(
-                        std::path::PathBuf::from("rule/special_50.txt"),
-                        Some(b"full:other.test\n".to_vec()),
-                    )],
-                )
-                .unwrap();
-            host.control().apply_candidate(candidate).await.unwrap();
-
-            assert_eq!(dns_exchange(&client, main_port, &group_query).await, 3);
-            assert_eq!(default_requests.load(Ordering::Relaxed), 1);
-            assert_eq!(
-                dns_exchange(&client, sibling_listener, &sibling_query).await,
-                0
-            );
-            assert_eq!(sibling_requests.load(Ordering::Relaxed), 1);
-
-            stop.cancel();
-            serving.await.unwrap().unwrap();
-            peer_stop.cancel();
-            group_task.await.unwrap();
-            default_task.await.unwrap();
-            sibling_task.await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn group_rename_and_port_only_change_retain_wire_cache_owners() {
-        let old_listener = free_pair();
-        let new_listener = loop {
-            let candidate = free_pair();
-            if candidate != old_listener {
-                break candidate;
-            }
-        };
-        let (host, root) =
-            managed_cache_fixture_with(15455, 15456, 15457, 15458, old_listener, None);
-        let control = host.control();
-        let old = control.view();
-        let quick_tag = old
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.kind == crate::config::CacheKind::Quick)
-            .unwrap()
-            .tag
-            .clone();
-        for cache in [
-            "cache_all",
-            "sibling_cache",
-            "cache_special_50",
-            quick_tag.as_str(),
-        ] {
-            let id = old
-                .config
-                .caches
-                .iter()
-                .find(|item| item.tag == cache)
-                .unwrap()
-                .id;
-            seed_cache(old.cache.get(id).unwrap(), "example.test.");
-        }
-
-        let candidate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("webinfo/special_upstream_groups.json"),
-                    Some(
-                        format!(
-                            r#"[{{"slot":50,"name":"renamed","listen_port":{}}}]"#,
-                            new_listener
-                        )
-                        .into_bytes(),
-                    ),
-                )],
-            )
-            .unwrap();
-        let (config, _persistence) = candidate.into_parts();
-        let prepared = control.prepare(config).unwrap();
-        let next = prepared.snapshot.as_ref().unwrap();
-        for tag in ["cache_all", "sibling_cache", "cache_special_50"] {
-            let id = next
-                .config
-                .caches
-                .iter()
-                .find(|item| item.tag == tag)
-                .unwrap()
-                .id;
-            assert_eq!(
-                next.cache.get(id).unwrap().len(),
-                1,
-                "display rename and listener port do not change wire cache policy: {tag}"
-            );
-        }
-        drop(prepared);
-        host.block_on(control.close()).unwrap();
-        drop(old);
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn deleting_and_reusing_a_slot_does_not_reimport_its_old_cache_dump() {
-        let (host, root) = managed_cache_fixture();
-        let control = host.control();
-        let old = control.view();
-        let group_id = old
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.tag == "cache_special_50")
-            .unwrap()
-            .id;
-        let old_group_cache = old.cache.get(group_id).unwrap();
-        seed_cache(old_group_cache, "example.test.");
-        host.block_on(old_group_cache.save()).unwrap();
-        assert_eq!(
-            crate::cache_dump::decode(
-                &std::fs::read(root.join("cache/cache_special_50.dump")).unwrap()
-            )
-            .unwrap()
-            .len(),
-            1
-        );
-
-        let delete = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("webinfo/special_upstream_groups.json"),
-                    Some(b"[]\n".to_vec()),
-                )],
-            )
-            .unwrap();
-        host.block_on(control.apply_candidate(delete)).unwrap();
-        assert!(
-            crate::cache_dump::decode(
-                &std::fs::read(root.join("cache/cache_special_50.dump")).unwrap()
-            )
-            .unwrap()
-            .is_empty()
-        );
-
-        let recreate = control
-            .compile_managed_candidate(
-                &root.join("config.yaml"),
-                vec![(
-                    std::path::PathBuf::from("webinfo/special_upstream_groups.json"),
-                    Some(br#"[{"slot":50,"name":"managed","listen_port":0}]"#.to_vec()),
-                )],
-            )
-            .unwrap();
-        host.block_on(control.apply_candidate(recreate)).unwrap();
-        let current = control.view();
-        let current_group = current
-            .config
-            .caches
-            .iter()
-            .find(|cache| cache.tag == "cache_special_50")
-            .unwrap()
-            .id;
-        assert!(current.cache.get(current_group).unwrap().is_empty());
-        host.block_on(control.close()).unwrap();
-        drop(current);
-        drop(old);
-        drop(control);
-        drop(host);
-
-        let restarted = crate::HostAssembly::from_config_file(&root.join("config.yaml")).unwrap();
-        let _bound = restarted.block_on(restarted.bind_host()).unwrap();
-        let current_group = restarted
-            .config()
-            .caches
-            .iter()
-            .find(|cache| cache.tag == "cache_special_50")
-            .unwrap()
-            .id;
-        assert!(restarted.cache().get(current_group).unwrap().is_empty());
-        drop(_bound);
-        restarted.block_on(restarted.control().close()).unwrap();
-        drop(restarted);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    fn managed_changes(address: &str) -> Vec<(std::path::PathBuf, Option<Vec<u8>>)> {
-        vec![
-            (
-                std::path::PathBuf::from("webinfo/special_upstream_groups.json"),
-                Some(br#"[{"slot":50,"name":"managed","listen_port":0}]"#.to_vec()),
-            ),
-            (
-                std::path::PathBuf::from("webinfo/upstream_overrides.json"),
-                Some(
-                    format!(
-                        r#"{{"special_upstream_50":[{{"tag":"local","enabled":true,"protocol":"udp","addr":"{address}"}}]}}"#
-                    )
-                    .into_bytes(),
-                ),
-            ),
-        ]
-    }
-
-    #[test]
-    fn managed_apply_replaces_files_swaps_runtime_and_cleans_after_retirement() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-            let generation = control.apply_candidate(candidate).await.unwrap();
-            assert_eq!(generation, 1);
-            assert_eq!(control.generation(), 1);
-            assert_eq!(
-                control
-                    .view()
-                    .config
-                    .managed_profile
-                    .as_ref()
-                    .unwrap()
-                    .groups[0]
-                    .name,
-                "managed"
-            );
-            assert!(root.join("sub_config/special_groups.yaml").is_file());
-            assert!(
-                !crate::transaction::ManagedStore::has_pending(&root),
-                "journal cleanup follows retirement"
-            );
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_apply_conflict_keeps_external_edit_and_reopens_old_generation() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let initial = control.view();
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-            let external = br#"{"external":true}"#;
-            std::fs::write(root.join("webinfo/upstream_overrides.json"), external).unwrap();
-            let error = control.apply_candidate(candidate).await.unwrap_err();
-            assert!(matches!(error, super::ApplyFailure::Conflict(_)));
-            assert_eq!(control.generation(), 0);
-            assert!(Rc::ptr_eq(&initial, &control.view()));
-            assert!(control.admission_open());
-            assert_eq!(
-                std::fs::read(root.join("webinfo/upstream_overrides.json")).unwrap(),
-                external
-            );
-            assert!(!crate::transaction::ManagedStore::has_pending(&root));
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_cache_apply_conflict_preserves_memory_dumps_and_admission() {
-        let (host, root) = managed_cache_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let initial = control.view();
-            let adapter = |tag: &str| {
-                let id = initial
-                    .config
-                    .caches
-                    .iter()
-                    .find(|cache| cache.tag == tag)
-                    .unwrap()
-                    .id;
-                initial.cache.get(id).unwrap().clone()
-            };
-            let all = adapter("cache_all");
-            let sibling = adapter("sibling_cache");
-            let group = adapter("cache_special_50");
-            seed_cache(&all, "example.test.");
-            seed_cache(&sibling, "sibling.test.");
-            seed_cache(&group, "example.test.");
-            all.save().await.unwrap();
-            sibling.save().await.unwrap();
-            group.save().await.unwrap();
-            let old_dumps = [
-                "cache/cache_all.dump",
-                "cache/sibling.dump",
-                "cache/cache_special_50.dump",
-            ]
-            .map(|path| std::fs::read(root.join(path)).unwrap());
-            let pending = all
-                .begin_store(&cache_query("pending.example."))
-                .unwrap()
-                .unwrap();
-
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    vec![(
-                        std::path::PathBuf::from("rule/special_50.txt"),
-                        Some(b"full:other.test\n".to_vec()),
-                    )],
-                )
-                .unwrap();
-            let external = b"full:external.test\n";
-            std::fs::write(root.join("rule/special_50.txt"), external).unwrap();
-
-            assert!(matches!(
-                control.apply_candidate(candidate).await,
-                Err(super::ApplyFailure::Conflict(_))
-            ));
-            assert_eq!(control.generation(), 0);
-            assert!(Rc::ptr_eq(&initial, &control.view()));
-            assert!(control.admission_open());
-            assert_eq!(all.len(), 1);
-            assert_eq!(sibling.len(), 1);
-            assert_eq!(group.len(), 1);
-            for (path, expected) in [
-                "cache/cache_all.dump",
-                "cache/sibling.dump",
-                "cache/cache_special_50.dump",
-            ]
-            .into_iter()
-            .zip(old_dumps)
-            {
-                assert_eq!(std::fs::read(root.join(path)).unwrap(), expected, "{path}");
-            }
-            assert_eq!(
-                std::fs::read(root.join("rule/special_50.txt")).unwrap(),
-                external
-            );
-            assert!(!crate::transaction::ManagedStore::has_pending(&root));
-            assert!(
-                pending
-                    .publish(&cache_response(&cache_query("pending.example.")))
-                    .unwrap()
-            );
-
-            control.close().await.unwrap();
-            drop(initial);
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn managed_apply_closes_admission_then_waits_for_existing_management_write() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-            let lease = control.begin_management_mutation().unwrap();
-            let task_control = control.clone();
-            let apply =
-                tokio::task::spawn_local(
-                    async move { task_control.apply_candidate(candidate).await },
-                );
-            tokio::task::yield_now().await;
-
-            assert!(!control.admission_open());
-            assert_eq!(control.generation(), 0);
-            assert!(
-                !crate::transaction::ManagedStore::has_pending(&root),
-                "persistent preparation waits until admitted management writes drain"
-            );
-            drop(lease);
-            assert_eq!(apply.await.unwrap().unwrap(), 1);
-            assert_eq!(control.generation(), 1);
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn host_shutdown_before_marker_rolls_back_and_does_not_reopen_admission() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let shutdown = mosdns_upstream_core::TransportCancellation::new();
-            let updates = control.start(&shutdown);
-            let gate = std::sync::Arc::new(super::ApplyCommitTestGate::new());
-            control.inject_apply_commit_test_gate(gate.clone());
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-            let task_control = control.clone();
-            let apply =
-                tokio::task::spawn_local(
-                    async move { task_control.apply_candidate(candidate).await },
-                );
-            gate.wait_until_reached().await;
-            assert_eq!(control.generation(), 0);
-            assert!(!control.admission_open());
-            assert_ne!(
-                std::fs::read(root.join("webinfo/special_upstream_groups.json")).unwrap(),
-                b"[]\n",
-                "candidate files are replaced before the marker"
-            );
-            shutdown.cancel();
-            gate.release();
-            assert!(matches!(
-                apply.await.unwrap(),
-                Err(super::ApplyFailure::Shutdown)
-            ));
-            assert_eq!(control.generation(), 0);
-            assert!(!control.admission_open());
-            assert_eq!(
-                std::fs::read(root.join("webinfo/special_upstream_groups.json")).unwrap(),
-                b"[]\n"
-            );
-            assert!(!crate::transaction::ManagedStore::has_pending(&root));
-            drop(updates);
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rollback_failure_enters_recovery_required_and_retains_journal() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let shutdown = mosdns_upstream_core::TransportCancellation::new();
-            let updates = control.start(&shutdown);
-            let gate = std::sync::Arc::new(super::ApplyCommitTestGate::new());
-            control.inject_apply_commit_test_gate(gate.clone());
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-            let task_control = control.clone();
-            let apply =
-                tokio::task::spawn_local(
-                    async move { task_control.apply_candidate(candidate).await },
-                );
-            gate.wait_until_reached().await;
-
-            let journal = root.join("webinfo/native_management.transaction");
-            let backup = std::fs::read_dir(&journal)
-                .unwrap()
-                .map(Result::unwrap)
-                .map(|entry| entry.path())
-                .find(|path| path.extension().is_some_and(|extension| extension == "old"))
-                .expect("transaction contains an old-state backup");
-            std::fs::write(&backup, b"tampered rollback artifact").unwrap();
-            shutdown.cancel();
-            gate.release();
-
-            assert!(matches!(
-                apply.await.unwrap(),
-                Err(super::ApplyFailure::RecoveryRequired(_))
-            ));
-            assert!(control.recovery_required());
-            assert!(!control.admission_open());
-            assert_eq!(control.generation(), 0);
-            assert!(crate::transaction::ManagedStore::has_pending(&root));
-            drop(updates);
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn committed_apply_finishes_after_client_disconnect_and_host_shutdown() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let shutdown = mosdns_upstream_core::TransportCancellation::new();
-            let updates = control.start(&shutdown);
-            let gate = std::sync::Arc::new(super::ApplyCommitTestGate::new());
-            control.inject_apply_marker_test_gate(gate.clone());
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let mut client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
-                .await
-                .unwrap();
-            let (server, _) = listener.accept().await.unwrap();
-            let (reader, _writer) = server.into_split();
-            let request_shutdown = shutdown.child_token();
-            let task_control = control.clone();
-            let task_shutdown = shutdown.clone();
-            let task_request_shutdown = request_shutdown.clone();
-            let apply = tokio::task::spawn_local(async move {
-                let operation = async move { task_control.apply_candidate(candidate).await };
-                crate::api::await_dispatch_after_disconnect(
-                    &task_shutdown,
-                    &task_request_shutdown,
-                    reader,
-                    operation,
-                )
-                .await
-            });
-
-            gate.wait_until_reached().await;
-            assert!(
-                root.join("webinfo/native_management.transaction/commit")
-                    .is_file(),
-                "the durable commit marker precedes the disconnect"
-            );
-            client.shutdown().await.unwrap();
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                request_shutdown.cancelled(),
-            )
-            .await
-            .expect("API observes client disconnect");
-            assert!(!apply.is_finished(), "the transaction remains host-owned");
-
-            shutdown.cancel();
-            gate.release();
-            assert_eq!(apply.await.unwrap().unwrap(), 1);
-            assert_eq!(control.generation(), 1);
-            assert!(!control.admission_open());
-            assert!(!crate::transaction::ManagedStore::has_pending(&root));
-            assert!(
-                String::from_utf8_lossy(
-                    &std::fs::read(root.join("webinfo/special_upstream_groups.json")).unwrap()
-                )
-                .contains("managed")
-            );
-            drop(updates);
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn ambiguous_marker_failure_fails_closed_and_retains_transaction_evidence() {
-        let (host, root) = managed_fixture();
-        host.block_on(async {
-            let control = host.control();
-            let shutdown = mosdns_upstream_core::TransportCancellation::new();
-            let updates = control.start(&shutdown);
-            let gate = std::sync::Arc::new(super::ApplyCommitTestGate::new());
-            control.inject_apply_commit_test_gate(gate.clone());
-            let candidate = control
-                .compile_managed_candidate(
-                    &root.join("config.yaml"),
-                    managed_changes("127.0.0.1:15455"),
-                )
-                .unwrap();
-            let task_control = control.clone();
-            let apply =
-                tokio::task::spawn_local(
-                    async move { task_control.apply_candidate(candidate).await },
-                );
-            gate.wait_until_reached().await;
-            let journal = root.join("webinfo/native_management.transaction");
-            let external = root.join("outside-marker-target");
-            std::fs::write(&external, b"sentinel").unwrap();
-            std::os::unix::fs::symlink(&external, journal.join("commit.tmp")).unwrap();
-            gate.release();
-
-            assert!(matches!(
-                apply.await.unwrap(),
-                Err(super::ApplyFailure::RecoveryRequired(_))
-            ));
-            assert!(control.recovery_required());
-            assert!(!control.admission_open());
-            assert_eq!(control.generation(), 0);
-            assert!(crate::transaction::ManagedStore::has_pending(&root));
-            assert_eq!(std::fs::read(&external).unwrap(), b"sentinel");
-            drop(updates);
-            control.close().await.unwrap();
-        });
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn sigkill_after_marker_swap_retirement_and_cleanup_recovers_committed_candidate() {
-        use std::os::unix::process::ExitStatusExt;
-
-        for phase in ["marker", "swap", "retirement", "cleanup"] {
-            let root = std::env::temp_dir().join(format!(
-                "native-managed-apply-kill-{}-{phase}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&root);
-            std::fs::create_dir_all(root.join("webinfo")).unwrap();
-            std::fs::create_dir_all(root.join("cache")).unwrap();
-            let path = root.join("config.yaml");
-            std::fs::write(
-                &path,
-                r#"log: {level: error}
-native_management: {special_groups: true}
-api: {http: "127.0.0.1:15380"}
-plugins:
-  - tag: default_upstream
-    type: forward
-    args: {upstreams: [{tag: local_default, addr: "udp://127.0.0.1:15455"}]}
-  - tag: cache_all
-    type: cache
-    args: {size: 64, lazy_cache_ttl: 0, dump_file: "cache/cache_all.dump"}
-  - tag: main_entry
-    type: sequence
-    args:
-      - exec: $cache_all
-      - exec: $special_upstream_matcher
-      - exec: $default_upstream
-  - tag: main_udp
-    type: udp_server
-    args: {entry: main_entry, listen: "127.0.0.1:15355", enable_audit: false}
-"#,
-            )
-            .unwrap();
-            std::fs::write(root.join("webinfo/special_upstream_groups.json"), b"[]\n").unwrap();
-            std::fs::write(root.join("webinfo/upstream_overrides.json"), b"{}\n").unwrap();
-            let ready = root.join("ready");
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "runtime_snapshot::admission_tests::managed_apply_crash_child",
-                    "--ignored",
-                    "--nocapture",
-                ])
-                .env("MOSDNS_TEST_APPLY_ROOT", &root)
-                .env("MOSDNS_TEST_APPLY_READY", &ready)
-                .env("MOSDNS_TEST_APPLY_CRASH_AFTER", phase)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-            loop {
-                if ready.exists() {
-                    break;
-                }
-                if let Some(status) = child.try_wait().unwrap() {
-                    panic!("apply child exited before {phase}: {status}");
-                }
-                if std::time::Instant::now() >= deadline {
-                    child.kill().unwrap();
-                    child.wait().unwrap();
-                    panic!("apply child did not reach {phase}");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            assert_eq!(std::fs::read(&ready).unwrap(), phase.as_bytes());
-            assert!(
-                std::process::Command::new("kill")
-                    .args(["-KILL", &child.id().to_string()])
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-            assert_eq!(child.wait().unwrap().signal(), Some(9));
-
-            let mut restarted = crate::transaction::ManagedStore::open(&root).unwrap();
-            restarted.recover().unwrap();
-            let groups = std::fs::read(root.join("webinfo/special_upstream_groups.json")).unwrap();
-            assert!(
-                String::from_utf8_lossy(&groups).contains("managed"),
-                "committed group file recovers after {phase}"
-            );
-            let generated =
-                std::fs::read_to_string(root.join("sub_config/special_groups.yaml")).unwrap();
-            assert!(generated.contains("sequence_special_50"));
-            let dump_path = root.join("cache/cache_all.dump");
-            let dump = std::fs::read(&dump_path).unwrap();
-            assert!(
-                crate::cache_dump::decode(&dump).unwrap().is_empty(),
-                "old cache data and final snapshots cannot overwrite the committed empty dump after {phase}"
-            );
-            assert!(!crate::transaction::ManagedStore::has_pending(&root));
-            drop(restarted);
-
-            let restarted_host = crate::HostAssembly::from_config_file(&path).unwrap();
-            let restarted_control = restarted_host.control();
-            let restarted_view = restarted_control.view();
-            let cache_id = restarted_view
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == "cache_all")
-                .unwrap()
-                .id;
-            assert!(
-                restarted_view.cache.get(cache_id).unwrap().is_empty(),
-                "committed cache invalidation remains empty after host restart at {phase}"
-            );
-            restarted_host.block_on(restarted_control.close()).unwrap();
-            drop(restarted_view);
-            drop(restarted_control);
-            drop(restarted_host);
-            std::fs::remove_dir_all(root).unwrap();
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    #[ignore = "subprocess crash probe invoked by the parent recovery test"]
-    fn managed_apply_crash_child() {
-        let Some(root) = std::env::var_os("MOSDNS_TEST_APPLY_ROOT").map(std::path::PathBuf::from)
-        else {
-            return;
-        };
-        let config = root.join("config.yaml");
-        let host = crate::HostAssembly::from_config_file(&config).unwrap();
-        host.block_on(async {
-            let control = host.control();
-            let initial = control.view();
-            let cache_id = initial
-                .config
-                .caches
-                .iter()
-                .find(|cache| cache.tag == "cache_all")
-                .unwrap()
-                .id;
-            let cache = initial.cache.get(cache_id).unwrap();
-            seed_cache(cache, "example.test.");
-            cache.save().await.unwrap();
-            seed_cache(cache, "pending.test.");
-            assert_eq!(
-                crate::cache_dump::decode(
-                    &std::fs::read(root.join("cache/cache_all.dump")).unwrap()
-                )
-                .unwrap()
-                .len(),
-                1,
-                "the transaction begins with a durable prior-generation entry"
-            );
-            drop(initial);
-            let candidate = control
-                .compile_managed_candidate(&config, managed_changes("127.0.0.1:15455"))
-                .unwrap();
-            control.apply_candidate(candidate).await.unwrap();
-        });
-        panic!("requested coordinator crash boundary was not reached");
-    }
 
     #[test]
     fn apply_admission_gate_closes_and_recovers_without_touching_the_snapshot() {
@@ -2991,20 +1381,13 @@ plugins:
         std::fs::create_dir_all(root.join("webinfo")).unwrap();
         std::fs::create_dir_all(root.join("cache")).unwrap();
         let old_port = free_pair();
-        let groups = root.join("webinfo/special_upstream_groups.json");
-        let write_group = |port| {
-            std::fs::write(
-                &groups,
-                format!(
-                    r#"[{{"slot":50,"name":"group","listen_port":{port},"custom_port_only":true}}]"#
-                ),
-            )
-            .unwrap()
-        };
-        write_group(old_port);
-        std::fs::write(root.join("webinfo/upstream_overrides.json"),r#"{"special_upstream_50":[{"tag":"controlled","protocol":"udp","addr":"127.0.0.1:15999","enabled":true}]}"#).unwrap();
         let path = root.join("config.yaml");
-        std::fs::write(&path,format!("log: {{level: error}}\nnative_management: {{special_groups: true}}\nplugins:\n  - tag: entry\n    type: sequence\n    args: [{{exec: $special_upstream_matcher}}, {{exec: reject 3}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: entry, listen: '127.0.0.1:{}', enable_audit: true}}\n",free_pair())).unwrap();
+        let main_port = free_pair();
+        // `main` plus an extra UDP/TCP pair on `port`; moving the pair removes the old bindings.
+        let write_pair = |port: u16| {
+            std::fs::write(&path, format!("log: {{level: error}}\nplugins:\n  - tag: fwd\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:15999'}}]}}\n  - tag: entry\n    type: sequence\n    args: [{{exec: reject 3}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: entry, listen: '127.0.0.1:{main_port}', enable_audit: true}}\n  - tag: extra_udp\n    type: udp_server\n    args: {{entry: entry, listen: '127.0.0.1:{port}', enable_audit: true}}\n  - tag: extra_tcp\n    type: tcp_server\n    args: {{entry: entry, listen: '127.0.0.1:{port}', enable_audit: true}}\n")).unwrap()
+        };
+        write_pair(old_port);
         let host =
             crate::HostAssembly::from_config(crate::load_and_compile(&path).unwrap()).unwrap();
         host.block_on(async {
@@ -3031,7 +1414,7 @@ plugins:
             let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1",old_port)).await.unwrap();
             let udp = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
             let in_flight: Vec<_> = old_bindings.iter().map(|l| control.capture(&l.tag,l.kind,l.listen).unwrap()).collect();
-            write_group(free_pair());
+            write_pair(free_pair());
             let prepared = control.prepare_host(crate::load_and_compile(&path).unwrap()).await.unwrap();
             control.install(prepared).unwrap();
             for binding in &old_bindings {
@@ -3062,37 +1445,44 @@ plugins:
             std::env::temp_dir().join(format!("native-failed-cleanup-{}", std::process::id()));
         std::fs::create_dir_all(root.join("webinfo")).unwrap();
         std::fs::create_dir_all(root.join("cache")).unwrap();
-        let old_port = free_pair();
-        let groups = root.join("webinfo/special_upstream_groups.json");
-        let write_group = |port| {
-            std::fs::write(
-                &groups,
-                format!(
-                    r#"[{{"slot":50,"name":"group","listen_port":{port},"custom_port_only":true}}]"#
-                ),
-            )
-            .unwrap()
-        };
-        write_group(old_port);
-        std::fs::write(root.join("webinfo/upstream_overrides.json"),r#"{"special_upstream_50":[{"tag":"controlled","protocol":"udp","addr":"127.0.0.1:15999","enabled":true}]}"#).unwrap();
         let path = root.join("config.yaml");
-        std::fs::write(&path,format!("log: {{level: error}}\nnative_management: {{special_groups: true}}\nplugins:\n  - tag: entry\n    type: sequence\n    args: [{{exec: $special_upstream_matcher}}, {{exec: reject 3}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: entry, listen: '127.0.0.1:{}', enable_audit: true}}\n",free_pair())).unwrap();
+        let main_port = free_pair();
+        let write_config = |upstream: u16| {
+            std::fs::write(&path, format!("log: {{level: error}}\nplugins:\n  - tag: cache\n    type: cache\n    args: {{dump_file: cache/c.dump}}\n  - tag: fwd\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:{upstream}'}}]}}\n  - tag: entry\n    type: sequence\n    args: [{{exec: $cache}}, {{exec: $fwd}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: entry, listen: '127.0.0.1:{main_port}', enable_audit: true}}\n")).unwrap()
+        };
+        write_config(15999);
         let host =
             crate::HostAssembly::from_config(crate::load_and_compile(&path).unwrap()).unwrap();
         host.block_on(async {
             let control = host.control();
             let old = control.view();
-            std::fs::write(root.join("webinfo/upstream_overrides.json"),r#"{"special_upstream_50":[{"tag":"replacement","protocol":"udp","addr":"127.0.0.1:16000","enabled":true}]}"#).unwrap();
-            let prepared = control.prepare(crate::load_and_compile(&path).unwrap()).unwrap();
+            write_config(16000);
+            let prepared = control
+                .prepare(crate::load_and_compile(&path).unwrap())
+                .unwrap();
             control.install(prepared).unwrap();
             let current = control.view();
-            old.cache.get(crate::config::CacheId(0)).unwrap().inject_refresh_join_failure();
-            current.cache.get(crate::config::CacheId(0)).unwrap().inject_persist_fault(crate::managed::PersistFault::Rename);
-            assert!(control.close().await.is_err(), "cleanup errors must remain observable");
-            for snapshot in [old,current] {
+            old.cache
+                .get(crate::config::CacheId(0))
+                .unwrap()
+                .inject_refresh_join_failure();
+            current
+                .cache
+                .get(crate::config::CacheId(0))
+                .unwrap()
+                .inject_persist_fault(crate::managed::PersistFault::Rename);
+            assert!(
+                control.close().await.is_err(),
+                "cleanup errors must remain observable"
+            );
+            for snapshot in [old, current] {
                 let executable = snapshot.config.forward_invocations[0].executable;
                 let owner = snapshot.forwards.forward(executable).unwrap();
-                assert_eq!(owner.upstream().lifecycle_state(),mosdns_upstream_core::LifecycleState::Closed,"both generations must close transports despite cache cleanup failures");
+                assert_eq!(
+                    owner.upstream().lifecycle_state(),
+                    mosdns_upstream_core::LifecycleState::Closed,
+                    "both generations must close transports despite cache cleanup failures"
+                );
             }
         });
         std::fs::remove_dir_all(root).unwrap();

@@ -126,7 +126,7 @@ Deliberate differences (data safety or not configuration):
 - Start-up count reconciliation rewrites only counts read while compiling (enabled sources); the
   reference also recounts disabled AdGuard lists at start.
 
-Known limits with `native_management` (not used by `config_all`): a managed apply compiles a new
+Known limits of a generation apply (the removed `native_management` mode shared them): an apply compiles a new
 view with its own rule-source state. When the new view is installed the retired view is fenced at
 once (no new jobs, no writes, mutating requests 503) and its jobs are joined during retirement;
 every view's owner of one manifest or rule file shares that file's write lock, so a write already
@@ -141,5 +141,5 @@ rule text, the build's temporaries and the new generation. After publication the
 pages to the system (glibc `malloc_trim` on the build thread; a fixed glibc mmap threshold and no
 transparent huge pages for the process keep them returnable), so with the production rule set the
 resident size settles near the start-up level after any number of rule-source rebuilds (numbers in
-`docs/rust/validation-records/10-08-mem-1/`). The replaced generation is freed off the DNS thread. Not covered
-yet: a `native_management` configuration apply (not used by `config_all`) is not followed by a trim.
+`docs/rust/validation-records/10-08-mem-1/`). The replaced generation is freed off the DNS thread. (The former
+`native_management` apply, which was not followed by a trim, was removed in Phase 6b.)

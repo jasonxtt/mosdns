@@ -64,10 +64,9 @@ pub use config::{
     ApiConfig, CacheId, CacheKind, CachePluginConfig, CheckFinding, CheckFindingKind, CheckReport,
     CompiledConfig, ConfigError, DomainMapperConfig, DomainSetConfig, ForwardConfig,
     ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme,
-    ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, ManagedRouterConfig,
-    ManagedRouterGroup, MapperOutcome, ResponseIpRuleConfig, SequenceConfig, check_config,
-    check_config_in, compile_yaml, compile_yaml_with_base, compile_yaml_with_roots,
-    load_and_compile, load_yaml,
+    ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, MapperOutcome,
+    ResponseIpRuleConfig, SequenceConfig, check_config, check_config_in, compile_yaml,
+    compile_yaml_with_base, compile_yaml_with_roots, load_and_compile, load_yaml,
 };
 pub use diag::record_fatal;
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
@@ -117,7 +116,6 @@ pub fn abandon_failed_update_exec(target: &RestartTarget, reason: &str) {
         update::transaction::abandon_staged(path, &format!("无法启动更新守护: {reason}"));
     }
 }
-pub use special_groups::{ManagedProfile, SpecialGroup, forward_entries, normalize_groups};
 pub use switch::SwitchDeclaration;
 pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};
@@ -175,5 +173,3 @@ pub use policy::{
 
 pub use rule_sources::{RuleSources, RuleTiming};
 pub use runtime_snapshot::{PreparedSnapshot, RuntimeControl};
-
-pub use transaction::{CandidatePersistence, CompiledCandidate, ManagedStore, TransactionError};

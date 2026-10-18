@@ -1,5 +1,7 @@
 # Native special groups and upstream management
 
+> **Historical (Phase 6b, 2026-10-18):** the `native_management` opt-in this plan implemented was removed; the standard `special_groups` configuration (M1-e) replaces it.
+
 2026-10-02, baseline79d93ae1. Scope selected; C2C planning review PLAN READY (no blockers).
 User approved implementation on 2026-10-03 (“开始实施”) after the complete reviewed
 plan and amendment requiring a fresh dedicated C2C code-review conversation.
