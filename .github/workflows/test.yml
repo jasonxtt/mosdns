@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to the toolchain the code is linted with locally; newer clippy
+        # releases add lints. Bump deliberately together with the lint fixes.
+        uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy,rustfmt
       - name: Format, lint and test
