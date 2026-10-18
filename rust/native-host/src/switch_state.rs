@@ -1602,10 +1602,12 @@ mod tests {
         assert_eq!(std::fs::read(&file).expect("external kept"), b"external");
 
         // A replacement with identical content but a new identity conflicts too.
-        std::fs::remove_file(&file).expect("remove");
+        // The old file is moved aside, not deleted, and kept until the end: a deleted inode can
+        // be handed straight to the next file (same content, same inode), which is no change.
+        std::fs::rename(&file, root.path("moved-1.txt")).expect("move aside");
         std::fs::write(&file, b"committed").expect("recreated");
         let restarted = SwitchRegistry::build(&[declaration(1, "sw1", &file)]).expect("admit");
-        std::fs::remove_file(&file).expect("remove again");
+        std::fs::rename(&file, root.path("moved-2.txt")).expect("move aside again");
         std::fs::write(&file, b"committed").expect("recreated again");
         let error = run_async(async {
             restarted

@@ -166,6 +166,22 @@ struct Host {
     stub: Stub,
 }
 
+/// Spawns `command`, retrying a bounded number of times while the freshly copied program is
+/// "Text file busy": another test thread forking at that moment can hold the copy's write
+/// handle for an instant. Any other error, or the same one after the last try, panics.
+fn spawn_retrying_busy(command: &mut Command) -> Child {
+    for _ in 0..50 {
+        match command.spawn() {
+            Ok(child) => return child,
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("spawn failed: {error}"),
+        }
+    }
+    command.spawn().unwrap()
+}
+
 impl Host {
     /// Starts a copy of the binary (so the file can be changed under it) with a cache that is saved at stop.
     fn start(name: &str) -> Self {
@@ -193,15 +209,15 @@ impl Host {
         )
         .unwrap();
         let stub = Stub::start(upstream);
-        let mut child = Command::new(&exe)
+        let mut command = Command::new(&exe);
+        command
             .args(["start", "-d"])
             .arg(&root)
             .arg("-c")
             .arg(root.join("config.yaml"))
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::piped());
+        let mut child = spawn_retrying_busy(&mut command);
         let (sender, stderr) = channel();
         let pipe = child.stderr.take().unwrap();
         std::thread::spawn(move || {
