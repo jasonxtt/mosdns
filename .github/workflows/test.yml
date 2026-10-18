@@ -1,16 +1,8 @@
 name: Test mosdns (Rust)
 
+# Manual only (user decision 2026-10-18): run from the Actions tab or
+# `gh workflow run test.yml --ref rust`.
 on:
-  push:
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.trellis/**'
-  pull_request:
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.trellis/**'
   workflow_dispatch:
 
 jobs:
