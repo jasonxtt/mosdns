@@ -6,6 +6,8 @@
 #![cfg(unix)]
 #![allow(clippy::pedantic)]
 
+mod common;
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -79,8 +81,9 @@ struct Stub {
 }
 
 impl Stub {
-    fn start(port: u16) -> Self {
-        let socket = UdpSocket::bind(("127.0.0.1", port)).unwrap();
+    fn start() -> (Self, u16) {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = socket.local_addr().unwrap().port();
         socket
             .set_read_timeout(Some(Duration::from_millis(50)))
             .unwrap();
@@ -94,10 +97,13 @@ impl Stub {
                 }
             }
         });
-        Self {
-            stop,
-            handle: Some(handle),
-        }
+        (
+            Self {
+                stop,
+                handle: Some(handle),
+            },
+            port,
+        )
     }
 }
 
@@ -456,19 +462,23 @@ struct Host {
 
 impl Host {
     fn start(name: &str, health_timeout: Option<u64>) -> Self {
+        common::ports::retry_addr_in_use(|| Self::try_start(name, health_timeout))
+    }
+
+    fn try_start(name: &str, health_timeout: Option<u64>) -> Result<Self, String> {
         let root = std::env::temp_dir().join(format!("f3a-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let exe = root.join("mosdns");
         std::fs::write(&exe, binary()).unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let (api, dns, upstream) = (free_port(), free_udp_port(), free_udp_port());
+        let (stub, upstream) = Stub::start();
+        let (api, dns) = (free_port(), free_udp_port());
         std::fs::write(
             root.join("config_custom.yaml"),
             config_text(api, dns, upstream, "original"),
         )
         .unwrap();
-        let stub = Stub::start(upstream);
         let server = ReleaseServer::start();
         let mut host = Self {
             root,
@@ -481,15 +491,15 @@ impl Host {
             server,
             _stub: stub,
         };
-        host.launch(health_timeout);
-        host
+        host.launch(health_timeout)?;
+        Ok(host)
     }
 
     fn spawn_process_placeholder() -> Child {
         Command::new("sleep").arg("0").spawn().unwrap()
     }
 
-    fn launch(&mut self, health_timeout: Option<u64>) {
+    fn launch(&mut self, health_timeout: Option<u64>) -> Result<(), String> {
         let _ = self.child.wait();
         let mut command = Command::new(&self.exe);
         command
@@ -525,14 +535,16 @@ impl Host {
         });
         self.child = child;
         self.stderr = receiver;
-        self.wait_ready();
-    }
-
-    fn wait_ready(&self) {
-        wait_until("host ready", 30, || {
-            http(self.api, "GET", "/api/v1/system/health", b"")
-                .is_some_and(|reply| reply.status == 200)
-        });
+        let api = self.api;
+        common::ports::wait_ready(
+            &mut self.child,
+            &self.stderr,
+            Duration::from_secs(30),
+            || {
+                http(api, "GET", "/api/v1/system/health", b"")
+                    .is_some_and(|reply| reply.status == 200)
+            },
+        )
     }
 
     fn api(&self, method: &str, path: &str, body: &[u8]) -> Reply {
@@ -967,7 +979,7 @@ fn a_full_update_replaces_program_and_config_in_the_same_process_and_is_confirme
         .args(["-TERM", &pid.to_string()])
         .status();
     let _ = host.child.wait();
-    host.launch(None);
+    host.launch(None).unwrap();
     wait_until("the transaction is cleaned up", 20, || {
         host.transactions().is_empty()
     });
@@ -1142,7 +1154,7 @@ fn killing_the_guard_mid_test_is_recovered_at_the_next_start() {
             "mixed state: new program, new config"
         );
         // What the service manager would do: start the installed program again.
-        host.launch(None);
+        host.launch(None).unwrap();
         wait_until("recovery finished", 30, || host.health().is_some());
         let tx = host.only_transaction();
         assert_eq!(tx["status"], "rolled_back", "{tx}");

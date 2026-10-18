@@ -2,6 +2,8 @@
 //! and the `config_all` loading shapes (several listeners, `:port`, optional
 //! `enable_audit`, `log.level`/`log.file`) work without `native_management`.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -370,7 +372,7 @@ fn several_listeners_serve_and_release_their_sockets_without_native_management()
 
 #[test]
 fn a_failed_bind_releases_the_listeners_that_already_bound() {
-    let (a, b) = (free_port(), free_port());
+    let (a, b) = common::ports::release_check_ports();
     let occupied = std::net::TcpListener::bind(("127.0.0.1", b)).unwrap();
     let yaml = reject_config(
         "",
@@ -543,31 +545,35 @@ fn the_config_all_shape_has_no_findings_and_check_does_not_touch_it() {
 /// log file content.
 fn run_with_log(level: &str, file_line: &str) -> (String, std::process::Output) {
     let dir = TempDir::new(&format!("log-{level}"));
-    let api = free_port();
-    let dns = free_port();
-    dir.write(
+    let (mut child, stderr) = common::ports::retry_addr_in_use(|| {
+        // A failed startup may already have written warnings; do not mix attempts.
+        if dir.path().join("m.log").exists() {
+            std::fs::remove_file(dir.path().join("m.log")).unwrap();
+        }
+        let api = free_port();
+        let dns = free_port();
+        dir.write(
         "config.yaml",
         &format!(
             "log: {{ level: {level}{file_line} }}\napi:\n  http: \"127.0.0.1:{api}\"\nplugins:\n  - tag: fwd\n    type: forward\n    args: {{ upstreams: [{{ addr: \"udp://127.0.0.1:15453\" }}] }}\n  - tag: ips\n    type: ip_set\n    args: {{ files: [rule/missing_ips.txt] }}\n  - tag: entry\n    type: sequence\n    args: [{{ exec: reject 3 }}]\n{}",
             listener("udp", "udp_server", &format!("127.0.0.1:{dns}"), "")
         ),
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mosdns"))
-        .args(["start", "-d"])
-        .arg(dir.path())
-        .args(["-c", "config.yaml"])
-        .current_dir(std::env::temp_dir())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while std::net::TcpStream::connect(("127.0.0.1", api)).is_err() {
-        assert!(Instant::now() < deadline, "host did not start");
-        std::thread::sleep(Duration::from_millis(50));
-    }
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mosdns"));
+        command
+            .args(["start", "-d"])
+            .arg(dir.path())
+            .args(["-c", "config.yaml"])
+            .current_dir(std::env::temp_dir())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        common::ports::spawn_ready(&mut command, Duration::from_secs(15), || {
+            std::net::TcpStream::connect(("127.0.0.1", api)).is_ok()
+        })
+    });
     child.kill().unwrap();
-    let output = child.wait_with_output().unwrap();
+    let mut output = child.wait_with_output().unwrap();
+    output.stderr = common::ports::collected_stderr(&stderr);
     let log = std::fs::read_to_string(dir.path().join("m.log")).unwrap_or_default();
     (log, output)
 }
@@ -608,8 +614,8 @@ fn without_a_log_file_diagnostics_go_to_stderr_and_an_unknown_level_falls_back_t
 #[test]
 fn a_fatal_startup_error_reaches_both_stderr_and_the_log_file() {
     let dir = TempDir::new("fatal");
-    let port = free_port();
-    let _occupied = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = occupied.local_addr().unwrap().port();
     dir.write(
         "config.yaml",
         &format!(
@@ -636,22 +642,31 @@ fn a_fatal_startup_error_reaches_both_stderr_and_the_log_file() {
 #[test]
 fn log_file_is_appended_not_truncated() {
     let dir = TempDir::new("append");
-    dir.write("m.log", "earlier line\n");
-    let port = free_port();
-    dir.write(
+    let (mut child, _stderr) = common::ports::retry_addr_in_use(|| {
+        dir.write("m.log", "earlier line\n");
+        let port = free_port();
+        dir.write(
         "config.yaml",
         &format!(
             "log: {{ level: nonsense, file: m.log }}\nplugins:\n  - tag: fwd\n    type: forward\n    args: {{ upstreams: [{{ addr: \"udp://127.0.0.1:15453\" }}] }}\n  - tag: entry\n    type: sequence\n    args: [{{ exec: reject 3 }}]\n{}",
             listener("udp", "udp_server", &format!("127.0.0.1:{port}"), "")
         ),
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mosdns"))
-        .args(["start", "-d"])
-        .arg(dir.path())
-        .args(["-c", "config.yaml"])
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mosdns"));
+        command
+            .args(["start", "-d"])
+            .arg(dir.path())
+            .args(["-c", "config.yaml"])
+            .stdout(Stdio::null());
+        common::ports::spawn_ready(&mut command, Duration::from_secs(15), || {
+            let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_millis(50)))
+                .unwrap();
+            socket.send_to(&query(), ("127.0.0.1", port)).unwrap();
+            socket.recv_from(&mut [0; 512]).is_ok()
+        })
+    });
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let log = std::fs::read_to_string(dir.path().join("m.log")).unwrap();
