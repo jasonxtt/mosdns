@@ -1,5 +1,7 @@
 # Rust cache test-host record
 
+> **Historical evidence (Phase 6a, 2026-10-18).** This document describes the Go↔Rust hybrid stage. The Go source, the cgo bridge (`rust/runtime`), the `MOSDNS_*_BACKEND` selectors and the scripts it names were removed from the `rust` branch (they remain in git history and, for Go, in the Go repository). The text below is kept unchanged as evidence.
+
 Status: isolated smoke and extended verification (dump restart, runtime fault
 injection, sustained concurrency) complete; Rust cache remains experimental.
 

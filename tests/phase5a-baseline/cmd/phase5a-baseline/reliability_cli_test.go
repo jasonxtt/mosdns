@@ -349,8 +349,8 @@ func TestReliabilityPublicSubprocessAndShellRunner(t *testing.T) {
 	repoRoot := strings.TrimSpace(string(rootOutput))
 	helpDir := t.TempDir()
 	helper := filepath.Join(helpDir, "phase5a-baseline-helper")
-	build := exec.Command("go", "build", "-trimpath", "-o", helper, "./tests/phase5a-baseline/cmd/phase5a-baseline")
-	build.Dir = repoRoot
+	build := exec.Command("go", "build", "-trimpath", "-o", helper, "./cmd/phase5a-baseline")
+	build.Dir = filepath.Join(repoRoot, "tests", "phase5a-baseline")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build helper: %v\n%s", err, output)
 	}

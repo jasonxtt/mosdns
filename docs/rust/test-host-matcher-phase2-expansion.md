@@ -1,5 +1,7 @@
 # Rust matcher Phase 2 expansion test-host record
 
+> **Historical evidence (Phase 6a, 2026-10-18).** This document describes the Go↔Rust hybrid stage. The Go source, the cgo bridge (`rust/runtime`), the `MOSDNS_*_BACKEND` selectors and the scripts it names were removed from the `rust` branch (they remain in git history and, for Go, in the Go repository). The text below is kept unchanged as evidence.
+
 Date: `2026-08-14`
 
 Host verification was run on isolated `mos-test` (`10.0.0.91`, Linux x86_64)

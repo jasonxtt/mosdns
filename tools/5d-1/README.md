@@ -2,7 +2,8 @@
 
 VM Linux root, existing Python3/PyYAML, iproute2, util-linux and OpenSSL.
 No downloads, installs, builds or deployment performed by this tool. Build
-exact pinned source offline with the repository scripts first (Vue before Go).
+the Rust binaries with the repository scripts first (Vue before Rust) and the Go
+reference (`mosdns-go`) with `tools/go-reference/build.sh <dir> mosdns`.
 All paths below are private VM directories outside any repository checkout.
 
 ```sh

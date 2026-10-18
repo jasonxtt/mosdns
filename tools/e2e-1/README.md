@@ -1,7 +1,7 @@
 # E2E-1 full-chain differential
 
 VM Linux root, Python 3 + PyYAML, iproute2, util-linux, OpenSSL required.
-Build binaries on the test VM before running; this tool never builds or deploys.
+Build binaries before running; this tool never builds or deploys. The Go reference (`--go`) comes from `tools/go-reference/build.sh <dir> mosdns` (pinned commit of the Go repository, cross-compiled with GOOS=linux GOARCH=amd64 on the Mac); the Rust binaries are built on the test VM.
 Inputs are config_all/config_rust plus snapshot/{rule,gen,srs,adguard,webinfo}.
 The output directory must not exist. Keep inputs and outputs outside the repo.
 

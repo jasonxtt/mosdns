@@ -1,41 +1,13 @@
-//! Experimental `MosDNS` Rust cache core.
-//!
-//! The C ABI uses integer handles backed by a process-local registry. This
-//! makes duplicate and concurrent close deterministic without dereferencing a
-//! pointer after its allocation has been freed.
-//!
-//! This crate is an implementation `rlib` linked by `mosdns-runtime` (the sole
-//! `staticlib`). All `extern "C"` symbols are exported by `mosdns-runtime`.
+//! `MosDNS` Rust cache core: the safe [`NativeCache`] used by the native host.
+//! (The former C ABI and its handle registry were removed with the Go bridge in Phase 6a.)
 
-#![allow(clippy::missing_safety_doc, clippy::missing_errors_doc)]
+#![allow(clippy::missing_errors_doc)]
 
 use bytes::Bytes;
-use dashmap::DashMap;
 use moka::sync::Cache as MokaCache;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 mod wire;
-
-pub const ABI_VERSION: u32 = 1;
-pub const CAPABILITY_LIFECYCLE: u64 = 1 << 0;
-pub const CAPABILITY_CACHE: u64 = 1 << 1;
-pub const CAPABILITY_LOOKUP_INTO: u64 = 1 << 2;
-
-static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
-static HANDLES: OnceLock<DashMap<u64, Arc<NativeCache>>> = OnceLock::new();
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Status {
-    Ok = 0,
-    InvalidArgument = 1,
-    Closed = 2,
-    Panic = 3,
-    Internal = 4,
-    BufferTooSmall = 5,
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -46,224 +18,11 @@ pub struct CacheConfig {
 }
 
 #[repr(C)]
-#[derive(Debug)]
-pub struct OwnedBuffer {
-    pub ptr: *mut u8,
-    pub len: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct BorrowedSlice {
-    pub ptr: *const u8,
-    pub len: u64,
-}
-
-impl BorrowedSlice {
-    #[must_use]
-    pub fn from_slice(bytes: &[u8]) -> Self {
-        if bytes.is_empty() {
-            return Self {
-                ptr: std::ptr::null(),
-                len: 0,
-            };
-        }
-        let Ok(len) = u64::try_from(bytes.len()) else {
-            return Self {
-                ptr: std::ptr::null(),
-                len: u64::MAX,
-            };
-        };
-        Self {
-            ptr: bytes.as_ptr(),
-            len,
-        }
-    }
-
-    /// Views caller-owned bytes for the duration of an ABI call.
-    ///
-    /// # Safety
-    ///
-    /// For non-empty input, `ptr` must be readable for exactly `len` bytes and
-    /// remain live for the returned lifetime.
-    pub unsafe fn as_slice(&self) -> Result<&[u8], Status> {
-        if self.ptr.is_null() {
-            return if self.len == 0 {
-                Ok(&[])
-            } else {
-                Err(Status::InvalidArgument)
-            };
-        }
-        if self.len == 0 {
-            return Err(Status::InvalidArgument);
-        }
-        if self.len > isize::MAX as u64 {
-            return Err(Status::InvalidArgument);
-        }
-        let len = usize::try_from(self.len).map_err(|_| Status::InvalidArgument)?;
-        // SAFETY: The caller upholds the pointer/length contract.
-        Ok(unsafe { std::slice::from_raw_parts(self.ptr, len) })
-    }
-}
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct WritableSlice {
-    pub ptr: *mut u8,
-    pub len: u64,
-}
-
-impl WritableSlice {
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self {
-            ptr: std::ptr::null_mut(),
-            len: 0,
-        }
-    }
-
-    #[must_use]
-    pub fn from_slice(bytes: &mut [u8]) -> Self {
-        if bytes.is_empty() {
-            return Self::empty();
-        }
-        let Ok(len) = u64::try_from(bytes.len()) else {
-            return Self {
-                ptr: std::ptr::null_mut(),
-                len: u64::MAX,
-            };
-        };
-        Self {
-            ptr: bytes.as_mut_ptr(),
-            len,
-        }
-    }
-
-    pub unsafe fn as_mut_slice(&mut self) -> Result<&mut [u8], Status> {
-        if self.ptr.is_null() {
-            return if self.len == 0 {
-                Ok(&mut [])
-            } else {
-                Err(Status::InvalidArgument)
-            };
-        }
-        if self.len == 0 {
-            return Err(Status::InvalidArgument);
-        }
-        if self.len > isize::MAX as u64 {
-            return Err(Status::InvalidArgument);
-        }
-        let len = usize::try_from(self.len).map_err(|_| Status::InvalidArgument)?;
-        // SAFETY: The caller guarantees exclusive writable access for this call.
-        Ok(unsafe { std::slice::from_raw_parts_mut(self.ptr, len) })
-    }
-}
-
-#[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LookupState {
     Miss = 0,
     Fresh = 1,
     Lazy = 2,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct LookupResult {
-    pub status: Status,
-    pub state: LookupState,
-    pub stored_at_unix: i64,
-    pub message_expires_at_unix: i64,
-    pub response: OwnedBuffer,
-    pub domain_set: OwnedBuffer,
-}
-
-impl LookupResult {
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self {
-            status: Status::Internal,
-            state: LookupState::Miss,
-            stored_at_unix: 0,
-            message_expires_at_unix: 0,
-            response: OwnedBuffer::empty(),
-            domain_set: OwnedBuffer::empty(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct LookupIntoResult {
-    pub status: Status,
-    pub state: LookupState,
-    pub stored_at_unix: i64,
-    pub message_expires_at_unix: i64,
-    pub response_len: u64,
-    pub domain_set_len: u64,
-}
-
-impl LookupIntoResult {
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self {
-            status: Status::Internal,
-            state: LookupState::Miss,
-            stored_at_unix: 0,
-            message_expires_at_unix: 0,
-            response_len: 0,
-            domain_set_len: 0,
-        }
-    }
-}
-
-impl OwnedBuffer {
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self {
-            ptr: std::ptr::null_mut(),
-            len: 0,
-        }
-    }
-
-    #[must_use]
-    pub fn copy_from_slice(bytes: &[u8]) -> Self {
-        if bytes.is_empty() {
-            return Self::empty();
-        }
-        Self::from_vec(bytes.to_vec())
-    }
-
-    #[must_use]
-    pub fn from_vec(bytes: Vec<u8>) -> Self {
-        if bytes.is_empty() {
-            return Self::empty();
-        }
-        let Ok(len) = u64::try_from(bytes.len()) else {
-            return Self::empty();
-        };
-        let ptr = Box::into_raw(bytes.into_boxed_slice()).cast::<u8>();
-        Self { ptr, len }
-    }
-
-    /// Views the bytes without taking ownership.
-    ///
-    /// # Safety
-    ///
-    /// This buffer must still own a live allocation created by
-    /// [`Self::copy_from_slice`], and no mutable reference to that allocation
-    /// may exist for the returned lifetime.
-    #[must_use]
-    pub unsafe fn as_slice(&self) -> &[u8] {
-        if self.ptr.is_null() || self.len == 0 {
-            return &[];
-        }
-        let Ok(len) = usize::try_from(self.len) else {
-            return &[];
-        };
-        // SAFETY: The caller upholds the allocation and aliasing contract.
-        unsafe { std::slice::from_raw_parts(self.ptr, len) }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,16 +56,14 @@ struct CacheState {
 
 /// An owned, safe cache instance for Rust-native callers.
 ///
-/// This object owns one Moka store and accepts ordinary Rust slices. It does
-/// not use the process-wide ABI handle registry; the registry adapts to this
-/// same object for transitional callers.
+/// This object owns one Moka store and accepts ordinary Rust slices.
 pub struct NativeCache {
     state: CacheState,
 }
 
 /// An optional native-only immutable attachment. It shares the exact entry's
 /// replacement/eviction/flush lifetime. Native snapshots retain it; codecs choose
-/// supported typed metadata. It remains absent from the transitional ABI.
+/// supported typed metadata.
 #[derive(Clone)]
 pub struct NativeAttachment(Arc<dyn std::any::Any + Send + Sync>);
 impl NativeAttachment {
@@ -484,7 +241,7 @@ impl NativeCache {
         )
     }
 
-    /// Native-only dual-clock insertion; the transitional ABI remains unchanged.
+    /// Dual-clock insertion.
     pub fn store_timed(
         &self,
         key: &[u8],
@@ -635,315 +392,9 @@ impl NativeCache {
     }
 }
 
-fn handles() -> &'static DashMap<u64, Arc<NativeCache>> {
-    HANDLES.get_or_init(DashMap::new)
-}
-
-fn boundary(operation: impl FnOnce() -> Status) -> Status {
-    catch_unwind(AssertUnwindSafe(operation)).unwrap_or(Status::Panic)
-}
-
-fn cache_error_status(error: CacheError) -> Status {
-    match error {
-        CacheError::InvalidConfig
-        | CacheError::InvalidKey
-        | CacheError::InvalidResponse
-        | CacheError::InvalidExpiry => Status::InvalidArgument,
-        CacheError::Internal => Status::Internal,
-    }
-}
-
-// -- Public API (Rust ABI, called by mosdns-runtime's extern "C" wrappers) --
-
-#[must_use]
-pub fn cache_abi_version() -> u32 {
-    ABI_VERSION
-}
-
-#[must_use]
-pub fn cache_abi_capabilities() -> u64 {
-    CAPABILITY_LIFECYCLE | CAPABILITY_CACHE | CAPABILITY_LOOKUP_INTO
-}
-
-/// Creates a cache handle.
-///
-/// # Safety
-///
-/// `config` must point to a readable [`CacheConfig`] and `out_handle` must
-/// point to writable `u64` storage for the duration of this call.
-#[must_use]
-pub unsafe fn cache_create(config: *const CacheConfig, out_handle: *mut u64) -> Status {
-    boundary(|| {
-        if config.is_null() || out_handle.is_null() {
-            return Status::InvalidArgument;
-        }
-        let config = unsafe { *config };
-        let cache = match NativeCache::new(config) {
-            Ok(cache) => cache,
-            Err(error) => return cache_error_status(error),
-        };
-
-        let handle = loop {
-            let candidate = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
-            if candidate != 0 && !handles().contains_key(&candidate) {
-                break candidate;
-            }
-        };
-        handles().insert(handle, Arc::new(cache));
-        unsafe { out_handle.write(handle) };
-        Status::Ok
-    })
-}
-
-#[must_use]
-pub fn cache_close(handle: u64) -> Status {
-    boundary(|| {
-        if handle == 0 {
-            return Status::InvalidArgument;
-        }
-        if handles().remove(&handle).is_some() {
-            Status::Ok
-        } else {
-            Status::Closed
-        }
-    })
-}
-
-/// Releases a buffer previously returned by this library.
-///
-/// # Safety
-///
-/// A non-empty `buffer` must be the original, not-yet-released value returned
-/// by this library. It must not be copied, modified, or released twice.
-#[must_use]
-#[allow(clippy::needless_pass_by_value)]
-pub unsafe fn cache_buffer_release(buffer: OwnedBuffer) -> Status {
-    boundary(|| {
-        if buffer.ptr.is_null() {
-            return if buffer.len == 0 {
-                Status::Ok
-            } else {
-                Status::InvalidArgument
-            };
-        }
-        if buffer.len == 0 {
-            return Status::InvalidArgument;
-        }
-        let Ok(len) = usize::try_from(buffer.len) else {
-            return Status::InvalidArgument;
-        };
-        let slice = std::ptr::slice_from_raw_parts_mut(buffer.ptr, len);
-        drop(unsafe { Box::from_raw(slice) });
-        Status::Ok
-    })
-}
-
-/// Returns the number of entries currently owned by a cache handle.
-///
-/// # Safety
-///
-/// `out_len` must point to writable `u64` storage for the duration of this call.
-pub unsafe fn cache_len(handle: u64, out_len: *mut u64) -> Status {
-    boundary(|| {
-        if handle == 0 || out_len.is_null() {
-            return Status::InvalidArgument;
-        }
-        let Some(state) = handles().get(&handle) else {
-            return Status::Closed;
-        };
-        let len = state.len();
-        unsafe { out_len.write(len) };
-        Status::Ok
-    })
-}
-
-/// Stores one entry under an already canonicalised `MosDNS` cache key.
-///
-/// # Safety
-///
-/// Every non-empty borrowed slice must remain readable for this call.
-#[must_use]
-pub unsafe fn cache_store(
-    handle: u64,
-    key: BorrowedSlice,
-    response: BorrowedSlice,
-    domain_set: BorrowedSlice,
-    stored_at_unix: i64,
-    message_expires_at_unix: i64,
-    cache_expires_at_unix: i64,
-) -> Status {
-    boundary(|| {
-        if handle == 0 {
-            return Status::InvalidArgument;
-        }
-        let Ok(key) = (unsafe { key.as_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        let Ok(response) = (unsafe { response.as_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        let Ok(domain_set) = (unsafe { domain_set.as_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        if let Err(error) = validate_store(
-            key,
-            response,
-            stored_at_unix,
-            message_expires_at_unix,
-            cache_expires_at_unix,
-        ) {
-            return cache_error_status(error);
-        }
-        let Some(state) = handles().get(&handle) else {
-            return Status::Closed;
-        };
-        match state.store(
-            key,
-            response,
-            domain_set,
-            stored_at_unix,
-            message_expires_at_unix,
-            cache_expires_at_unix,
-        ) {
-            Ok(()) => Status::Ok,
-            Err(error) => cache_error_status(error),
-        }
-    })
-}
-
-/// Looks up one already canonicalised `MosDNS` cache key.
-///
-/// # Safety
-///
-/// `key` must satisfy [`BorrowedSlice`]'s pointer contract and `out_result`
-/// must point to writable [`LookupResult`] storage for this call.
-pub unsafe fn cache_lookup(
-    handle: u64,
-    key: BorrowedSlice,
-    now_unix: i64,
-    out_result: *mut LookupResult,
-) -> Status {
-    boundary(|| {
-        if handle == 0 || out_result.is_null() {
-            return Status::InvalidArgument;
-        }
-        let Ok(key_bytes) = (unsafe { key.as_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        if key_bytes.is_empty() {
-            return Status::InvalidArgument;
-        }
-        let Some(cache) = handles().get(&handle) else {
-            return Status::Closed;
-        };
-        let mut result = LookupResult::empty();
-        result.status = Status::Ok;
-        match cache.lookup(key_bytes, now_unix) {
-            Ok(Some(data)) => {
-                result.state = data.state;
-                result.stored_at_unix = data.stored_at_unix;
-                result.message_expires_at_unix = data.message_expires_at_unix;
-                result.response = OwnedBuffer::from_vec(data.response);
-                result.domain_set = OwnedBuffer::copy_from_slice(&data.domain_set);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                let status = cache_error_status(error);
-                result.status = status;
-                unsafe { out_result.write(result) };
-                return status;
-            }
-        }
-        unsafe { out_result.write(result) };
-        Status::Ok
-    })
-}
-
-/// Looks up one key and writes hit payloads into caller-owned buffers.
-///
-/// # Safety
-///
-/// Borrowed input and writable output slices must remain valid for this call,
-/// and `out_result` must point to writable [`LookupIntoResult`] storage.
-pub unsafe fn cache_lookup_into(
-    handle: u64,
-    key: BorrowedSlice,
-    now_unix: i64,
-    mut response_out: WritableSlice,
-    mut domain_set_out: WritableSlice,
-    out_result: *mut LookupIntoResult,
-) -> Status {
-    boundary(|| {
-        if handle == 0 || out_result.is_null() {
-            return Status::InvalidArgument;
-        }
-        let Ok(key_bytes) = (unsafe { key.as_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        let Ok(response_buffer) = (unsafe { response_out.as_mut_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        let Ok(domain_set_buffer) = (unsafe { domain_set_out.as_mut_slice() }) else {
-            return Status::InvalidArgument;
-        };
-        if key_bytes.is_empty() {
-            return Status::InvalidArgument;
-        }
-        let Some(cache) = handles().get(&handle) else {
-            return Status::Closed;
-        };
-        let mut result = LookupIntoResult::empty();
-        result.status = Status::Ok;
-        match cache.lookup(key_bytes, now_unix) {
-            Ok(Some(data)) => {
-                result.state = data.state;
-                result.stored_at_unix = data.stored_at_unix;
-                result.message_expires_at_unix = data.message_expires_at_unix;
-                result.response_len = u64::try_from(data.response.len()).unwrap_or(u64::MAX);
-                result.domain_set_len = u64::try_from(data.domain_set.len()).unwrap_or(u64::MAX);
-                if response_buffer.len() < data.response.len()
-                    || domain_set_buffer.len() < data.domain_set.len()
-                {
-                    result.status = Status::BufferTooSmall;
-                    unsafe { out_result.write(result) };
-                    return Status::BufferTooSmall;
-                }
-                response_buffer[..data.response.len()].copy_from_slice(&data.response);
-                domain_set_buffer[..data.domain_set.len()].copy_from_slice(&data.domain_set);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                let status = cache_error_status(error);
-                result.status = status;
-                unsafe { out_result.write(result) };
-                return status;
-            }
-        }
-        unsafe { out_result.write(result) };
-        Status::Ok
-    })
-}
-
-#[must_use]
-pub fn cache_flush(handle: u64) -> Status {
-    boundary(|| {
-        if handle == 0 {
-            return Status::InvalidArgument;
-        }
-        let Some(cache) = handles().get(&handle) else {
-            return Status::Closed;
-        };
-        cache.flush();
-        Status::Ok
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        BorrowedSlice, CacheConfig, LookupState, NativeCache, Status, boundary, cache_close,
-        cache_create, cache_lookup, cache_store,
-    };
+    use super::{CacheConfig, LookupState, NativeCache};
 
     const CONFIG: CacheConfig = CacheConfig {
         capacity: 4,
@@ -1029,11 +480,6 @@ mod tests {
         );
         cache.flush();
         assert!(cache.lookup(b"key", 101).unwrap().is_none());
-    }
-
-    #[test]
-    fn panic_is_contained_at_boundary() {
-        assert_eq!(boundary(|| panic!("ffi test panic")), Status::Panic);
     }
 
     #[test]
@@ -1125,59 +571,6 @@ mod tests {
                 .expect("cache expiry boundary")
                 .is_none()
         );
-    }
-
-    #[test]
-    fn native_and_abi_lookup_results_match_at_the_same_time() {
-        let cache = NativeCache::new(CONFIG).expect("native cache");
-        let packet = response(60, [192, 0, 2, 9]);
-        cache
-            .store(b"key", &packet, b"domain", 100, 160, 200)
-            .expect("native store");
-
-        let mut handle = 0;
-        assert_eq!(
-            unsafe { cache_create(&CONFIG, &raw mut handle) },
-            Status::Ok
-        );
-        assert_eq!(
-            unsafe {
-                cache_store(
-                    handle,
-                    BorrowedSlice::from_slice(b"key"),
-                    BorrowedSlice::from_slice(&packet),
-                    BorrowedSlice::from_slice(b"domain"),
-                    100,
-                    160,
-                    200,
-                )
-            },
-            Status::Ok
-        );
-
-        let native = cache
-            .lookup(b"key", 107)
-            .expect("native lookup")
-            .expect("hit");
-        let mut abi = super::LookupResult::empty();
-        assert_eq!(
-            unsafe { cache_lookup(handle, BorrowedSlice::from_slice(b"key"), 107, &raw mut abi,) },
-            Status::Ok
-        );
-        assert_eq!(abi.state, native.state);
-        assert_eq!(abi.stored_at_unix, native.stored_at_unix);
-        assert_eq!(abi.message_expires_at_unix, native.message_expires_at_unix);
-        assert_eq!(unsafe { abi.response.as_slice() }, native.response);
-        assert_eq!(unsafe { abi.domain_set.as_slice() }, native.domain_set);
-        assert_eq!(
-            unsafe { super::cache_buffer_release(abi.response) },
-            Status::Ok
-        );
-        assert_eq!(
-            unsafe { super::cache_buffer_release(abi.domain_set) },
-            Status::Ok
-        );
-        assert_eq!(cache_close(handle), Status::Ok);
     }
 
     #[test]

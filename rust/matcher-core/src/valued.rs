@@ -52,36 +52,6 @@ pub struct ValuedMatchResult {
     pub joined_sources: String,
 }
 
-pub const VALUED_RULE_BATCH_VERSION: u8 = 1;
-pub const VALUED_RESULT_VERSION: u8 = 1;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ValuedEncodingError {
-    InvalidVersion(u8),
-    InvalidUtf8,
-    LengthOverflow,
-    Truncated,
-    TrailingBytes,
-    Build(ValuedBuildError),
-}
-
-impl Display for ValuedEncodingError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidVersion(version) => {
-                write!(f, "unsupported valued encoding version {version}")
-            }
-            Self::InvalidUtf8 => write!(f, "valued encoding contains invalid UTF-8"),
-            Self::LengthOverflow => write!(f, "valued encoding length exceeds u32"),
-            Self::Truncated => write!(f, "truncated valued encoding"),
-            Self::TrailingBytes => write!(f, "trailing bytes in valued encoding"),
-            Self::Build(error) => error.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for ValuedEncodingError {}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ValuedBuildError {
     InvalidRule(String),
@@ -311,12 +281,6 @@ impl ValuedDomainMatcher {
         })
     }
 
-    /// Builds an immutable matcher from the versioned ABI rule batch.
-    pub fn build_encoded(bytes: &[u8]) -> Result<Self, ValuedEncodingError> {
-        let rules = decode_valued_rule_batch(bytes)?;
-        Self::build(&rules).map_err(ValuedEncodingError::Build)
-    }
-
     /// Returns the number of unique rule strings in this snapshot.
     #[must_use]
     pub const fn len(&self) -> usize {
@@ -532,180 +496,9 @@ fn append_joined_value(joined: &mut String, value: &str) {
     }
 }
 
-/// Encodes one complete valued-rule batch for the runtime ABI.
-pub fn encode_valued_rule_batch(rules: &[ValuedRule]) -> Result<Vec<u8>, ValuedEncodingError> {
-    let count = u32::try_from(rules.len()).map_err(|_| ValuedEncodingError::LengthOverflow)?;
-    let mut out = Vec::new();
-    out.push(VALUED_RULE_BATCH_VERSION);
-    out.extend_from_slice(&count.to_le_bytes());
-    for rule in rules {
-        push_string(&mut out, &rule.rule)?;
-        out.extend_from_slice(&rule.fast_marks.to_le_bytes());
-        let ctx_count =
-            u32::try_from(rule.ctx_marks.len()).map_err(|_| ValuedEncodingError::LengthOverflow)?;
-        out.extend_from_slice(&ctx_count.to_le_bytes());
-        for mark in &rule.ctx_marks {
-            out.extend_from_slice(&mark.to_le_bytes());
-        }
-        push_string(&mut out, &rule.joined_tags)?;
-        push_string(&mut out, &rule.joined_sources)?;
-    }
-    Ok(out)
-}
-
-/// Decodes one complete valued-rule batch from the runtime ABI.
-pub fn decode_valued_rule_batch(bytes: &[u8]) -> Result<Vec<ValuedRule>, ValuedEncodingError> {
-    if bytes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut cursor = 0;
-    let version = read_u8(bytes, &mut cursor)?;
-    if version != VALUED_RULE_BATCH_VERSION {
-        return Err(ValuedEncodingError::InvalidVersion(version));
-    }
-    let count = read_u32(bytes, &mut cursor)? as usize;
-    let remaining = bytes.len().saturating_sub(cursor);
-    // A rule has five fixed-width fields even when every variable-length
-    // field is empty. Reject an impossible count before allocating based on
-    // untrusted input.
-    if count > remaining / 24 {
-        return Err(ValuedEncodingError::Truncated);
-    }
-    let mut rules = Vec::with_capacity(count);
-    for _ in 0..count {
-        let rule = read_string(bytes, &mut cursor)?;
-        let fast_marks = read_u64(bytes, &mut cursor)?;
-        let ctx_count = read_u32(bytes, &mut cursor)? as usize;
-        let remaining = bytes.len().saturating_sub(cursor);
-        if ctx_count > remaining / 4 {
-            return Err(ValuedEncodingError::Truncated);
-        }
-        let mut ctx_marks = Vec::with_capacity(ctx_count);
-        for _ in 0..ctx_count {
-            ctx_marks.push(read_u32(bytes, &mut cursor)?);
-        }
-        let joined_tags = read_string(bytes, &mut cursor)?;
-        let joined_sources = read_string(bytes, &mut cursor)?;
-        rules.push(ValuedRule {
-            rule,
-            fast_marks,
-            ctx_marks,
-            joined_tags,
-            joined_sources,
-        });
-    }
-    if cursor != bytes.len() {
-        return Err(ValuedEncodingError::TrailingBytes);
-    }
-    Ok(rules)
-}
-
-/// Encodes one matched result into the caller-owned ABI payload format.
-pub fn encode_valued_match_result(
-    result: &ValuedMatchResult,
-) -> Result<Vec<u8>, ValuedEncodingError> {
-    let ctx_count =
-        u32::try_from(result.ctx_marks.len()).map_err(|_| ValuedEncodingError::LengthOverflow)?;
-    let mut out = Vec::new();
-    out.push(VALUED_RESULT_VERSION);
-    out.extend_from_slice(&result.fast_marks.to_le_bytes());
-    out.extend_from_slice(&ctx_count.to_le_bytes());
-    for mark in &result.ctx_marks {
-        out.extend_from_slice(&mark.to_le_bytes());
-    }
-    push_string(&mut out, &result.joined_tags)?;
-    push_string(&mut out, &result.joined_sources)?;
-    Ok(out)
-}
-
-/// Decodes one caller-owned ABI result payload for parity and misuse tests.
-pub fn decode_valued_match_result(bytes: &[u8]) -> Result<ValuedMatchResult, ValuedEncodingError> {
-    let mut cursor = 0;
-    let version = read_u8(bytes, &mut cursor)?;
-    if version != VALUED_RESULT_VERSION {
-        return Err(ValuedEncodingError::InvalidVersion(version));
-    }
-    let fast_marks = read_u64(bytes, &mut cursor)?;
-    let ctx_count = read_u32(bytes, &mut cursor)? as usize;
-    let remaining = bytes.len().saturating_sub(cursor);
-    if ctx_count > remaining / 4 {
-        return Err(ValuedEncodingError::Truncated);
-    }
-    let mut ctx_marks = Vec::with_capacity(ctx_count);
-    for _ in 0..ctx_count {
-        ctx_marks.push(read_u32(bytes, &mut cursor)?);
-    }
-    let joined_tags = read_string(bytes, &mut cursor)?;
-    let joined_sources = read_string(bytes, &mut cursor)?;
-    if cursor != bytes.len() {
-        return Err(ValuedEncodingError::TrailingBytes);
-    }
-    Ok(ValuedMatchResult {
-        fast_marks,
-        ctx_marks,
-        joined_tags,
-        joined_sources,
-    })
-}
-
-fn push_string(out: &mut Vec<u8>, value: &str) -> Result<(), ValuedEncodingError> {
-    let len = u32::try_from(value.len()).map_err(|_| ValuedEncodingError::LengthOverflow)?;
-    out.extend_from_slice(&len.to_le_bytes());
-    out.extend_from_slice(value.as_bytes());
-    Ok(())
-}
-
-fn read_u8(bytes: &[u8], cursor: &mut usize) -> Result<u8, ValuedEncodingError> {
-    let value = *bytes.get(*cursor).ok_or(ValuedEncodingError::Truncated)?;
-    *cursor += 1;
-    Ok(value)
-}
-
-fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, ValuedEncodingError> {
-    let end = cursor
-        .checked_add(4)
-        .ok_or(ValuedEncodingError::Truncated)?;
-    let value = bytes
-        .get(*cursor..end)
-        .ok_or(ValuedEncodingError::Truncated)?;
-    *cursor = end;
-    let mut encoded = [0_u8; 4];
-    encoded.copy_from_slice(value);
-    Ok(u32::from_le_bytes(encoded))
-}
-
-fn read_u64(bytes: &[u8], cursor: &mut usize) -> Result<u64, ValuedEncodingError> {
-    let end = cursor
-        .checked_add(8)
-        .ok_or(ValuedEncodingError::Truncated)?;
-    let value = bytes
-        .get(*cursor..end)
-        .ok_or(ValuedEncodingError::Truncated)?;
-    *cursor = end;
-    let mut encoded = [0_u8; 8];
-    encoded.copy_from_slice(value);
-    Ok(u64::from_le_bytes(encoded))
-}
-
-fn read_string(bytes: &[u8], cursor: &mut usize) -> Result<String, ValuedEncodingError> {
-    let len = read_u32(bytes, cursor)? as usize;
-    let end = cursor
-        .checked_add(len)
-        .ok_or(ValuedEncodingError::Truncated)?;
-    let value = bytes
-        .get(*cursor..end)
-        .ok_or(ValuedEncodingError::Truncated)?;
-    *cursor = end;
-    String::from_utf8(value.to_vec()).map_err(|_| ValuedEncodingError::InvalidUtf8)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        ValuedBuildError, ValuedDomainMatcher, ValuedEncodingError, ValuedMatchResult, ValuedRule,
-        decode_valued_match_result, decode_valued_rule_batch, encode_valued_match_result,
-        encode_valued_rule_batch,
-    };
+    use super::{ValuedBuildError, ValuedDomainMatcher, ValuedRule};
 
     #[test]
     fn full_rules_that_differ_only_in_case_merge_instead_of_overwriting() {
@@ -947,64 +740,6 @@ mod tests {
         for worker in workers {
             worker.join().expect("reader thread");
         }
-    }
-
-    #[test]
-    fn versioned_encodings_round_trip_and_reject_malformed_lengths() {
-        let rules = vec![
-            ValuedRule::new("domain:example.com", 3, [20, 10], "base|tag", "source"),
-            ValuedRule::new("keyword:child", 4, [30], "keyword", "keyword-source"),
-        ];
-        let encoded_rules = encode_valued_rule_batch(&rules).expect("encode valued rules");
-        assert_eq!(
-            decode_valued_rule_batch(&encoded_rules).expect("decode valued rules"),
-            rules
-        );
-
-        let mut truncated = encoded_rules.clone();
-        truncated.pop();
-        assert_eq!(
-            decode_valued_rule_batch(&truncated),
-            Err(ValuedEncodingError::Truncated)
-        );
-        let mut trailing = encoded_rules.clone();
-        trailing.push(0);
-        assert_eq!(
-            decode_valued_rule_batch(&trailing),
-            Err(ValuedEncodingError::TrailingBytes)
-        );
-        assert_eq!(
-            decode_valued_rule_batch(&[1, 0xff, 0xff, 0xff, 0xff]),
-            Err(ValuedEncodingError::Truncated)
-        );
-        let mut invalid_rule_utf8 = encoded_rules.clone();
-        invalid_rule_utf8[9] = 0xff;
-        assert_eq!(
-            decode_valued_rule_batch(&invalid_rule_utf8),
-            Err(ValuedEncodingError::InvalidUtf8)
-        );
-
-        let result = ValuedMatchResult {
-            fast_marks: 7,
-            ctx_marks: vec![10, 20, 30],
-            joined_tags: "tag|other".to_owned(),
-            joined_sources: "source".to_owned(),
-        };
-        let encoded_result = encode_valued_match_result(&result).expect("encode valued result");
-        assert_eq!(
-            decode_valued_match_result(&encoded_result).expect("decode valued result"),
-            result
-        );
-        assert_eq!(
-            decode_valued_match_result(&[1]),
-            Err(ValuedEncodingError::Truncated)
-        );
-        let mut invalid_result_utf8 = encoded_result.clone();
-        invalid_result_utf8[29] = 0xff;
-        assert_eq!(
-            decode_valued_match_result(&invalid_result_utf8),
-            Err(ValuedEncodingError::InvalidUtf8)
-        );
     }
 
     #[test]

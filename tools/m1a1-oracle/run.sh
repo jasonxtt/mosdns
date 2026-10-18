@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Differential run (M1-a1). Usage: run.sh <source tree> <snapshot dir> <work dir> [native target dir]
 # CONFIG (default config_custom.yaml) names the main file inside <snapshot dir>.
-# <source tree> holds the repo (Go oracle + rust/); <snapshot dir> is copied, never modified.
+# <source tree> is this repository (rust/ + tools/); <snapshot dir> is copied, never modified.
+# The Go oracle is built by tools/go-reference/build.sh from the pinned commit of the Go
+# repository (MOSDNS_GO_REPO, default /Users/tom/github/mosdns); set ORACLE_GO to use a built one.
 set -euo pipefail
 SRC="$1"; SNAP="$2"; WORK="$3"; TARGET="${4:-$WORK/target}"
 TOOLS="$SRC/tools/m1a1-oracle"
@@ -9,7 +11,8 @@ CONFIG="${CONFIG:-config_custom.yaml}"
 rm -rf "$WORK/root" "$WORK/out"; mkdir -p "$WORK/out"
 cp -a "$SNAP" "$WORK/root"
 python3 "$TOOLS/extract.py" --root "$WORK/root" --config "$CONFIG" --out "$WORK/out"
-(cd "$SRC" && go build -o "$WORK/oracle-go" ./tools/m1a1-oracle)
+if [ -n "${ORACLE_GO:-}" ]; then cp "$ORACLE_GO" "$WORK/oracle-go"
+else "$SRC/tools/go-reference/build.sh" "$WORK/go-reference" m1a1-oracle && cp "$WORK/go-reference/m1a1-oracle" "$WORK/oracle-go"; fi
 (cd "$SRC/rust" && CARGO_TARGET_DIR="$TARGET" cargo build -p mosdns-native-host --example m1a1_oracle >/dev/null)
 NATIVE="$TARGET/debug/examples/m1a1_oracle"
 "$WORK/oracle-go" -root "$WORK/root" -config "$CONFIG" -in "$WORK/out/rules_request.jsonl" -out "$WORK/out/rules_answers.jsonl" 2>"$WORK/out/go-rules.err"

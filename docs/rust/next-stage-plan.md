@@ -1,5 +1,9 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-18：Phase 6a `rust` 分支变成纯 Rust 项目（待 Codex 审查结论与规划会话确认）
+
+删除 Go 源码（`coremain/ plugin/ pkg/ mlog/ main.go go.mod go.sum`、`tools/*.go`）、Go 构建与发布文件和工作流、`rust/runtime` 及全部混合脚手架、`/log` 源码；内置 UI 产物迁到 `rust/native-host/ui/`；Go 参照工具改由 `tools/go-reference/build.sh` 从 `../mosdns` 固定提交 `75f26677` 构建。只删除与迁移，Rust 行为不变；`native_management` 留给 6b。清单、验证与测试数量变化见 [validation-records/10-18-p6a](validation-records/10-18-p6a/README.md)。
+
 ## 2026-10-18：F-3a 原生在线更新、自动回滚与配置包管理实现完成，待 Codex 审查结论与规划会话确认
 
 只认 `jasonxtt/mosdns` 的 `rust-v*` release；检查/状态/下载（程序、清单、`config_rust` 配置包）全部 sha256 校验、大小与时间有界；预检（候选自报版本、新配置 `check`）在**动服务之前**完成。

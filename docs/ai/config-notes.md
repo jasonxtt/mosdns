@@ -22,7 +22,7 @@ SRS data, or config-update state into config-package `managed_files`.
 
 For the Go/main-style config-update workflow, compatibility is declared by
 `requiredConfigSchema` and `requiredConfigPackageID` in
-`coremain/config_update.go`.
+`coremain/config_update.go` (a file of the Go repository, `main` branch; this branch no longer holds it).
 
 - Binary-only releases keep both values unchanged.
 - Structural config releases bump both values and publish a matching external package.

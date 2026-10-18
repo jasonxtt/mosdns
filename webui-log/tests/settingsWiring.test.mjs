@@ -69,16 +69,15 @@ test('the effective-settings read is a plain, ungated request', () => {
 })
 
 const sources = [
-  new URL('../src/components/SystemControlManager.vue', import.meta.url),
-  new URL('../src-log1/SystemControlManager.vue', import.meta.url)
+  new URL('../src/components/SystemControlManager.vue', import.meta.url)
 ]
 
-test('both shells hide the replacement rules, apply overrides at once and offer restore only on the native runtime', async () => {
+test('the shell hides the replacement rules, apply overrides at once and offer restore only on the native runtime', async () => {
   for (const path of sources) {
     const source = await readFile(path, 'utf8')
     // The replacement panel and its toggle exist only outside the native runtime.
     assert.match(source, /expandedAdvanced\.replacementRules && !nativeRuntime/, path.pathname)
-    assert.match(source, /v-if="!nativeRuntime" class="(?:system-advanced-toggle-row|log1-module-toggle-row log1-module-toggle-row-center)"/, path.pathname)
+    assert.match(source, /v-if="!nativeRuntime" class="system-advanced-toggle-row"/, path.pathname)
     assert.match(source, /data-native-replacements-note/, path.pathname)
     // Native saves send no replacements, never ask for a restart and can restore a field.
     const save = source.slice(source.indexOf('async function saveOverrides()'))

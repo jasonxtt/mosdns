@@ -65,7 +65,8 @@ def run(args):
                 env.pop(key, None)
             host = spawn(["unshare", "--mount", "--propagation", "private", "sh", "-c", 'mount --bind "$1" /tmp; shift; exec "$@"', "e2e1", root / "tmp", binary, "start", "-d", root, "-c", "config_custom.yaml"], "host.log", env)
             # unshare/sh exec preserves the PID used for resource attribution.
-            api_port = json.loads((root / "webinfo/webui_port_settings.json").read_text())["port"] if role == "go" else 9099
+            # Both hosts apply the saved WebUI port (the native one since F-1).
+            api_port = json.loads((root / "webinfo/webui_port_settings.json").read_text())["port"]
             command(["ip", "netns", "exec", ns, "python3", script / "replay.py", root, args.work / "corpus.json", host.pid, "--api-port", api_port])
             if host.poll() is not None:
                 raise RuntimeError(role + " host exited during replay")

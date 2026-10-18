@@ -107,15 +107,14 @@ Correct: SO_REUSEADDR allows closed sessions while active listeners still fail.
 ## Verification
 
 - Add a failing regression or parity test before changing behavior, then make it pass.
-- Run focused package tests while iterating and `go test ./...` before handing off backend changes.
-- Run race tests for concurrency-sensitive Go bridges and cache code.
+- Run focused tests while iterating and `cargo test --workspace --no-fail-fast` (in `rust/`, on the build VM) before handing off backend changes. (The `rust` branch has no Go code since Phase 6a; Go-side tests belong to the Go repository.)
 - Rust crates must pass `cargo fmt --check`, `cargo test`, and `cargo clippy --all-targets -- -D warnings`.
-- FFI changes require Linux+cgo integration coverage plus sanitizer/Miri or an equivalent focused memory-safety check where applicable.
+- Any `unsafe` or FFI-style change needs a focused memory-safety check (sanitizer/Miri or equivalent) where applicable.
 - Cache migration requires golden parity for TTL, negative answers, ECS, exclusion, lazy update, dump/API behavior, raw UDP/TCP/HTTP responses, concurrency, metrics, and fallback.
 
 ## Build and deployment
 
-Release/deployment binaries must contain freshly built Vue assets; use repository build scripts rather than a bare `go build`. For deployment work, validate locally, then on `mos-test` (`10.0.0.91`), and promote to production only after confirmation.
+Release/deployment binaries must contain freshly built Vue assets; use the repository build scripts (`scripts/build-rust-native.sh`, `scripts/build-rust-release.sh`) rather than a bare `cargo build`. For deployment work, validate locally, then on `mos-test` (`10.0.0.91`), and promote to production only after confirmation.
 
 ## Review gates
 

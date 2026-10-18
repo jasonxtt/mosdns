@@ -1,5 +1,6 @@
 // Command mksrs writes the small SRS fixtures used by the native provider
 // tests, built with the same sing library the reference providers read with.
+// Self-contained: it is built inside the pinned reference tree (tools/go-reference).
 //
 //	mksrs <output dir>
 package main
@@ -14,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/testutil"
 	"github.com/sagernet/sing/common/varbin"
 )
 
@@ -52,7 +52,7 @@ func main() {
 		os.Exit(2)
 	}
 	out := os.Args[1]
-	domains, err := testutil.BuildDomainSRS(
+	domains, err := BuildDomainSRS(
 		[]string{"exact.srs.example", "other.srs.example"},
 		[]string{"suffix.srs.example", "example.cn"},
 		[]string{"kwsrs"},
