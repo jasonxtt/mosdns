@@ -1,5 +1,12 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-18：F-3a 原生在线更新、自动回滚与配置包管理实现完成，待 Codex 审查结论与规划会话确认
+
+只认 `jasonxtt/mosdns` 的 `rust-v*` release；检查/状态/下载（程序、清单、`config_rust` 配置包）全部 sha256 校验、大小与时间有界；预检（候选自报版本、新配置 `check`）在**动服务之前**完成。
+替换走事务：守护 = 旧程序 `exec` 进来的**同一 PID**（systemd 不察觉），候选是它的子进程，健康（连续 3 次 `ready` + 版本 + 配置 schema）才确认；候选崩溃/不健康/超时 → 秒级自动回滚旧程序与旧受管配置，不依赖 `Restart=always`/`RestartSec=2min`；
+守护被强杀或断电 → 启动恢复回滚（实测最坏 = `RestartSec` + 0.5 s）。配置包 schema `1`、ID `rust-config-schema-1`，状态文件 `webinfo/rust_config_update_state.json`（不碰 Go 的）；`config/export`、`config/update_from_url` 与 Go 路由一致但只作用于本机配置根并走同一事务。
+VM 实测（systemd `Restart=always`/`RestartSec=120`）：升级 DNS 两次各约 0.2 s 的静默、失败回滚一次约 1.2 s、进程号不变、`NRestarts` 不变。记录见 [validation-records/10-18-f3a](validation-records/10-18-f3a/README.md)，契约 [native-update.md](contracts/native-update.md)。首次从 Go 切换的部署脚本（F-3b）与发布（打 tag、传产物）仍待做。
+
 ## 2026-10-18：F-2b 日志抓取的逐步流程实现完成，待 Codex 审查结论与规划会话确认
 
 抓取期间引擎在每个有名字的 matcher 求值后、每条规则执行动作前，写出与 Go `chain.go` 相同 msg 与字段的行（`dns query flows through matcher` / `… plugin`；`trace_id` 与汇总行一致），

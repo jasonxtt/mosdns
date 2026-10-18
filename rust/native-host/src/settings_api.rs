@@ -275,6 +275,16 @@ fn unique<'a>(
     }
 }
 
+/// The address of the configured `socks5_proxy` object (empty when there is none, or it is
+/// ambiguous): the proxy the updater's downloads go through.
+pub(crate) fn proxy_address(config: &CompiledConfig) -> String {
+    unique(config, "socks5_proxy")
+        .ok()
+        .flatten()
+        .map(|item| item.value.trim().to_owned())
+        .unwrap_or_default()
+}
+
 fn overrides_get(config: &CompiledConfig) -> Reply {
     let value = |kind: &str| -> Result<String, String> {
         Ok(unique(config, kind)?

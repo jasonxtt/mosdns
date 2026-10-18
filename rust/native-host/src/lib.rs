@@ -47,6 +47,7 @@ mod tcp;
 mod transaction;
 mod udp;
 mod ui_manifest;
+mod update;
 mod upstream_metrics;
 mod webinfo;
 
@@ -79,7 +80,43 @@ pub use observer::{
     UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
     UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamTransport,
 };
-pub use restart::{RestartTarget, capture as capture_restart_target, captured as restart_target};
+pub use restart::{
+    RestartTarget, capture as capture_restart_target, captured as restart_target, take_pending,
+};
+
+/// `mosdns update-guard --transaction <file>`: the update guard (see `update/guard.rs`). It
+/// replaces this process and returns only when even the final `exec` failed.
+#[must_use]
+pub fn run_update_guard(transaction: &std::path::Path) -> String {
+    update::guard::run(transaction)
+}
+
+/// Called by `mosdns start`: a candidate started by the update guard asks to be stopped
+/// together with it.
+pub fn arm_update_candidate() {
+    update::guard::arm_parent_death_signal();
+}
+
+/// Called by `mosdns start` before the configuration is loaded: rolls back an interrupted
+/// update and returns the program and arguments to run again (`None`: nothing to recover).
+///
+/// # Errors
+///
+/// A message when the rollback itself failed (the host must not start in a mixed state).
+pub fn recover_interrupted_update(
+    root: &std::path::Path,
+) -> Result<Option<(String, Vec<String>)>, String> {
+    update::transaction::recover_on_start(root)
+        .map(|recovered| recovered.map(|recovered| (recovered.executable, recovered.args)))
+}
+
+/// After the `exec` of an update guard failed: nothing was changed, so the staged
+/// transaction is closed as rolled back with the reason.
+pub fn abandon_failed_update_exec(target: &RestartTarget, reason: &str) {
+    if let Some(path) = target.transaction() {
+        update::transaction::abandon_staged(path, &format!("无法启动更新守护: {reason}"));
+    }
+}
 pub use special_groups::{ManagedProfile, SpecialGroup, forward_entries, normalize_groups};
 pub use switch::SwitchDeclaration;
 pub use tcp::{TcpServer, TcpServerError};
@@ -99,6 +136,9 @@ where
         ))),
         CliCommand::Check { .. } => Err(HostError::Cli(CliError::new(
             "check does not prepare a host",
+        ))),
+        CliCommand::UpdateGuard { .. } => Err(HostError::Cli(CliError::new(
+            "update-guard does not prepare a host",
         ))),
         CliCommand::Start { config, dir } => {
             let (config, root) =

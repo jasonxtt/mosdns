@@ -32,6 +32,26 @@ The external package repository is the sibling `file` repository, normally
 `../file/mosdns/config` from these worktrees. Keep binary values, manifests,
 managed-file boundaries, and published packages consistent.
 
+### Rust (native) config package
+
+The native host has its own schema and package ID, independent of the Go ones:
+`REQUIRED_CONFIG_SCHEMA` / `REQUIRED_CONFIG_PACKAGE_ID` (`1`, `rust-config-schema-1`) in
+`rust/native-host/src/update/mod.rs`, checked against `scripts/rust-release-metadata.json` by
+`scripts/generate-rust-update-manifest.sh`. Same rules as above: binary-only releases keep both
+values, a structural change of the managed files bumps both and republishes the package.
+
+- The package is `config_rust_up.zip` (`channel: "rust"`), built from `config_rust/` by
+  `file/mosdns/config/build_config_rust_up.sh`. It manages `config_custom.yaml` and `sub_config/*.yaml`
+  except the host-generated `special_groups.yaml`; user and runtime data (`webinfo/`, `rule/`, `gen/`,
+  `srs/`, `adguard/`, `cache/`, `ui/`, `sub_config/special_groups.yaml`) are never touched.
+- The native host keeps its package state in `webinfo/rust_config_update_state.json`. The Go host's
+  `webinfo/config_update_state.json` (which `config_rust/webinfo` may carry as a copy) is neither read nor
+  written by the native host, and the Go host must not be pointed at the native file: reusing one file
+  would make either side believe the other's schema is already applied.
+- A fresh native install (the F-3b deployment script) must write `rust_config_update_state.json` with
+  `applied_schema` equal to the package it installed, otherwise the first update would re-apply the package.
+- Contract and failure handling: `docs/rust/contracts/native-update.md`.
+
 ## Dedicated routing and rule order
 
 The canonical feature name is `special_groups`.

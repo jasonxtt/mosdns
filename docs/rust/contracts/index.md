@@ -23,6 +23,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Native typed settings](native-settings.md) | `socks5_proxy`/`ecs_address` objects and `$tag` references, `webinfo/settings.json`, effective configuration with sources, hot apply, WebUI settings routes |
 | [Native `requery`](native-requery.md) | Scheduled / triggered re-query job, reference state file, shared in-process URL actions, scheduler and API |
 | [Native `domain_output`](native-domain-output.md) | Name statistics, reference file formats, rule publication, immediate `target_mapper` injection, `/show` `/save` `/flush` API |
+| [Native online update](native-update.md) | `rust-v*` releases, sha256-verified program and `config_rust` package updates, guarded transaction with automatic rollback that does not depend on the service manager, configuration export/update from URL |
 | [Native WebUI hosting](native-webui-hosting.md) | Same-origin embedded/external UI, truthful health/version, capability admission and opt-in pure native build |
 
 ## Before development
