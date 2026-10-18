@@ -1,4 +1,4 @@
-//! Standard-mode API; the older native_management handlers remain frozen.
+//! Standard-mode special-groups API.
 use crate::config::{
     CompiledConfig,
     settings::UpstreamEntry,

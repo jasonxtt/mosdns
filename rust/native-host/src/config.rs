@@ -576,8 +576,6 @@ pub struct CompiledConfig {
     /// means the compiler cannot prove reuse safe for that cache owner.
     pub(crate) cache_dependencies: Vec<Option<String>>,
     pub(crate) response_identities: std::collections::HashMap<(usize, usize), std::sync::Arc<str>>,
-    pub managed_profile: Option<crate::special_groups::ManagedProfile>,
-    pub managed_router: Option<ManagedRouterConfig>,
     /// Ordered listener inventory. `listener` remains the primary helper view.
     pub listeners: Vec<ListenerConfig>,
     pub response_policies: Vec<ResponsePolicyConfig>,
@@ -614,18 +612,6 @@ pub struct CompiledConfig {
     pub program: ValidatedProgram,
     /// Management state of the rule providers and their `domain_mapper`s.
     pub(crate) rule_sources: Rc<crate::rule_sources::RuleSources>,
-}
-
-/// The native router's canonical named calls. All IDs belong to this program.
-pub struct ManagedRouterConfig {
-    pub sequence: SequenceId,
-    pub groups: Vec<ManagedRouterGroup>,
-}
-pub struct ManagedRouterGroup {
-    pub slot: u32,
-    /// Snapshot-local indices into `CompiledConfig.domain_sets` in priority order.
-    pub providers: [usize; 2],
-    pub child: SequenceId,
 }
 
 pub struct ResponseIpRuleConfig {
@@ -863,8 +849,6 @@ fn compile_with_settings(
         &raw,
         base_dir,
         root_dir,
-        None,
-        None,
         origin.map(|_| &mut inputs),
         origin,
         settings,
@@ -944,70 +928,37 @@ pub(crate) fn recompile_groups(
     )
 }
 
-pub(crate) fn compile_candidate_yaml(
-    yaml: &str,
-    base_dir: &Path,
-    root_dir: &Path,
-    profile: crate::special_groups::ManagedProfile,
-    files: &crate::special_groups::StagedFiles,
-    inputs: &mut crate::special_groups::CandidateInputSet,
-) -> Result<CompiledConfig, ConfigError> {
-    let settings = settings::Settings::load(root_dir)?;
-    compile_raw(
-        &parse_yaml(yaml)?,
-        base_dir,
-        root_dir,
-        Some(profile),
-        Some(files),
-        Some(inputs),
-        None,
-        &settings,
-        None,
-    )
-}
-
 fn parse_yaml(yaml: &str) -> Result<RawValue, ConfigError> {
     yaml_serde::from_str(yaml)
         .map_err(|error| ConfigError::new("$", format!("invalid YAML: {error}")))
 }
 
-/// Preflight only the explicit opt-in before acquiring the state-root writer.
-/// Full compilation is deliberately deferred until durable recovery completes.
-pub(crate) fn management_enabled(yaml: &str) -> Result<bool, ConfigError> {
-    managed_opt_in(&parse_yaml(yaml)?)
-}
-
-fn managed_opt_in(raw: &RawValue) -> Result<bool, ConfigError> {
+/// `native_management` (the experimental managed mode) was removed; a configuration that
+/// still carries it is refused instead of being silently ignored.
+fn reject_removed_management(raw: &RawValue) -> Result<(), ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
-    let Some(value) = root.get("native_management") else {
-        return Ok(false);
-    };
-    let options = expect_map(
-        value,
-        "$.native_management",
-        "native_management must be a mapping",
-    )?;
-    options.reject_unknown(&["special_groups"], "$.native_management")?;
-    expect_bool(
-        options.required("special_groups", "$.native_management")?,
-        "$.native_management.special_groups",
-    )
+    if root.get("native_management").is_some() {
+        return Err(ConfigError::new(
+            "$.native_management",
+            "native_management was removed; use the standard special_groups configuration",
+        ));
+    }
+    Ok(())
 }
 
-const ROOT_FIELDS: &[&str] = &["log", "include", "plugins", "api", "native_management"];
+const ROOT_FIELDS: &[&str] = &["log", "include", "plugins", "api"];
 
 #[allow(clippy::too_many_arguments)]
 fn compile_raw(
     raw: &RawValue,
     base_dir: &Path,
     root_dir: &Path,
-    candidate: Option<crate::special_groups::ManagedProfile>,
-    staged: Option<&crate::special_groups::StagedFiles>,
     mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     config_origin: Option<&Path>,
     settings: &settings::Settings,
     groups: Option<&[standard_groups::Group]>,
 ) -> Result<CompiledConfig, ConfigError> {
+    reject_removed_management(raw)?;
     let root = expect_map(raw, "$", "top level must be a mapping")?;
     root.reject_unknown(ROOT_FIELDS, "$")?;
     let log = compile_log(root.required("log", "$")?, root_dir)?.level;
@@ -1019,21 +970,6 @@ fn compile_raw(
         .map(|api| ApiConfig {
             http: crate::system_api::with_saved_port(root_dir, api.http),
         });
-    let managed = if managed_opt_in(raw)? {
-        Some(match candidate {
-            Some(profile) => profile,
-            None => crate::special_groups::ManagedProfile::load(base_dir)?,
-        })
-    } else {
-        if candidate.is_some() {
-            return Err(ConfigError::new(
-                "native_management",
-                "candidate requires the frozen managed opt-in",
-            ));
-        }
-        None
-    };
-
     // Definition collection: included plugin-only files load in declaration
     // order, then this file's plugins. No definition is resolved until the
     // whole ordered catalog exists, so a reference may name a later
@@ -1046,15 +982,9 @@ fn compile_raw(
         for (index, include) in includes.iter().enumerate() {
             let expression = expect_string(include, &format!("$.include[{index}]"))?;
             include_paths.push(resolve_relative(&expression, base_dir));
-            if managed.is_none()
-                && config_origin.is_some()
-                && is_standard_include(&expression, base_dir)
-            {
+            if config_origin.is_some() && is_standard_include(&expression, base_dir) {
                 standard = true;
                 continue;
-            }
-            if let Some(profile) = &managed {
-                reject_generated_include(profile, &expression)?;
             }
             collect_included(
                 &expression,
@@ -1074,102 +1004,13 @@ fn compile_raw(
         )?);
     }
 
-    if let Some(profile) = &managed {
-        apply_managed_definitions(profile, &mut definitions)?;
-    }
     let sources = CompileSources {
         config_origin,
         include_paths: &include_paths,
         settings,
         standard: standard.then_some((root_dir, groups)),
     };
-    finish_compile(log, api, definitions, managed, staged, inputs, &sources)
-}
-
-/// Applies the managed opt-in to the collected definitions: reserved tag
-/// check, `aliapi` descriptor normalization, upstream overrides, and the
-/// generated special_groups plugins.
-fn apply_managed_definitions(
-    profile: &crate::special_groups::ManagedProfile,
-    definitions: &mut Vec<RawPlugin>,
-) -> Result<(), ConfigError> {
-    if let Some(plugin) = definitions
-        .iter()
-        .find(|plugin| crate::special_groups::reserved_tag(&plugin.tag))
-    {
-        return Err(ConfigError::new(
-            &plugin.source_path,
-            "reserved generated plugin tag collision",
-        ));
-    }
-    // `aliapi` is also the legacy wrapper name for ordinary DNS entries.
-    // Normalize only its descriptor to the native forward compiler. Signed
-    // API fields and protocols still fail that strict compiler; no fallback.
-    for plugin in definitions.iter_mut() {
-        if plugin.kind == "aliapi" {
-            plugin.kind = "forward".into();
-        }
-    }
-    for (tag, entries) in &profile.overrides {
-        if tag.starts_with("special_upstream_") {
-            continue;
-        }
-        let plugin = definitions
-            .iter_mut()
-            .find(|plugin| &plugin.tag == tag && plugin.kind == "forward")
-            .ok_or_else(|| {
-                ConfigError::new(
-                    "webinfo/upstream_overrides.json",
-                    format!("unknown forward tag `{tag}`"),
-                )
-            })?;
-        let translated = crate::special_groups::forward_entries(entries, tag)?;
-        let RawValue::Map(args) = &mut plugin.args else {
-            return Err(ConfigError::new(tag, "forward args must be a mapping"));
-        };
-        let raw = parse_yaml(
-            &serde_json::to_string(&translated)
-                .map_err(|e| ConfigError::new(tag, e.to_string()))?,
-        )?;
-        args.entries.retain(|(key, _)| key != "upstreams");
-        args.entries.push(("upstreams".into(), raw));
-    }
-    let generated = parse_yaml(&profile.generated_yaml)?;
-    let generated = expect_map(
-        &generated,
-        crate::special_groups::GENERATED_PATH,
-        "generated input",
-    )?;
-    let plugins = expect_sequence(
-        generated.required("plugins", "generated")?,
-        "generated.plugins",
-    )?;
-    for (index, plugin) in plugins.iter().enumerate() {
-        definitions.push(decode_plugin(
-            plugin,
-            &format!("@managed-generated.plugins[{index}]"),
-            &profile.base_dir,
-        )?);
-    }
-    Ok(())
-}
-
-fn reject_generated_include(
-    profile: &crate::special_groups::ManagedProfile,
-    expression: &str,
-) -> Result<(), ConfigError> {
-    let path = resolve_relative(expression, &profile.base_dir);
-    let generated = profile.base_dir.join(crate::special_groups::GENERATED_PATH);
-    if crate::special_groups::lexical_path(&path) == generated
-        || canonicalized_path(&path)
-            .is_some_and(|path| canonicalized_path(&generated).as_ref() == Some(&path))
-    {
-        return Err(ConfigError::new(
-            "$.include",
-            "generated special_groups input must not be explicitly included",
-        ));
-    }
-    Ok(())
+    finish_compile(log, api, definitions, inputs, &sources)
 }
 
 /// Compiles fully collected definitions; shared by `start` and `check`.
@@ -1177,13 +1018,11 @@ fn finish_compile(
     log: LogLevel,
     api: Option<ApiConfig>,
     definitions: Vec<RawPlugin>,
-    managed: Option<crate::special_groups::ManagedProfile>,
-    staged: Option<&crate::special_groups::StagedFiles>,
     mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     sources: &CompileSources<'_>,
 ) -> Result<CompiledConfig, ConfigError> {
     let mut definitions = definitions;
-    let mut applied = settings::apply(&mut definitions, sources.settings, managed.is_some())?;
+    let mut applied = settings::apply(&mut definitions, sources.settings)?;
     let standard = match sources.standard {
         Some((base, groups)) => Some(standard_groups::apply(
             base,
@@ -1202,66 +1041,7 @@ fn finish_compile(
         .map_err(|reason| ConfigError::new(standard_groups::STATE, reason))?;
     }
     let dependency_definitions = definitions.clone();
-    let mut compiled = compile_definitions(
-        log,
-        api,
-        definitions,
-        managed.is_some(),
-        staged,
-        inputs,
-        sources,
-    )?;
-    if let Some(profile) = managed {
-        let router = compiled
-            .program
-            .sequence_id(crate::special_groups::ROUTER_TAG)
-            .ok_or_else(|| ConfigError::new("native_management", "generated router missing"))?;
-        if !reachable_sequence(
-            &compiled,
-            compiled.sequence.sequence,
-            router,
-            &mut BTreeSet::new(),
-        ) {
-            return Err(ConfigError::new(
-                "native_management",
-                "special_groups hook must be reachable from primary entry",
-            ));
-        }
-        let groups = profile
-            .groups
-            .iter()
-            .filter(|g| !g.custom_port_only)
-            .map(|g| {
-                let provider = |tag: String| {
-                    compiled
-                        .domain_sets
-                        .iter()
-                        .position(|set| set.tag == tag)
-                        .ok_or_else(|| {
-                            ConfigError::new("native_management", "group provider missing")
-                        })
-                };
-                Ok(ManagedRouterGroup {
-                    slot: g.slot,
-                    providers: [
-                        provider(format!("special_route_{}", g.slot))?,
-                        provider(format!("special_manual_{}", g.slot))?,
-                    ],
-                    child: compiled
-                        .program
-                        .sequence_id(&format!("sequence_special_{}", g.slot))
-                        .ok_or_else(|| {
-                            ConfigError::new("native_management", "group sequence missing")
-                        })?,
-                })
-            })
-            .collect::<Result<Vec<_>, ConfigError>>()?;
-        compiled.managed_router = Some(ManagedRouterConfig {
-            sequence: router,
-            groups,
-        });
-        compiled.managed_profile = Some(profile);
-    }
+    let mut compiled = compile_definitions(log, api, definitions, inputs, sources)?;
     compiled.cache_dependencies = cache_dependency_fingerprints(&compiled, &dependency_definitions);
     compiled.settings = sources.settings.clone();
     compiled.settings_report = applied.items;
@@ -1522,28 +1302,6 @@ impl<'a> CacheDependencyClosure<'a> {
         if current == goal || !visited.insert((current, goal)) {
             return;
         }
-        if self
-            .config
-            .managed_router
-            .as_ref()
-            .is_some_and(|router| router.sequence == current)
-        {
-            let groups: Vec<u32> = self
-                .config
-                .managed_router
-                .as_ref()
-                .into_iter()
-                .flat_map(|router| router.groups.iter())
-                .filter(|group| {
-                    reachable_sequence(self.config, group.child, goal, &mut BTreeSet::new())
-                })
-                .map(|group| group.slot)
-                .collect();
-            for slot in groups {
-                self.add_group_context(slot);
-            }
-            return;
-        }
         let Some(sequence) = self.config.program.sequence(current) else {
             self.refuse_reuse();
             return;
@@ -1583,45 +1341,14 @@ impl<'a> CacheDependencyClosure<'a> {
         let Some(sequence) = self.config.program.sequence(sequence) else {
             return;
         };
-        let Some(slot) = sequence
+        if sequence
             .name
             .strip_prefix("sequence_special_")
             .and_then(|slot| slot.parse::<u32>().ok())
-        else {
-            return;
-        };
-        self.add_group_context(slot);
-    }
-
-    fn add_group_context(&mut self, slot: u32) {
-        let Some(profile) = self.config.managed_profile.as_ref() else {
-            self.refuse_reuse();
-            return;
-        };
-        let Some(group) = profile.groups.iter().find(|group| group.slot == slot) else {
-            self.refuse_reuse();
-            return;
-        };
-        self.material.insert(format!(
-            "managed-group:{slot}:main-enabled:{}",
-            !group.custom_port_only
-        ));
-        if let Some(router_group) = self
-            .config
-            .managed_router
-            .as_ref()
-            .and_then(|router| router.groups.iter().find(|item| item.slot == slot))
+            .is_some()
         {
-            for provider in router_group.providers {
-                if let Some(domain_set) = self.config.domain_sets.get(provider) {
-                    self.material.insert(format!(
-                        "managed-route:{}:{}",
-                        domain_set.tag, domain_set.semantic_sha256
-                    ));
-                } else {
-                    self.refuse_reuse();
-                }
-            }
+            // A special-group sequence has no cache-reuse proof.
+            self.refuse_reuse();
         }
     }
 
@@ -2210,8 +1937,6 @@ fn compile_definitions(
     log: LogLevel,
     api: Option<ApiConfig>,
     definitions: Vec<RawPlugin>,
-    managed_listeners: bool,
-    staged: Option<&crate::special_groups::StagedFiles>,
     inputs: Option<&mut crate::special_groups::CandidateInputSet>,
     sources: &CompileSources<'_>,
 ) -> Result<CompiledConfig, ConfigError> {
@@ -2276,12 +2001,7 @@ fn compile_definitions(
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
             let mut inputs = candidate_inputs.borrow_mut();
-            compiled_domain_sets.push(compile_domain_set(
-                plugin,
-                managed_listeners,
-                staged,
-                inputs.as_mut(),
-            )?);
+            compiled_domain_sets.push(compile_domain_set(plugin, inputs.as_mut())?);
         }
     }
     let mut file_owners: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();
@@ -2607,9 +2327,6 @@ fn compile_definitions(
                 listeners.push((candidate, plugin.source_path.clone()));
             }
         }
-    }
-    if let Some(staged) = staged {
-        known_artifacts.extend(staged.keys().cloned());
     }
     if let Some(inputs) = candidate_inputs.borrow().as_ref() {
         known_artifacts.extend(inputs.files.keys().cloned());
@@ -3088,8 +2805,6 @@ fn compile_definitions(
         generation: 0,
         cache_dependencies: Vec::new(),
         response_identities,
-        managed_profile: None,
-        managed_router: None,
         listeners: listeners
             .into_iter()
             .map(|(listener, _)| listener)
@@ -3888,125 +3603,37 @@ struct ManagedCandidate {
 
 fn compile_domain_set(
     plugin: &RawPlugin,
-    immutable: bool,
-    staged: Option<&crate::special_groups::StagedFiles>,
-    mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<CompiledDomainSet, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
     args.reject_unknown(&["exps", "files"], &path)?;
     let expressions = string_list(args.get("exps"), &format!("{path}.exps"))?;
     let files = string_list(args.get("files"), &format!("{path}.files"))?;
-    if expressions.is_empty()
-        && files.is_empty()
-        && !plugin.source_path.starts_with("@managed-generated.")
-    {
+    if expressions.is_empty() && files.is_empty() {
         return Err(ConfigError::new(
             &path,
             "a domain_set requires at least one expression or file",
         ));
     }
-    // Managed routing cannot silently drop a malformed enabled rule file.
-    // Preserve the legacy tolerant loader for ordinary unmanaged providers.
-    let strict = plugin.source_path.starts_with("@managed-generated.");
-    let mut strict_expressions = expressions.clone();
-    let mut remaining_files = Vec::new();
-    for file in &files {
-        let path = resolve_rule_path(file, &plugin.root_dir);
-        let candidate =
-            staged.and_then(|files| files.get(&crate::special_groups::lexical_path(&path)));
-        if !strict && candidate.is_none() {
-            remaining_files.push(file.clone());
-            continue;
-        }
-        let bytes = match candidate {
-            Some(Some(bytes)) => bytes.clone(),
-            Some(None) => {
-                return Err(ConfigError::new(
-                    path.display().to_string(),
-                    "enabled rule file is deleted in candidate",
-                ));
-            }
-            None => {
-                let display = path.display().to_string();
-                let file_path = path.clone();
-                let worker_display = display.clone();
-                let read_display = display.clone();
-                let bytes = crate::transaction::blocking_io(move || {
-                    let metadata = std::fs::metadata(&file_path).map_err(|error| {
-                        ConfigError::new(worker_display.clone(), error.to_string())
-                    })?;
-                    if metadata.len() > crate::policy::POLICY_BYTES_LIMIT as u64 {
-                        return Err(ConfigError::new(
-                            worker_display,
-                            "rule file exceeds byte limit",
-                        ));
-                    }
-                    std::fs::read(file_path).map_err(|error| {
-                        ConfigError::new(
-                            read_display,
-                            format!("invalid enabled rule file: {error}"),
-                        )
-                    })
-                })
-                .map_err(|error| {
-                    ConfigError::new(
-                        display.clone(),
-                        format!("bounded I/O worker failed: {error}"),
-                    )
-                })??;
-                if let Some(inputs) = inputs.as_deref_mut() {
-                    inputs
-                        .record_bytes(&path, &bytes)
-                        .map_err(|reason| ConfigError::new(path.display().to_string(), reason))?;
+    let (matcher, accepted) =
+        build_domain_set_with_inputs(&expressions, &files, &plugin.root_dir, inputs).map_err(
+            |error| match error {
+                DomainSetError::Expression { index, .. } => {
+                    ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
                 }
-                bytes
-            }
-        };
-        if bytes.len() > crate::policy::POLICY_BYTES_LIMIT {
-            return Err(ConfigError::new(
-                path.display().to_string(),
-                "rule file exceeds byte limit",
-            ));
-        }
-        let text = std::str::from_utf8(&bytes).map_err(|e| {
-            ConfigError::new(
-                path.display().to_string(),
-                format!("invalid enabled rule file: {e}"),
-            )
-        })?;
-        strict_expressions.extend(
-            text.lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .map(str::to_owned),
-        );
-    }
-    let (matcher, accepted) = build_domain_set_with_inputs(
-        &strict_expressions,
-        &remaining_files,
-        &plugin.root_dir,
-        inputs,
-    )
-    .map_err(|error| match error {
-        DomainSetError::Expression { index, .. } => {
-            ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
-        }
-        DomainSetError::File { index, .. } => {
-            ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
-        }
-    })?;
+                DomainSetError::File { index, .. } => {
+                    ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
+                }
+            },
+        )?;
 
     // A managed profile needs exactly one unambiguous writable `.txt` source,
     // matching Go's POST precondition, so an edit can never silently drop part
     // of the configured rule set. Everything else stays query-only.
     let semantic_sha256 = crate::special_groups::sha256(format!("{accepted:?}").as_bytes());
-    let single_txt_file = !immutable && expressions.is_empty()
+    let single_txt_file = expressions.is_empty()
         && files.len() == 1
-        // Generated routing providers belong to the immutable snapshot. Their
-        // future management writes must rebuild a complete candidate instead
-        // of replacing a live handle behind queries already admitted.
-        && !plugin.source_path.starts_with("@managed-generated.")
         && Path::new(&files[0])
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"));

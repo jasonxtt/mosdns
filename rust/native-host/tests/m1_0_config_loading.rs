@@ -665,3 +665,117 @@ fn log_file_is_appended_not_truncated() {
     child.kill().unwrap();
     child.wait().unwrap();
 }
+
+// --- Phase 6b: the experimental `native_management` mode was removed ---------
+
+const MANAGEMENT_REMOVED: &str =
+    "native_management was removed; use the standard special_groups configuration";
+
+fn config_with_native_management(value: &str) -> String {
+    let port = free_port();
+    reject_config(
+        &format!("native_management: {value}\n"),
+        &listener("udp_a", "udp_server", &format!("127.0.0.1:{port}"), ""),
+    )
+}
+
+#[test]
+fn a_configuration_naming_native_management_is_refused_with_a_clear_message() {
+    let dir = TempDir::new("removed-management");
+    // Whatever the value was (the opt-in on, off, empty or malformed), the field is gone.
+    for value in [
+        "{special_groups: true}",
+        "{special_groups: false}",
+        "{}",
+        "true",
+    ] {
+        let yaml = config_with_native_management(value);
+        let config = dir.write("config.yaml", &yaml);
+        let error = load_and_compile(&config).err().expect("load is refused");
+        assert!(
+            error.to_string().contains(MANAGEMENT_REMOVED),
+            "{value}: {error}"
+        );
+        let error = compile_yaml(&yaml).err().expect("compile is refused");
+        assert!(
+            error.to_string().contains(MANAGEMENT_REMOVED),
+            "{value}: {error}"
+        );
+        let error = HostAssembly::from_config_file(&config)
+            .err()
+            .expect("assembly is refused");
+        assert!(
+            error.to_string().contains(MANAGEMENT_REMOVED),
+            "{value}: {error}"
+        );
+
+        let output = Command::new(env!("CARGO_BIN_EXE_mosdns"))
+            .args(["check", "-c"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{value}: {stdout}");
+        assert!(stdout.contains(MANAGEMENT_REMOVED), "{value}: {stdout}");
+        assert!(stdout.contains("SUMMARY "), "{value}: {stdout}");
+
+        let output = Command::new(env!("CARGO_BIN_EXE_mosdns"))
+            .args(["start", "-c"])
+            .arg(&config)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{value}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(MANAGEMENT_REMOVED),
+            "{value}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn leftover_native_management_state_files_are_neither_read_nor_deleted() {
+    let port = free_port();
+    let dir = TempDir::new("leftover-management");
+    let left = [
+        ("webinfo/native_management.lock", "lock"),
+        (
+            "webinfo/native_management.transaction/journal.json",
+            "{not json",
+        ),
+        ("webinfo/native_management.transaction/commit", "x"),
+        (
+            "webinfo/native_management.staging/rule/special_50.txt",
+            "full:a.example",
+        ),
+        ("webinfo/native_management.retired/srs/old.json", "[]"),
+    ];
+    for (name, contents) in left {
+        dir.write(name, contents);
+    }
+    let config = dir.write(
+        "config.yaml",
+        &reject_config(
+            "",
+            &listener("udp_a", "udp_server", &format!("127.0.0.1:{port}"), ""),
+        ),
+    );
+    let host = HostAssembly::from_config_file(&config).expect("starts normally");
+    host.block_on(async {
+        let bound = host.bind_host().await.expect("binds");
+        let shutdown = TransportCancellation::new();
+        let serving = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let reply = udp_exchange(([127, 0, 0, 1], port).into()).await;
+        assert_eq!(reply[3] & 15, 3);
+        shutdown.cancel();
+        serving.await.unwrap().expect("clean shutdown");
+    });
+    drop(host);
+    for (name, contents) in left {
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(name)).unwrap(),
+            contents,
+            "{name} must stay as it was"
+        );
+    }
+}

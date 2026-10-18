@@ -1,5 +1,9 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-18：Phase 6b 退役 `native_management`（待 Codex 审查结论与规划会话确认）
+
+删除托管模式的全部代码：开关解析、`ManagedProfile`/候选 profile、`ManagedStore` 事务日志与 staging/retired/lock、`compile_managed_candidate`/`apply_candidate` 及 `apply_config` 里的托管分支、托管版 special-groups / upstream / diversion / 手工规则 HTTP 处理、仅为它存在的测试与示例；共享的 `blocking_io` 工作线程、`CandidateInputSet`、`sha256`、`lexical_path`、`FileCommit` 提交路径与标准模式（M1-e special_groups、typed settings）原样保留。配置里写 `native_management` 现在加载/`check`/`start` 都明确失败（`native_management was removed; use the standard special_groups configuration`）；`webinfo/native_management.*` 残留文件不读不删。同时去掉不再成立的 `check` 输出行 `SKIPPED managed-store …`。清单、测试数量变化与验证见 [validation-records/10-18-p6b](validation-records/10-18-p6b/README.md)。
+
 ## 2026-10-18：Phase 6a `rust` 分支变成纯 Rust 项目（待 Codex 审查结论与规划会话确认）
 
 删除 Go 源码（`coremain/ plugin/ pkg/ mlog/ main.go go.mod go.sum`、`tools/*.go`）、Go 构建与发布文件和工作流、`rust/runtime` 及全部混合脚手架、`/log` 源码；内置 UI 产物迁到 `rust/native-host/ui/`；Go 参照工具改由 `tools/go-reference/build.sh` 从 `../mosdns` 固定提交 `75f26677` 构建。只删除与迁移，Rust 行为不变；`native_management` 留给 6b。清单、验证与测试数量变化见 [validation-records/10-18-p6a](validation-records/10-18-p6a/README.md)。

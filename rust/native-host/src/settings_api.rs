@@ -108,8 +108,7 @@ pub(crate) fn override_config(config: &CompiledConfig, tag: &str) -> Vec<serde_j
         .unwrap_or_default()
 }
 
-/// `POST /api/v1/upstream/config {plugin_tag, upstreams}` without
-/// `native_management`.
+/// `POST /api/v1/upstream/config {plugin_tag, upstreams}`.
 pub(crate) async fn post_upstream(control: &RuntimeControl, body: &[u8]) -> Reply {
     #[derive(Deserialize)]
     struct Payload {
@@ -186,7 +185,6 @@ pub(crate) async fn post_upstream(control: &RuntimeControl, body: &[u8]) -> Repl
 /// The overrides page exists when a `socks5_proxy` or `ecs_address` does.
 pub(crate) fn overrides_available(config: &CompiledConfig) -> bool {
     config.reload.is_some()
-        && config.managed_profile.is_none()
         && config
             .settings_report
             .iter()
@@ -195,9 +193,7 @@ pub(crate) fn overrides_available(config: &CompiledConfig) -> bool {
 
 /// The domain-generation switches exist when a `domain_output` does.
 pub(crate) fn generation_available(config: &CompiledConfig) -> bool {
-    config.reload.is_some()
-        && config.managed_profile.is_none()
-        && !config.local.domain_outputs.is_empty()
+    config.reload.is_some() && !config.local.domain_outputs.is_empty()
 }
 
 /// The tags of one plugin kind in the effective report, in order.

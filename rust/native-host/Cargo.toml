@@ -14,7 +14,6 @@ name = "mosdns-settings-migrate"
 path = "src/bin/settings_migrate.rs"
 
 [dependencies]
-fs2 = "=0.4.3"
 flate2 = "=1.1.9"
 hickory-proto = { version = "0.25.2", default-features = false }
 # Rule-source downloads (M1-a2): the same reviewed pins `mosdns-upstream-core`

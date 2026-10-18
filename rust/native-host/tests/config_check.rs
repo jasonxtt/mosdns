@@ -46,7 +46,6 @@ GAP entry sequence {GAPS}:plugins[4].args[1].exec  unsupported executable `debug
 CASCADE entry sequence {GAPS}:plugins[4].args[2].exec[0]  references removed `requery_x`; unknown executable reference `$requery_x`
 GAP entry sequence {GAPS}:plugins[4].args[2].exec[1]  unsupported executable `black_hole`
 CASCADE entry sequence {GAPS}:plugins[4].args[4].exec  references removed `no_args`; unknown executable reference `$no_args`
-SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
 NOTE first-error-per-definition; rerun after fixing to see further gaps
 NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues
 SUMMARY gaps=8 cascades=4 globals=2 definitions=8
@@ -186,7 +185,6 @@ fn parsed_structural_rejections_are_findings_not_errors() {
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert_eq!(output.status.code(), Some(1), "case {index}: {stdout}");
         assert!(stdout.contains(expected), "case {index}: {stdout}");
-        assert!(stdout.contains("\nSKIPPED "), "case {index}: {stdout}");
         assert!(stdout.contains("\nSUMMARY "), "case {index}: {stdout}");
         assert!(output.stderr.is_empty(), "case {index}");
     }

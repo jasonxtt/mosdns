@@ -421,7 +421,6 @@ struct Objects {
 pub(super) fn apply(
     definitions: &mut [RawPlugin],
     settings: &Settings,
-    managed: bool,
 ) -> Result<Applied, ConfigError> {
     let kind_of = |tag: &str| {
         definitions
@@ -460,12 +459,6 @@ pub(super) fn apply(
                 }
             }
         }
-    }
-    if managed && !settings.upstreams.is_empty() {
-        return Err(settings_error(
-            "upstreams",
-            "upstream settings are not available with native_management (use its own upstream overrides)",
-        ));
     }
     for (tag, entries) in &settings.upstreams {
         for (index, entry) in entries.iter().enumerate() {

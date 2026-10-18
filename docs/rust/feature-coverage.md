@@ -2,6 +2,8 @@
 
 2026-10-18（Phase 6a）：`rust` 分支已是纯 Rust 项目——表中“Go 源码位置/Go 插件”一类引用指向 Go 仓库（`main` 与 `/Users/tom/github/mosdns`），不再在本分支；混合桥相关描述为历史。
 
+2026-10-18（Phase 6b）：实验性 `native_management` 托管模式已删除；表中“托管 profile”一词凡指单 `.txt` 规则文件管理（P02 等，`ManagedDomainSet`）的仍然有效，指 special_groups 托管的为历史。
+
 规划盘点日期：2026-09-20。源码基线：`4fe08c0eebed45efd304f9b197ce1d6e5d2608d5`；盘点时存在无关工作树改动，本次不将它们计为迁移成果。
 
 2026-10-06 当前状态：下文第 2–6 节保留历史盘点，其中关于 switch、domain_set 等的旧

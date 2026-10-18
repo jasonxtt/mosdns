@@ -194,84 +194,21 @@ impl HostAssembly {
         path: &std::path::Path,
         root: Option<&std::path::Path>,
     ) -> Result<Self, AssemblyError> {
-        Self::from_config_file_after_preflight(path, root, || {})
-    }
-
-    fn from_config_file_after_preflight(
-        path: &std::path::Path,
-        root: Option<&std::path::Path>,
-        after_preflight: impl FnOnce(),
-    ) -> Result<Self, AssemblyError> {
         let yaml = crate::config::load_yaml(path).map_err(AssemblyError::Config)?;
         let state_root = path
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
         let root_dir = root.unwrap_or(state_root);
-        // Installed first so every later startup failure, store recovery
-        // included, reaches `log.file` as well as stderr.
+        // Installed first so every later startup failure reaches `log.file` as well as stderr.
         let log = crate::config::log_settings(&yaml, root_dir).map_err(AssemblyError::Config)?;
         crate::diag::install(&log)
             .map_err(|error| AssemblyError::Runtime(format!("cannot open log file: {error}")))?;
-        let mut store = if crate::config::management_enabled(&yaml)
-            .map_err(AssemblyError::Config)?
-        {
-            Some(
-                crate::transaction::ManagedStore::open(state_root)
-                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?,
-            )
-        } else {
-            if crate::transaction::ManagedStore::has_pending(state_root) {
-                return Err(AssemblyError::Runtime(
-                    "unfinished native transaction requires the managed opt-in for recovery".into(),
-                ));
-            }
-            None
-        };
-        if let Some(store) = &mut store {
-            store
-                .recover()
-                .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
-        }
-        // Without `-d` the candidate compiler keeps the store's canonical root,
-        // exactly as before; only an explicit root replaces it.
-        if let (Some(store), Some(root)) = (&mut store, root) {
-            store.set_plugin_root(root.to_path_buf());
-        }
-        let canonical_config_path = if let Some(store) = &store {
-            let config_path = path.to_path_buf();
-            let config_path =
-                crate::transaction::blocking_io(move || std::fs::canonicalize(config_path))
-                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?
-                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
-            if config_path.parent() != Some(store.root()) {
-                return Err(AssemblyError::Runtime(
-                    "managed root configuration must reside directly under its state root".into(),
-                ));
-            }
-            Some(config_path)
-        } else {
-            None
-        };
-        after_preflight();
         // File-backed startup always has a base, including a bare basename.
         // An empty in-memory base intentionally does not mount external UI.
-        let mut config = crate::config::compile_file_with_roots(&yaml, path, state_root, root_dir)
+        let config = crate::config::compile_file_with_roots(&yaml, path, state_root, root_dir)
             .map_err(AssemblyError::Config)?;
-        match (&mut config.managed_profile, canonical_config_path) {
-            (Some(profile), Some(config_path)) => profile.config_path = Some(config_path),
-            (None, None) => {}
-            _ => {
-                return Err(AssemblyError::Runtime(
-                    "managed root configuration identity changed during startup".into(),
-                ));
-            }
-        }
-        let host = Self::with_options_and_state_root(config, HostOptions::default(), state_root)?;
-        if let Some(store) = store {
-            host.control.attach_managed_store(store)?;
-        }
-        Ok(host)
+        Self::with_options_and_state_root(config, HostOptions::default(), state_root)
     }
 
     /// Constructs a pre-I/O graph from an already compiled configuration.
@@ -1787,34 +1724,6 @@ mod tests {
             HostAssembly::from_yaml(&invalid),
             Err(AssemblyError::Config(ConfigError { .. }))
         ));
-    }
-
-    #[test]
-    fn startup_uses_the_same_config_snapshot_for_preflight_and_compilation() {
-        let root = std::env::temp_dir().join(format!(
-            "native-preflight-config-snapshot-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("config.yaml");
-        std::fs::write(&path, UDP).unwrap();
-
-        let host = HostAssembly::from_config_file_after_preflight(&path, None, || {
-            std::fs::write(
-                &path,
-                include_str!("../../../docs/rust/examples/native-managed-empty/config.yaml"),
-            )
-            .unwrap();
-        })
-        .expect("the preflight snapshot remains a valid unmanaged configuration");
-
-        assert!(
-            host.config().managed_profile.is_none(),
-            "the compiled graph must reflect the YAML snapshot whose opt-in was checked"
-        );
-        drop(host);
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -1,5 +1,7 @@
 # M1 缺口清单：`config_all` 原生运行（2026-10-06）
 
+> **Phase 6b（2026-10-18）**：下文提到的 `native_management` 托管模式已从代码中删除（含 `ManagedProfile`、`webinfo/native_management.*` 事务存储与托管 HTTP 处理）；相关条目仅作历史记录。
+
 来源：原生 `mosdns check` 对 `config_all`（`file` 仓库 `28c6493`，与 `86e6a65` 无差异）的
 原始输出 [config_all-check.txt](validation-records/10-06-config-check/config_all-check.txt)，
 以及仅用于看下一层的[派生探测](validation-records/10-06-config-check/README.md#派生探测probe)。

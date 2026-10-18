@@ -370,7 +370,7 @@ Vue 源码无需因后端语言变化而重写。5A 是隔离实验产物；5B/5
 
 retirement 必须先证明对应 Rust-native 路径已有等价产品契约测试，删除后再跑完整 Rust-native E2E、配置/API/WebUI/audit/dump/重启恢复以及性能/长期运行 gate。Phase 6 完成前不得把 `rust` 分支作为最终替代版本发布。
 
-**Phase 6a 状态（2026-10-18，用户决定）**：`rust` 分支已删除全部 Go 源码、Go 构建/发布文件与工作流、cgo 桥（`rust/runtime`、`rust_backend*.go`、`MOSDNS_*_BACKEND`、混合阶段脚本）与 `/log` 源码；内置 `/` UI 产物迁到 `rust/native-host/ui/`；Go 参照（`mosdns` 参照程序与 oracle/interop 工具）改由 `tools/go-reference/build.sh` 从 `/Users/tom/github/mosdns` 的固定提交构建。无 Go 干净克隆构建与缩小版 E2E-1 差分已复跑，记录见 [10-18-p6a](../rust/validation-records/10-18-p6a/README.md)。**仍未完成的 Phase 6 门禁**：`native_management` 退役（6b）、性能与长期运行 gate、生产切换。
+**Phase 6a 状态（2026-10-18，用户决定）**：`rust` 分支已删除全部 Go 源码、Go 构建/发布文件与工作流、cgo 桥（`rust/runtime`、`rust_backend*.go`、`MOSDNS_*_BACKEND`、混合阶段脚本）与 `/log` 源码；内置 `/` UI 产物迁到 `rust/native-host/ui/`；Go 参照（`mosdns` 参照程序与 oracle/interop 工具）改由 `tools/go-reference/build.sh` 从 `/Users/tom/github/mosdns` 的固定提交构建。无 Go 干净克隆构建与缩小版 E2E-1 差分已复跑，记录见 [10-18-p6a](../rust/validation-records/10-18-p6a/README.md)。**Phase 6b（2026-10-18）**：`native_management` 托管模式已退役并删除（含 `ManagedProfile`、候选 profile、`webinfo/native_management.*` 事务存储、托管 HTTP 分支及其专属测试）；含该字段的配置加载、`check`、`start` 明确失败，残留状态文件不读不删。**仍未完成的 Phase 6 门禁**：性能与长期运行 gate、生产切换。
 
 ## 7. 验证与发布矩阵
 

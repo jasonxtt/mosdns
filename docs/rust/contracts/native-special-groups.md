@@ -5,8 +5,16 @@
 Implementation is under external review; validation is recorded in
 [M1-e evidence](../validation-records/10-09-m1-e/README.md). A file configuration
 that includes `sub_config/special_groups.yaml` enables standard group management
-without `native_management`. The sections below this M1-e section document the
-older managed opt-in, which is frozen until the Phase 6 retirement assessment.
+without `native_management`.
+
+**Phase 6b (2026-10-18): the managed opt-in was removed.** A configuration that still
+contains a top-level `native_management` key (any value) is refused at load, by `check -c`
+and by `start`, with `native_management was removed; use the standard special_groups
+configuration`; it is not ignored and not migrated. The sections below this one are kept as
+the historical record of that retired contract (`ManagedProfile`, the `webinfo/native_management.*`
+transaction store and the managed HTTP handlers no longer exist). Files named
+`webinfo/native_management.{transaction,staging,retired,lock}` that an older run left behind are
+neither read nor deleted by the host; they can be removed by hand.
 
 `webinfo/special_upstream_groups.json` is authoritative. It retains the v0.7.3
 array fields `slot`, `name`, `listen_port`, `custom_port_only`,
@@ -88,7 +96,7 @@ present, not that older implicit migration format.
 
 ## 1. Scope / trigger
 
-The remaining sections preserve the frozen `native_management` contract;
+The remaining sections preserve the **retired** `native_management` contract (history only);
 the M1-e standard profile and proxy rule are described above.
 
 Compiler and native runtime contract for explicit `native_management: {special_groups: true}`.
@@ -172,8 +180,8 @@ before cache publication (`ExecutionFacts::note_cname_normalization`).
 
 ## 5. Good / base / bad cases
 
-Base: [empty managed sample](../examples/native-managed-empty/config.yaml)
-compiles without adding groups. Good: two overlapping groups select the lower
+Base: the empty managed sample (`docs/rust/examples/native-managed-empty`, removed in Phase 6b)
+compiled without adding groups. Good: two overlapping groups select the lower
 slot and cache its normalized answer with the actual supplying entry. Bad:
 enabling a retained signed upstream or malformed source aborts compilation.
 

@@ -38,8 +38,7 @@ entries compile; `concurrent` stays the YAML value; all entries disabled is an e
 `bootstrap_version`, `use_proxy` (the reference's `use_socks_proxy` is accepted on input). Refused with a reason: `protocol: aliapi` / signed-API fields, a literal `socks5`,
 `so_mark`, `bind_to_device`, `enable_pipeline`, `enable_http3`, positive `idle_timeout`, `quic`, unknown fields.
 Loading errors (start, `check`): unreadable or unparsable file, a version other than 1, an unknown top-level key, a settings key that names no object / the wrong kind, an invalid
-value. A missing or empty file is "no settings". Compiling and `check` never write. With `native_management` the file is still read at start, but the settings API is not served and a settings apply is refused (that mode keeps its own upstream
-overrides; this mode remains frozen through M1-e).
+value. A missing or empty file is "no settings". Compiling and `check` never write. (The `native_management` mode that used to bypass the settings API was removed in Phase 6b.)
 
 ## The effective configuration
 
@@ -60,7 +59,7 @@ overlay settings, and report every item (`kind`, `object`, `field`, `value`, `so
 
 ## Hot apply
 
-A change builds new settings, recompiles the same YAML with them (any error rejects the change), and publishes the result as the next generation through the whole-generation path the managed mode uses
+A change builds new settings, recompiles the same YAML with them (any error rejects the change), and publishes the result as the next generation through the whole-generation path
 (admission pause, management drain, switch rebase, cache policy gate, install, retirement of the old generation with rule sources / `domain_output` / `requery` fenced and joined, then a memory trim).
 **Commit order:** (1) caches whose identity changed get an empty dump written; (2) the settings file is replaced durably (temporary file and parent directory are fsynced around the rename) after checking it still holds the bytes the candidate was built against (else
 409); (3) the generation is published. Failure before (2) changes nothing; failure of (2) leaves the old file and generation (dumps may be empty: harmless, caches are only read at start); a crash
@@ -68,7 +67,7 @@ after (2) restarts into the new state, which the candidate compile already prove
 query uses the new one. The candidate compile runs on the DNS thread (its cost with the production rule set is in the validation record): DNS answers pause for about 0.4–0.65 s, and UDP queries arriving meanwhile wait in the
 listener's enlarged kernel receive buffer instead of being dropped (see "UDP receive buffer and apply pause" in native-webui-hosting.md; compiling off the DNS thread is the M2-3 backlog item).
 
-## API (without `native_management`; with it the settings routes are not served and the existing managed routes are unchanged)
+## API
 
 - `GET /api/v1/upstream/tags` (the `aliapi` tags), `GET /api/v1/upstream/config` (`{tag:[entries]}`: the effective list in the WebUI shape, `use_socks_proxy` = the effective switch),
   `GET /api/v1/upstream/runtime/{tag}` (`override_config` = the settings entries), `POST /api/v1/upstream/config {plugin_tag, upstreams}` (validated, stored, applied; an empty list removes the override;

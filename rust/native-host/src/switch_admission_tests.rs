@@ -1,6 +1,6 @@
 //! S3 admission-semantics proof: real DNS datagrams and TCP frames capture
 //! one immutable switch snapshot, keep it through branches and lazy
-//! successors, managed apply drains and rebinds the latest values, and a
+//! successors, a settings apply drains and rebinds the latest values, and a
 //! fatal post-rename ambiguity stops the host.
 
 #![allow(clippy::too_many_lines)]
@@ -681,7 +681,6 @@ fn a_changed_owner_identity_on_the_same_path_re_admits_after_the_drain() {
     // candidate must admit the file's post-drain state, not a stale
     // preparation-time read.
     let yaml = "log: {level: error}
-native_management: {special_groups: true}
 plugins:
   - tag: default_upstream
     type: forward
@@ -692,13 +691,12 @@ plugins:
   - tag: main_entry
     type: sequence
     args:
-      - exec: $special_upstream_matcher
       - exec: $default_upstream
   - tag: main_udp
     type: udp_server
     args: {entry: main_entry, listen: \"127.0.0.1:25358\", enable_audit: false}
 ";
-    let (assembly, root) = managed_fixture(yaml, &[("shared.txt", "X")]);
+    let (assembly, root) = reloadable_fixture(yaml, &[("shared.txt", "X")]);
     let control = assembly.control();
 
     // Hold a POST on the old owner (sw2, shared.txt) across the apply.
@@ -720,12 +718,10 @@ plugins:
             .replace("tag: sw2", "tag: sw3")
             .replace("type: switch2", "type: switch3");
         std::fs::write(&config_path, &replacement).expect("stage replacement config");
-        let candidate = control
-            .compile_managed_candidate(&config_path, Vec::new())
-            .expect("candidate compiles");
+        let settings = control.view().config.settings.clone();
         let control_task = control.clone();
         let applied =
-            tokio::task::spawn_local(async move { control_task.apply_candidate(candidate).await });
+            tokio::task::spawn_local(async move { control_task.apply_settings(settings).await });
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // The held old-owner POST commits Y durably before the drain
@@ -755,8 +751,8 @@ plugins:
     });
 }
 
-fn managed_fixture(yaml: &str, state_files: &[(&str, &str)]) -> (HostAssembly, Root) {
-    let root = Root::new("managed");
+fn reloadable_fixture(yaml: &str, state_files: &[(&str, &str)]) -> (HostAssembly, Root) {
+    let root = Root::new("reloadable");
     std::fs::create_dir_all(root.path.join("webinfo")).expect("webinfo");
     std::fs::create_dir_all(root.path.join("cache")).expect("cache");
     for (name, value) in state_files {
@@ -764,12 +760,6 @@ fn managed_fixture(yaml: &str, state_files: &[(&str, &str)]) -> (HostAssembly, R
     }
     let config_path = root.path.join("config.yaml");
     std::fs::write(&config_path, yaml).expect("config");
-    std::fs::write(
-        root.path.join("webinfo/special_upstream_groups.json"),
-        b"[]\n",
-    )
-    .unwrap();
-    std::fs::write(root.path.join("webinfo/upstream_overrides.json"), b"{}\n").unwrap();
     (
         HostAssembly::from_config_file(&config_path).expect("assembly"),
         root,
@@ -777,9 +767,8 @@ fn managed_fixture(yaml: &str, state_files: &[(&str, &str)]) -> (HostAssembly, R
 }
 
 #[test]
-fn managed_apply_drains_a_held_switch_post_and_rebinds_the_latest_value() {
+fn a_settings_apply_drains_a_held_switch_post_and_rebinds_the_latest_value() {
     let yaml = "log: {level: error}
-native_management: {special_groups: true}
 plugins:
   - tag: default_upstream
     type: forward
@@ -790,13 +779,12 @@ plugins:
   - tag: main_entry
     type: sequence
     args:
-      - exec: $special_upstream_matcher
       - exec: $default_upstream
   - tag: main_udp
     type: udp_server
     args: {entry: main_entry, listen: \"127.0.0.1:25355\", enable_audit: false}
 ";
-    let (assembly, root) = managed_fixture(yaml, &[("sw2.txt", "A")]);
+    let (assembly, root) = reloadable_fixture(yaml, &[("sw2.txt", "A")]);
     let control = assembly.control();
 
     let gate = crate::managed::PersistGate::new();
@@ -812,12 +800,10 @@ plugins:
 
         // The apply pauses admission and waits for the accepted mutation's
         // durable completion before publishing the new generation.
-        let candidate = control
-            .compile_managed_candidate(&root.path.join("config.yaml"), Vec::new())
-            .expect("candidate compiles");
+        let settings = control.view().config.settings.clone();
         let control_task = control.clone();
         let applied =
-            tokio::task::spawn_local(async move { control_task.apply_candidate(candidate).await });
+            tokio::task::spawn_local(async move { control_task.apply_settings(settings).await });
         // Yield so the apply reaches its admission pause and management
         // drain before the held POST is released.
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -839,7 +825,6 @@ plugins:
 #[test]
 fn a_stale_same_tag_different_path_write_cannot_reach_a_new_owner() {
     let yaml = "log: {level: error}
-native_management: {special_groups: true}
 plugins:
   - tag: default_upstream
     type: forward
@@ -850,16 +835,15 @@ plugins:
   - tag: main_entry
     type: sequence
     args:
-      - exec: $special_upstream_matcher
       - exec: $default_upstream
   - tag: main_udp
     type: udp_server
     args: {entry: main_entry, listen: \"127.0.0.1:25356\", enable_audit: false}
 ";
-    let (assembly, root) = managed_fixture(yaml, &[("old.txt", "A"), ("new.txt", "C")]);
+    let (assembly, root) = reloadable_fixture(yaml, &[("old.txt", "A"), ("new.txt", "C")]);
     let control = assembly.control();
 
-    // Hold a write to the old owner's file across the managed swap.
+    // Hold a write to the old owner's file across the generation swap.
     let gate = crate::managed::PersistGate::new();
     control.view().switches.inject_commit_hold(gate.clone());
     let config_path = root.path.join("config.yaml");
@@ -877,12 +861,10 @@ plugins:
             .unwrap()
             .replace("old.txt", "new.txt");
         std::fs::write(&config_path, &replacement).expect("stage replacement config");
-        let candidate = control
-            .compile_managed_candidate(&config_path, Vec::new())
-            .expect("candidate compiles");
+        let settings = control.view().config.settings.clone();
         let control_task = control.clone();
         let applied =
-            tokio::task::spawn_local(async move { control_task.apply_candidate(candidate).await });
+            tokio::task::spawn_local(async move { control_task.apply_settings(settings).await });
         tokio::time::sleep(Duration::from_millis(50)).await;
         gate.release();
         ticket.complete().await.expect("post completed");

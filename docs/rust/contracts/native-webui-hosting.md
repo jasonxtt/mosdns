@@ -272,7 +272,7 @@ above, `/metrics`, and `perf` on the host (`perf record -e cpu-clock -F 999 --ca
 Schema1 retains its existing keys and adds `ui_operations`: all 30 IDs from
 [the approved matrix](../plans/native-webui-runtime-capabilities.md), each with
 boolean `supported` and true→null / false→displayable-string `reason`. Eligibility
-comes from actual handlers/providers: an empty managed profile alone does not
+comes from actual handlers/providers: a group profile alone does not
 make local-rule writes available. Existing per-item format/read-only contracts
 remain authoritative. Missing Go-only APIs do not gain fake success handlers.
 
