@@ -4590,7 +4590,7 @@ fn join_effective_tags(no_v: &[&str], core: &str) -> String {
     tags.join("|")
 }
 
-fn diagnose_response_wire(response_wire: &[u8]) -> ResponseDetails {
+pub(crate) fn diagnose_response_wire(response_wire: &[u8]) -> ResponseDetails {
     if response_wire.is_empty() {
         return ResponseDetails::no_response();
     }

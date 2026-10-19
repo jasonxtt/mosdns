@@ -6,7 +6,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use mosdns_dns_core::{FrameMode, frame_response};
 use mosdns_upstream_core::TransportCancellation;
 use tokio::net::UdpSocket;
 use tokio::task::JoinSet;
@@ -266,6 +265,8 @@ async fn process_request(task: RequestTask) {
             return;
         }
     };
+    let udp_limit = crate::udp_response::payload_limit(&raw);
+    let capture_audit_details = admitted.execution_checkpoint().capture_audit_details();
     let mut execution = execute_request(
         ExecutionRequest {
             client: mosdns_sequence_core::ClientContext::from_peer(
@@ -295,8 +296,15 @@ async fn process_request(task: RequestTask) {
     } else if !response_formed {
         Some(QueryTerminalOutcome::NoResponse)
     } else {
-        match frame_response(&execution.response_wire, FrameMode::Udp) {
-            Ok(framed) => {
+        match crate::udp_response::prepare_response(
+            std::mem::take(&mut execution.response_wire),
+            udp_limit,
+            &raw,
+        ) {
+            Ok((framed, records_removed)) => {
+                if records_removed && capture_audit_details {
+                    execution.response_details = crate::execution::diagnose_response_wire(&framed);
+                }
                 framed_response = Some(framed);
                 None
             }

@@ -102,6 +102,14 @@ replacement, and report the DNS card and audit panel as bounded C08/C11
 subitems while rank, QueryManager, other System APIs and static serving remain
 separate work.
 
+## UDP terminal presentation (2026-10-19)
+
+Detailed UDP records project the final client-sized response: `flags.tc` and
+retained Answer rows include the listener's whole-RR truncation. Execution and
+cache publication still retain the complete response; TCP records remain full.
+No audit schema/capacity change or internal byte eviction is introduced. See
+[UDP response contract](native-udp-response.md) for budgets, OPT and TSIG rules.
+
 ## Planned native v2 upstream diagnostics migration (approved 2026-09-30)
 
 ### 1. Scope / Trigger
