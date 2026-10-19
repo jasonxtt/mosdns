@@ -894,7 +894,7 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
 
     // Build the one GET this exchange is allowed to send. There is no body, no
     // `User-Agent`, and no request `Content-Encoding`.
-    let request = build_get_request(&prepared.target, &prepared.authority)?;
+    let request = build_get_request(&prepared.target, &prepared.authority, protocol)?;
 
     match protocol {
         DohProtocol::Http1 => {
@@ -1151,20 +1151,35 @@ fn classify_alpn(protocol: Option<&[u8]>) -> Result<DohProtocol, SecureError> {
 
 /// Builds the single `GET` request this exchange may send.
 ///
-/// The target is the origin-form request target produced by the endpoint, so the
-/// authority and any numeric dial override cannot leak into it. `Host` is the
-/// service authority from the URL.
-fn build_get_request(target: &str, authority: &str) -> Result<Request<EmptyBody>, SecureError> {
-    let uri = target.parse::<hyper::Uri>().map_err(|_| {
-        SecureError::DohRequest(crate::secure::error::DohRequestError::TargetTooLarge)
-    })?;
+/// HTTP/1.1 keeps the origin-form target plus Host. HTTP/2 obtains its scheme
+/// and authority pseudo-headers from the URI, never from the numeric dial.
+fn build_get_request(
+    target: &str,
+    authority: &str,
+    protocol: DohProtocol,
+) -> Result<Request<EmptyBody>, SecureError> {
+    let uri = match protocol {
+        DohProtocol::Http1 => target.parse::<hyper::Uri>().map_err(|_| {
+            SecureError::DohRequest(crate::secure::error::DohRequestError::TargetTooLarge)
+        })?,
+        DohProtocol::Http2 => hyper::Uri::builder()
+            .scheme("https")
+            .authority(authority)
+            .path_and_query(target)
+            .build()
+            .map_err(|_| {
+                SecureError::DohRequest(crate::secure::error::DohRequestError::TargetTooLarge)
+            })?,
+    };
     let mut builder = Request::builder()
         .method(hyper::Method::GET)
         .uri(uri)
         // The DNS media type is the only acceptable response type.
         .header(ACCEPT, DNS_MEDIA_TYPE);
-    // `Host` carries the service authority, never the numeric dial address.
-    builder = builder.header(HOST, authority);
+    builder = match protocol {
+        DohProtocol::Http1 => builder.header(HOST, authority),
+        DohProtocol::Http2 => builder.version(hyper::Version::HTTP_2),
+    };
     builder
         .body(EmptyBody)
         .map_err(|_| SecureError::DohRequest(crate::secure::error::DohRequestError::TargetTooLarge))
@@ -1775,7 +1790,11 @@ impl PooledDohSession {
         control: &ExchangeControl,
         deadline: Instant,
     ) -> Result<(SecureResponse, Self), PooledDohOutcome> {
-        let request = match build_get_request(target, authority) {
+        let protocol = match &self {
+            Self::Http1 { .. } => DohProtocol::Http1,
+            Self::Http2 { .. } => DohProtocol::Http2,
+        };
+        let request = match build_get_request(target, authority, protocol) {
             Ok(request) => request,
             Err(error) => {
                 // A rejected request target never reached the wire.

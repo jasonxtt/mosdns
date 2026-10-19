@@ -191,6 +191,15 @@ those children invisible to owner shutdown.
 - ALPN offers `h2,http/1.1` in that order. `h2` dispatches to
   `hyper::client::conn::http2`; negotiated or absent HTTP/1.1 dispatches to the
   inline HTTP/1.1 driver. No protocol fallback or request replay is allowed.
+- DoH h2 fixtures must validate the received URI pseudo-header fields:
+  `scheme == https`, authority equals the service URL authority (including any
+  non-default port), and path/query equals the encoded GET target. Checking
+  only the ordinary `Host` header cannot establish correct h2 routing. Reject
+  invalid pseudo-headers or an extra ordinary `Host` with a protocol error.
+  Cover one-shot and reused sessions, numeric dial overrides and SOCKS, and
+  prove repeated pooled calls still share a connection. Keep HTTP/1.1
+  origin-form/Host tests passing. See the
+  [2026-10-19 regression record](../validation-records/10-19-doh-h2-authority/README.md).
 - Executor admission registers a child before `tokio::spawn` while the scope
   is unsealed. Teardown seals admission, aborts all registered handles, and
   waits until every child guard drops.
