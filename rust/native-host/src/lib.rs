@@ -46,6 +46,9 @@ mod system_api;
 mod tcp;
 mod transaction;
 mod udp;
+mod udp_response;
+#[cfg(test)]
+mod udp_truncation_tests;
 mod ui_manifest;
 mod update;
 mod upstream_metrics;
