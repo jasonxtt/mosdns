@@ -821,6 +821,12 @@ their existing behavior; their concurrent reuse is a separate follow-up.
   the peer stream limit. A local semaphore bounds exchange leases to 64,
   including waits for a stream or connection; fixture counters independently
   prove the actual peer stream bound.
+- DoH GET representation follows the negotiated protocol in both one-shot and
+  reused sessions. HTTP/2 uses an explicit HTTP/2 request version and URI with
+  `https` scheme, service URL authority (including a non-default port), and the
+  existing path/query; it does not add an ordinary `Host` header. Numeric dial
+  overrides and SOCKS routes never replace that authority or TLS identity.
+  HTTP/1.1 retains its origin-form target and ordinary service `Host` header.
 - HTTP/1.1 allows twelve connecting/busy/idle connections, each exclusive to
   one exchange. Pool shortage waits inside the original absolute deadline.
   At most 256 calls are admitted; further calls fail `Backpressure(NotSent)`.

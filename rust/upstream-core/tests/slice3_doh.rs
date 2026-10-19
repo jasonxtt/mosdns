@@ -91,6 +91,16 @@ fn start_h2_server(
     expected_path: String,
     response: Vec<u8>,
 ) -> (SocketAddr, std::thread::JoinHandle<(String, String)>) {
+    start_h2_server_with_authority(set, expected_path, response, "dns.example")
+}
+
+fn start_h2_server_with_authority(
+    set: &FixtureSet,
+    expected_path: String,
+    response: Vec<u8>,
+    expected_authority: &str,
+) -> (SocketAddr, std::thread::JoinHandle<(String, String)>) {
+    let expected_authority = expected_authority.to_owned();
     let (listener, address) = bind_listener();
     listener
         .set_nonblocking(true)
@@ -116,11 +126,9 @@ fn start_h2_server(
                 panic!("client did not send an h2 request");
             };
             let authority = request
-                .headers()
-                .get("host")
-                .expect("h2 authority")
-                .to_str()
-                .expect("valid h2 authority")
+                .uri()
+                .authority()
+                .map_or("", |value| value.as_str())
                 .to_owned();
             let path = request
                 .uri()
@@ -128,7 +136,15 @@ fn start_h2_server(
                 .expect("h2 path")
                 .as_str()
                 .to_owned();
-            assert_eq!(path, expected_path);
+            if request.uri().scheme_str() != Some("https")
+                || authority != expected_authority
+                || path != expected_path
+                || request.headers().contains_key("host")
+            {
+                respond.send_reset(Reason::PROTOCOL_ERROR);
+                let _ = timeout(Duration::from_millis(100), connection.accept()).await;
+                return (authority, path);
+            }
             let response_head = Response::builder()
                 .status(200)
                 .header("content-type", "application/dns-message")
@@ -314,6 +330,43 @@ fn negotiated_h2_serves_one_doh_get_with_service_authority_and_path() {
         let (authority, path) = server.join().expect("server joined");
         assert_eq!(authority, "dns.example");
         assert_eq!(path, expected_target);
+    });
+}
+
+#[test]
+fn one_shot_h2_keeps_non_default_service_port_separate_from_numeric_dial() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let query = query_wire(0x8310);
+        let service = "https://dns.example:8443/dns-query?foo=bar";
+        let expected = DohEndpoint::new(service, "192.0.2.53:443".parse().unwrap())
+            .unwrap()
+            .get_request_target(ExchangeRequest::new(&query).unwrap())
+            .unwrap();
+        let (address, server) = start_h2_server_with_authority(
+            &set,
+            expected.clone(),
+            response_wire(0),
+            "dns.example:8443",
+        );
+        let upstream = DohUpstream::new(
+            DohEndpoint::new(service, address).unwrap(),
+            TlsPolicy::verified(set.root_store_a()).unwrap(),
+        )
+        .unwrap();
+        let response = upstream
+            .exchange(
+                ExchangeRequest::new(&query).unwrap(),
+                ExchangeContext::new(Instant::now() + TEST_TIMEOUT, TransportCancellation::new()),
+            )
+            .await
+            .expect("strict h2 response");
+        assert_eq!(response.request_id(), 0x8310);
+        assert_eq!(response.http_version(), Some(SecureHttpVersion::Http2));
+        assert_eq!(
+            server.join().unwrap(),
+            ("dns.example:8443".to_owned(), expected)
+        );
     });
 }
 

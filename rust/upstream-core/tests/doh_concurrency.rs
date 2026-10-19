@@ -126,12 +126,28 @@ fn tls_config(h2: bool) -> (TlsPolicy, rustls::ServerConfig) {
     (policy, config)
 }
 
+fn valid_h2_request<B>(request: &hyper::Request<B>, authority: &str) -> bool {
+    request.uri().scheme_str() == Some("https")
+        && request
+            .uri()
+            .authority()
+            .map(hyper::http::uri::Authority::as_str)
+            == Some(authority)
+        && request.uri().path() == "/dns-query"
+        && !request.headers().contains_key("host")
+}
+
 impl Peer {
     async fn h1() -> Self {
         Self::start(false, 64).await
     }
 
     async fn start(h2: bool, stream_limit: u32) -> Self {
+        Self::start_with_authority(h2, stream_limit, "dns.example").await
+    }
+
+    async fn start_with_authority(h2: bool, stream_limit: u32, authority: &str) -> Self {
+        let expected_authority = authority.to_owned();
         let (policy, config) = tls_config(h2);
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
@@ -166,6 +182,7 @@ impl Peer {
                         let active_count=Arc::clone(&active_count);
                         let peak_count=Arc::clone(&peak_count);
                         let end_count=Arc::clone(&end_count);
+                        let expected_authority=expected_authority.clone();
                         children.spawn(async move {
                             let _ended=CountEnd(end_count);
                             let Ok(stream) = acceptor.accept(socket).await else {return};
@@ -183,6 +200,10 @@ impl Peer {
                                         incoming=connection.accept() => match incoming {Some(v)=>v,None=>break},
                                     };
                                     let Ok((request,mut send)) = incoming else {break};
+                                    if !valid_h2_request(&request, &expected_authority) {
+                                        send.send_reset(h2::Reason::PROTOCOL_ERROR);
+                                        continue;
+                                    }
                                     req_count.fetch_add(1,Ordering::SeqCst);
                                     let current=active_count.fetch_add(1,Ordering::SeqCst)+1;
                                     peak_count.fetch_max(current,Ordering::SeqCst);
@@ -342,6 +363,78 @@ fn both_protocols_keep_the_same_socks_route_for_every_reused_connection() {
             peer.close().await;
             proxy.close().await;
         }
+    });
+}
+
+#[test]
+fn one_shot_h2_keeps_non_default_authority_through_socks() {
+    runtime(async {
+        let peer = Peer::start_with_authority(true, 64, "dns.example:8443").await;
+        let proxy = Proxy::start(peer.address).await;
+        let destination = std::net::SocketAddr::from(([127, 0, 0, 2], peer.address.port()));
+        let endpoint = DohEndpoint::new("https://dns.example:8443/dns-query", destination)
+            .unwrap()
+            .with_socks5(mosdns_upstream_core::socks5::Route::new(
+                &proxy.address.to_string(),
+                None,
+            ));
+        let upstream =
+            mosdns_upstream_core::secure::DohUpstream::new(endpoint, peer.policy.clone()).unwrap();
+        for id in [31, 32] {
+            let wire = query(id);
+            let response = upstream
+                .exchange(
+                    ExchangeRequest::new(&wire).unwrap(),
+                    ExchangeContext::new(
+                        Instant::now() + Duration::from_secs(3),
+                        TransportCancellation::new(),
+                    ),
+                )
+                .await
+                .expect("strict one-shot h2 through SOCKS");
+            assert_eq!(response.request_id(), id);
+            assert_eq!(
+                response.http_version(),
+                Some(mosdns_upstream_core::secure::SecureHttpVersion::Http2)
+            );
+        }
+        assert_eq!(peer.requests.load(Ordering::SeqCst), 2);
+        assert_eq!(peer.accepts.load(Ordering::SeqCst), 2);
+        assert_eq!(proxy.accepts.load(Ordering::SeqCst), 2);
+        wait_count(&peer.ended, 2).await;
+        peer.close().await;
+        proxy.close().await;
+    });
+}
+
+#[test]
+fn h2_reuse_keeps_non_default_authority_through_socks() {
+    runtime(async {
+        let peer = Peer::start_with_authority(true, 64, "dns.example:8443").await;
+        let proxy = Proxy::start(peer.address).await;
+        let destination = std::net::SocketAddr::from(([127, 0, 0, 2], peer.address.port()));
+        let endpoint = DohEndpoint::new("https://dns.example:8443/dns-query", destination)
+            .unwrap()
+            .with_socks5(mosdns_upstream_core::socks5::Route::new(
+                &proxy.address.to_string(),
+                None,
+            ));
+        let owner = Arc::new(DohReuseOwner::new(endpoint, peer.policy.clone()).unwrap());
+        for id in [41, 42, 43] {
+            assert_eq!(
+                exchange(Arc::clone(&owner), id)
+                    .await
+                    .expect("strict reused h2 through SOCKS"),
+                id
+            );
+        }
+        assert_eq!(peer.requests.load(Ordering::SeqCst), 3);
+        assert_eq!(peer.accepts.load(Ordering::SeqCst), 1);
+        assert_eq!(proxy.accepts.load(Ordering::SeqCst), 1);
+        owner.close().await;
+        wait_count(&peer.ended, 1).await;
+        peer.close().await;
+        proxy.close().await;
     });
 }
 
