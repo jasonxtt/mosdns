@@ -1,5 +1,20 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-20：Shadow-1 提前结束并收尾（停止点2已接受）
+
+停止点1的一小时smoke已通过外部审查；随后systemd无人值守长测由用户决定在27.667小时提前结束，
+没有完成原48小时。492652完整配对中490653一致（99.594237%）、598 learned-state解释、1401未解释；
+Go NOERROR/Rust SERVFAIL为4，另有15条已提交但期限内无Rust回答。guard始终[0,0,0]，
+Rust PID/自动重启不变、not-ready0、学习文件计数无下降。已观察RSS中位118.281MiB、
+内核峰176.008MiB，在128稳态/256峰值预算内且低于Go参考；应用后平台不能补成48小时结论。
+
+typed setting及rewrite两次变更/恢复完成；F-3a v0.1.3和systemctl restart因提前结束未在本窗口执行。
+已有此前真实流量F-3a两次确认13.37/12.16秒和扩容重启自启动证据，未冒充本窗口事件。
+内存台阶、审计关联覆盖缺口、TC/负缓存与其它未解释类别均有离线分析及明确证据限制，未改Rust。
+采集/回放和Mac参考采样已停止，临时发布文件/构建目录已清理，保留Rust与隔离guard及全部私有证据。
+见[公开数值记录及小时序列](validation-records/10-18-shadow-1/README.md)。
+规划方已接受停止点2并收尾；定向诊断确认一项P1（预算耗尽静默不答，修复任务`10-20-rust-native-budget-servfail`），修复与短回放复核后再讨论mos-test/生产切换。
+
 ## 2026-10-18：F-3b 首次 Go→Rust 切换与回滚（实施与 VM 验证，待外部 Claude 审查）
 
 新增 `scripts/cutover/{go-to-rust.sh,rust-to-go.sh,cutover.py}`：Go schema-4 受管原文校验、显式逐文件放行差异、保留用户数据、typed-settings 迁移、原生增量包状态、空间/inode 预检、停服最终快照、原子程序/整根替换、健康失败自动回滚与中断后的显式恢复。
