@@ -372,8 +372,16 @@ fn several_listeners_serve_and_release_their_sockets_without_native_management()
 
 #[test]
 fn a_failed_bind_releases_the_listeners_that_already_bound() {
-    let (a, b) = common::ports::release_check_ports();
-    let occupied = std::net::TcpListener::bind(("127.0.0.1", b)).unwrap();
+    use common::ports::{Protocol, assert_released};
+
+    let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let b = occupied.local_addr().unwrap().port();
+    let a = free_port();
+    #[cfg(target_os = "linux")]
+    {
+        common::ports::check_release_probe(a, Protocol::Udp);
+        common::ports::check_release_probe(a, Protocol::Tcp);
+    }
     let yaml = reject_config(
         "",
         &(listener("udp_a", "udp_server", &format!("127.0.0.1:{a}"), "")
@@ -388,8 +396,8 @@ fn a_failed_bind_releases_the_listeners_that_already_bound() {
             "occupied port fails startup"
         );
     });
-    std::net::TcpListener::bind(("127.0.0.1", a)).expect("earlier TCP socket released");
-    std::net::UdpSocket::bind(("127.0.0.1", a)).expect("earlier UDP socket released");
+    assert_released(a, Protocol::Tcp);
+    assert_released(a, Protocol::Udp);
     drop(occupied);
 }
 
