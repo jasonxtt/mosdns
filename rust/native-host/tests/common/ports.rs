@@ -1,4 +1,4 @@
-//! Bounded startup retries, only for the bind(0) -> child bind hand-off race.
+//! Socket ownership checks and bounded retries for child startup bind races.
 #![allow(dead_code)] // Each integration binary uses the helpers it needs.
 
 use std::io::{BufRead, BufReader};
@@ -7,45 +7,80 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-/// Keep kernel-selected `bind(0)` ports away from release-after-failure checks.
-/// If procfs is unavailable or fewer than two unprivileged ports remain below
-/// the ephemeral range, probe both protocols on a kernel-selected port instead.
-pub fn release_check_ports() -> (u16, u16) {
-    let lower = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
-        .ok()
-        .and_then(|range| range.split_whitespace().next()?.parse::<u16>().ok())
-        .filter(|lower| *lower > 1026);
-    let mut sockets = Vec::new();
-    for _ in 0..256 {
-        let port = if let Some(lower) = lower {
-            let mut random = [0; 4];
-            getrandom::fill(&mut random).expect("random release-check port");
-            1025 + u16::try_from(u32::from_ne_bytes(random) % u32::from(lower - 1025))
-                .expect("port offset fits u16")
-        } else {
-            0
-        };
-        let tcp = match std::net::TcpListener::bind(("127.0.0.1", port)) {
-            Ok(tcp) => tcp,
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
-            Err(error) => panic!("probe release-check TCP port: {error}"),
-        };
-        let port = tcp.local_addr().unwrap().port();
-        let udp = match std::net::UdpSocket::bind(("127.0.0.1", port)) {
-            Ok(udp) => udp,
-            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
-            Err(error) => panic!("probe release-check UDP port: {error}"),
-        };
-        // Hold both protocols until two distinct ports have been selected.
-        sockets.push((tcp, udp));
-        if sockets.len() == 2 {
-            return (
-                sockets[0].0.local_addr().unwrap().port(),
-                sockets[1].0.local_addr().unwrap().port(),
-            );
+#[derive(Clone, Copy, Debug)]
+pub enum Protocol {
+    Udp,
+    Tcp,
+}
+
+/// Only sockets with an fd in this process count, even if another process has
+/// already reused the port. Read failures must not masquerade as release.
+#[cfg(target_os = "linux")]
+fn owns_port(port: u16, protocol: Protocol) -> bool {
+    let tables = match protocol {
+        Protocol::Udp => ["/proc/net/udp", "/proc/net/udp6"],
+        Protocol::Tcp => ["/proc/net/tcp", "/proc/net/tcp6"],
+    };
+    let mut inodes = std::collections::HashSet::new();
+    for table in tables {
+        let contents = std::fs::read_to_string(table).expect("read socket table");
+        assert_eq!(contents.split_whitespace().next(), Some("sl"), "{table}");
+        for row in contents.lines().skip(1) {
+            let columns: Vec<_> = row.split_whitespace().collect();
+            assert!(columns.len() >= 10, "malformed socket row: {row}");
+            let (_, local_port) = columns[1].rsplit_once(':').expect("local socket address");
+            let local_port = u16::from_str_radix(local_port, 16).expect("hex socket port");
+            let inode = columns[9].parse::<u64>().expect("socket inode");
+            if local_port == port {
+                inodes.insert(format!("socket:[{inode}]"));
+            }
         }
     }
-    panic!("could not probe two release-check ports in 256 attempts");
+    for entry in std::fs::read_dir("/proc/self/fd").expect("read own fds") {
+        let entry = entry.expect("own fd entry");
+        let link = match std::fs::read_link(entry.path()) {
+            Ok(link) => link,
+            // Other test threads can close fds while we enumerate them.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("read own fd link: {error}"),
+        };
+        if inodes.contains(link.to_string_lossy().as_ref()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Prove that the detector sees a real held socket before testing rollback.
+#[cfg(target_os = "linux")]
+pub fn check_release_probe(port: u16, protocol: Protocol) {
+    match protocol {
+        Protocol::Udp => {
+            let _probe = std::net::UdpSocket::bind(("127.0.0.1", port)).expect("UDP probe");
+            assert!(owns_port(port, protocol), "held UDP probe not detected");
+        }
+        Protocol::Tcp => {
+            let _probe = std::net::TcpListener::bind(("127.0.0.1", port)).expect("TCP probe");
+            assert!(owns_port(port, protocol), "held TCP probe not detected");
+        }
+    }
+}
+
+pub fn assert_released(port: u16, protocol: Protocol) {
+    #[cfg(target_os = "linux")]
+    assert!(
+        !owns_port(port, protocol),
+        "this process still owns {protocol:?} port {port} after failed bind"
+    );
+    #[cfg(not(target_os = "linux"))]
+    match protocol {
+        Protocol::Udp => {
+            std::net::UdpSocket::bind(("127.0.0.1", port)).expect("UDP socket released");
+        }
+        Protocol::Tcp => {
+            std::net::TcpListener::bind(("127.0.0.1", port)).expect("TCP socket released");
+        }
+    }
 }
 
 pub fn retry_addr_in_use<T>(mut start: impl FnMut() -> Result<T, String>) -> T {

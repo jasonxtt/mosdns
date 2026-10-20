@@ -5,6 +5,8 @@
 //! real DNS client against the host-owned UDP listener. No router, handler or
 //! response object is mocked.
 
+mod common;
+
 use std::fs;
 use std::net::{SocketAddr, TcpListener as StdTcpListener, UdpSocket as StdUdpSocket};
 use std::path::PathBuf;
@@ -857,6 +859,8 @@ fn one_shutdown_scope_releases_both_listeners_for_rebind() {
 #[test]
 fn a_failed_management_bind_releases_the_dns_listener() {
     let dns_port = free_udp_port();
+    #[cfg(target_os = "linux")]
+    common::ports::check_release_probe(dns_port, common::ports::Protocol::Udp);
     let occupied = StdTcpListener::bind("127.0.0.1:0").expect("occupy management port");
     let api_port = occupied.local_addr().expect("occupied address").port();
 
@@ -870,13 +874,14 @@ fn a_failed_management_bind_releases_the_dns_listener() {
     drop(bound);
 
     // The DNS listener bound before the failure must not stay bound.
-    StdUdpSocket::bind(("127.0.0.1", dns_port))
-        .expect("the DNS socket must be released after a failed management bind");
+    common::ports::assert_released(dns_port, common::ports::Protocol::Udp);
 }
 
 #[test]
 fn a_failed_dns_bind_releases_the_management_listener() {
     let api_port = free_tcp_port();
+    #[cfg(target_os = "linux")]
+    common::ports::check_release_probe(api_port, common::ports::Protocol::Tcp);
     let occupied = StdUdpSocket::bind("127.0.0.1:0").expect("occupy DNS port");
     let dns_port = occupied.local_addr().expect("occupied address").port();
 
@@ -889,8 +894,7 @@ fn a_failed_dns_bind_releases_the_management_listener() {
     );
     drop(bound);
 
-    StdTcpListener::bind(("127.0.0.1", api_port))
-        .expect("the management socket must be released after a failed DNS bind");
+    common::ports::assert_released(api_port, common::ports::Protocol::Tcp);
 }
 
 #[test]
