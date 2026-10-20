@@ -447,10 +447,14 @@ fn redirect_cycle_shares_root_fuel_and_cannot_manufacture_success() {
         &host,
         query(RecordType::A, DNSClass::IN, "original.example."),
     );
-    assert!(response.is_none());
+    let response = response.expect("live fuel exhaustion must answer SERVFAIL");
+    assert_eq!(u16::from(response.response_code()), 2);
     assert_eq!(
         host.audit_snapshot().records[0].response,
-        ResponseState::NoResponse
+        ResponseState::Dns {
+            rcode: 2,
+            source: ResponseSource::Local,
+        }
     );
 }
 

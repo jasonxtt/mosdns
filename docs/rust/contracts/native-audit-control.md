@@ -110,6 +110,28 @@ cache publication still retain the complete response; TCP records remain full.
 No audit schema/capacity change or internal byte eviction is introduced. See
 [UDP response contract](native-udp-response.md) for budgets, OPT and TSIG rules.
 
+## Live policy budget exhaustion (2026-10-20)
+
+A live request exhausting a scoped policy/branch deadline or shared fuel returns
+local SERVFAIL on UDP and TCP. This includes ECS (handler and quick form),
+redirect, fallback and preference. Use the admission ID and original question;
+restore client EDNS size/DO without a supplier ECS echo, and pass UDP through
+the ordinary client-size truncation path. An inherited or losing response must
+not become the final answer or selected supplier.
+
+The terminal audit reports DNS rcode 2 with local source and local
+`RequestBudgetExceeded` failure provenance. Retain actual upstream attempt
+outcomes and clear selected supplier/peer/origin. `SendSucceeded` requires a
+successful transport write. A genuine root/listener/connection cancellation
+takes precedence and sends nothing; its audit remains Canceled/NoResponse.
+Successful empty completion, exit without response, and drop_resp followed by
+empty completion remain REFUSED; ordinary upstream failure remains SERVFAIL.
+There is no audit API schema or timeout/configuration change.
+
+Real UDP/TCP regressions must cover the policy callers, EDNS and noEDNS,
+original-question restoration, root cancellation after upstream admission, and
+the existing REFUSED/ordinary failure cases. Fuel exhaustion must answer too.
+
 ## Planned native v2 upstream diagnostics migration (approved 2026-09-30)
 
 ### 1. Scope / Trigger

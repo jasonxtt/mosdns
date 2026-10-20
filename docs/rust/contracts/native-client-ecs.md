@@ -150,6 +150,11 @@ and expired suffix validation prove this boundary without a new persistence form
 
 ## S6 refresh and composed proof
 
+Live ECS successor deadline/fuel exhaustion follows the
+[budget terminal contract](native-audit-control.md#live-policy-budget-exhaustion-2026-10-20):
+local SERVFAIL with the original question and client EDNS, no supplier echo or
+selected upstream. Genuine root cancellation still sends nothing.
+
 The first start_refresh callback owns both the successor recipe's state (including
 trusted peer and routing state) and the complete QueryView (immutable admission,
 current ECS, other OPT options and echo token). A same-key follower does not build

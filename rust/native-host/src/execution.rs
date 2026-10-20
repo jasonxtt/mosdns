@@ -1643,7 +1643,14 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 error,
                                 ExecutionError::Cancelled | ExecutionError::BudgetExceeded
                             ) {
-                                return terminal_policy_failure(error, facts);
+                                return terminal_policy_failure(
+                                    error,
+                                    &mut machine,
+                                    raw,
+                                    &header,
+                                    &question,
+                                    facts,
+                                );
                             }
                             set_servfail(&mut machine);
                             facts.set_response_source(ResponseSource::Local);
@@ -1745,7 +1752,14 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 core_error
                             }
                             Err(terminal) => {
-                                return terminal_policy_failure(terminal, facts);
+                                return terminal_policy_failure(
+                                    terminal,
+                                    &mut machine,
+                                    raw,
+                                    &header,
+                                    &question,
+                                    facts,
+                                );
                             }
                         };
                         match machine.resume(dispatch.executable(), Err(core_error)) {
@@ -1831,7 +1845,14 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 core_error
                             }
                             Err(terminal) => {
-                                return terminal_policy_failure(terminal, facts);
+                                return terminal_policy_failure(
+                                    terminal,
+                                    &mut machine,
+                                    raw,
+                                    &header,
+                                    &question,
+                                    facts,
+                                );
                             }
                         };
                         match machine.resume(dispatch.executable(), Err(core_error)) {
@@ -4248,20 +4269,44 @@ fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
     result_from_wire(Vec::new(), facts)
 }
 
-fn terminal_policy_failure(error: ExecutionError, mut facts: ExecutionFacts) -> ExecutionResult {
+fn terminal_policy_failure(
+    error: ExecutionError,
+    machine: &mut ExecutionMachine<'_>,
+    raw: &[u8],
+    header: &QueryHeader,
+    question: &QuestionInfo,
+    mut facts: ExecutionFacts,
+) -> ExecutionResult {
     debug_assert!(matches!(
         error,
         ExecutionError::Cancelled | ExecutionError::BudgetExceeded
     ));
-    facts.response_source = None;
-    facts.selected_peer = None;
-    if let Some(diagnostics) = &mut facts.upstream_diagnostics {
-        diagnostics.selected = None;
+    // A deadline/fuel limit is an execution failure on a live request, not
+    // transport cancellation. Recheck the root token after branch drain so
+    // concurrent shutdown still wins and never fabricates a reply.
+    if matches!(error, ExecutionError::Cancelled) || facts.cancellation.is_cancelled() {
+        return canceled_execution(facts);
     }
-    if let Some(trace) = &facts.policy_trace {
-        trace.borrow_mut().clear_selection();
-    }
-    result_from_wire(Vec::new(), facts)
+    let wire = protocol_error(header, question, SERVFAIL);
+    let wire = match crate::ecs::response_wire(&wire, raw, None, false) {
+        Ok(wire) => {
+            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                LocalFailureKind::RequestBudgetExceeded,
+            ));
+            wire
+        }
+        Err(_) => {
+            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                LocalFailureKind::ResponseConstruction,
+            ));
+            wire
+        }
+    };
+    // Replace any inherited answer and its origin before collecting final
+    // routing/response facts. Only the admission question belongs in this error.
+    machine.state_mut().set_raw_response(wire);
+    facts.set_response_source(ResponseSource::Local);
+    result_from_state(machine, header, question, facts)
 }
 
 fn result_from_state(

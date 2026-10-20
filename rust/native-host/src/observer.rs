@@ -652,6 +652,8 @@ impl Index<usize> for UpstreamAttemptList {
 /// Classification for a local failure that produced or prevented a response.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum LocalFailureKind {
+    /// The live request exhausted its execution deadline or shared fuel.
+    RequestBudgetExceeded,
     /// No upstream leg produced a usable response.
     NoUsableUpstreamResponse,
     /// The native host could not form a response from execution results.
