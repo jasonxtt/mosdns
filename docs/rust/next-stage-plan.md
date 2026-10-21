@@ -1,5 +1,19 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-21：Shadow-2 两小时复核完成，等待外部Claude审查
+
+`bc957a24`离线构建的`rust-v0.1.4`通过F-3a安装到rtdns（确认14.026秒），随后无事件运行两小时并正常到期。
+31331次已提交回放全部收到Rust回答，Rust无回答0（Shadow-1为15）；31330完整配对中31057一致（99.128631%）、
+24条learned-state解释、249条未解释。未解释包含214条Go NXDOMAIN/Rust NOERROR、17条反方向rcode、
+1条Go NOERROR/Rust SERVFAIL及17条TC-only（Rust方向16、Go方向1），未自行接受这些差异。
+唯一SERVFAIL在84.440ms内返回、两个UDP attempt均response；本窗口未重现约5秒预算耗尽触发条件，不能把无回答0写成实流覆盖所有修复分支。
+
+guard始终[0,0,0]、not-ready0、Rust/工具重启0、学习计数无下降；ARCOUNT=0的20183个配对中Rust>512字节0。
+Rust RSS中位50.988MiB、采样峰54.418MiB、自启动VmHWM87.320MiB；Go参考RSS中位195.152MiB；
+Rust延迟p50/p95/p99为0.542/1.090/1.428ms。输入、缓存、事件与观察长度不同，不用两窗变化推断单项修复性能收益。
+到期后已卸载Mac采样并清理本次单元/暂存发布文件/构建目录，保留v0.1.4安装、隔离guard与运行证据。
+见[公开数值记录](validation-records/10-21-shadow-2/README.md)。本轮不改Rust、不自审、不提交或推进生产切换；等待外部Claude对证据与未解释项的审查结论。
+
 ## 2026-10-20：Shadow-1 提前结束并收尾（停止点2已接受）
 
 停止点1的一小时smoke已通过外部审查；随后systemd无人值守长测由用户决定在27.667小时提前结束，
