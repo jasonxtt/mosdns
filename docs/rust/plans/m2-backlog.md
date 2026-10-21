@@ -76,3 +76,22 @@
 5D-2b（2026-10-17）测得：设置 API 修改与专用组保存的热应用在唯一 DNS 线程上编译配置，DNS 停顿约 0.5–0.65 s；500 qps 下内核 UDP 缓冲溢出丢包，
 生产负载（数十 qps）下仅表现为约 1% 查询延迟。首次替换前用 5D-2c 增大 `SO_RCVBUF` 并写明运维说明。根治方案：编译在构建线程完成后把结果交回 DNS 线程安装，
 需要把编译结果中的单线程类型（`Rc`/`RefCell`）改为可跨线程或在 DNS 线程做最小化的“装配”步骤。首次替换后评估。
+
+## M2-4：切换生产后的待办（2026-10-21 记录）
+
+生产已于 2026-10-21 由用户手动切换为 rtdns（rust-v0.1.4，独立服务 `rtdns.service`、配置根 `/cus/rtdns`，Go 原样保留可回滚）。
+
+**随 UI 重做一起处理（用户决定 2026-10-21）**
+1. **本地规则页隐藏固定名单**：`webui-log/src/components/ListManager.vue` 中原生模式下 `special_groups.enabled` 为真时只列专属分流组名单，
+   白/黑/灰名单、rewrite、ddns 等固定名单不显示（6b 退役托管模式后的残留判断）。规则本身由后端加载生效，`/plugins/<tag>/show` 正常。
+   排查其它页面同类 `special_groups.enabled` 残留。
+2. **`ip_set` 缺 `/plugins/<tag>/show` 与 `/post`**（后端）：`client_ip`、`direct_ip` 返回 404，Go `plugin/data_provider/ip_set/ip_set.go` 有此接口。
+   名单从文件加载并生效，但无法经 API/WebUI 查看或修改；新 UI 需要此后端接口。
+
+**真实流量（Shadow-1/2）留下的线索**
+3. **并发上游的应答优先级**（P2）：Go `aliapi` 等待并发各路，优先“含 A/AAAA 的应答”→ 首个 NOERROR/NXDOMAIN → 其它 rcode；
+   疑似 Rust 会采用先到的 SERVFAIL（Shadow-1 token 20061、Shadow-2 token 198，同为 `local_addlist_exit_v6`→domestic）。先诊断再修。
+4. **本地合成应答不复制 RD/CD**（P2）：Go `SetReply` 复制 RD；Rust `protocol_error`/`synthesize_response` 为 RD=0。
+5. **热应用后内存台阶**（P2）：整代热应用时峰值约 176 MiB、之后 RSS 停在约 118 MiB（新进程约 51 MiB），稳态贴近 128 MiB 预算；与 M2-3 一并评估。
+6. **Rust-only TC 偏多**（P2，原因未明）：Rust 应答 additional A 更多；“Rust 扩大上游 OPT”的假设已被否定（Go 反而统一加 OPT 1200）。
+7. **上游查询形状**（待定契约）：Go 对上游统一 OPT 1200、DO=0；Rust 普通转发原样、ECS 时 1232。是否对齐需先定契约。
