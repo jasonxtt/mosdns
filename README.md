@@ -1,6 +1,13 @@
 # MosDNS-T
 
-MosDNS-T 是基于 [`yyysuo/mosdns`](https://github.com/yyysuo/mosdns) 持续维护的 DNS 分流增强版，面向家庭网络、旁路由和透明代理环境，重构了 WebUI，并增加专属分流组、规则维护、查询诊断及多平台部署支持。
+> [!IMPORTANT]
+> **MosDNS-T（本仓库的 Go 版）已停止维护。**
+>
+> 后续开发与版本发布已转移到 **AtomDNS**，这是我们用 Rust 重写的后续项目。
+>
+> **[前往 AtomDNS](https://github.com/jasonxtt/atomdns)** · [新用户快速开始](https://jasonxtt.github.io/atomdns/guide/quick-start) · [从 MosDNS-T 迁移](https://jasonxtt.github.io/atomdns/guide/migrate)
+
+MosDNS-T 是基于 [`yyysuo/mosdns`](https://github.com/yyysuo/mosdns) 开发的 Go 版 DNS 分流增强项目，面向家庭网络、旁路由和透明代理环境，重构了 WebUI，并增加专属分流组、规则维护、查询诊断及多平台部署支持。
 
 ## 项目优势
 
@@ -26,7 +33,7 @@ MosDNS-T 是基于 [`yyysuo/mosdns`](https://github.com/yyysuo/mosdns) 持续维
 
 ## 多版本支持
 
-当前提供 **Linux 原生版、Docker 容器版、OpenWrt / ImmortalWrt 版**。三种版本共享主要核心分流能力和 WebUI，主要区别在安装方式、服务管理与网络环境。
+**旧版部署参考**。以下安装说明适用于 Go 版 MosDNS-T，涵盖 **Linux 原生版、Docker 容器版、OpenWrt / ImmortalWrt 版**。三种版本共享主要核心分流能力和 WebUI，主要区别在安装方式、服务管理与网络环境。
 
 | 版本 | 适合场景 | 安装与管理方式 | 主要说明 |
 | --- | --- | --- | --- |
@@ -98,7 +105,7 @@ wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/mosdns/
 
 安装完成后，LuCI 入口位于：**服务 → MosDNS-T**。
 
-当前软件源支持：
+旧版软件源支持的平台：
 
 - OpenWrt / ImmortalWrt 25.12：APK
 - OpenWrt 24.10：IPK
@@ -127,7 +134,7 @@ OpenWrt 版由 procd 管理服务，并针对路由器环境提供 LuCI、dnsmas
 
 ## 配置包
 
-这个 fork 维护中的配置包放在：
+Go 版 MosDNS-T 的配置包：
 
 - [`mosdns/config/config_all.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip)
 - [`mosdns/config/config_up.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip)
@@ -141,14 +148,14 @@ OpenWrt 版由 procd 管理服务，并针对路由器环境提供 LuCI、dnsmas
 
 - `/cus/mosdns`
 
-## 当前相对上游的改动
+## 相对上游的改动
 
 - 新增改动：
   - 专属分流组与专属上游联动
   - 在线规则、本地规则、日志排障等日常维护能力
-  - 使用 Vue 对 UI 进行了重构，并持续替换原有前端工作流
+  - 使用 Vue 重构了 UI 和原有前端工作流
 - 当前 UI 路径关系如下：
-  - 默认入口 `/` 为当前维护中的 Vue UI，后续功能演进以这套界面为主
+  - 默认入口 `/` 为 Vue UI
   - main分支`/log` 保留原版 UI，主要用于兼容、对照和过渡期使用
 - 重构 UI 内容包括：
   - 将概览、查询日志、规则管理、数据管理、上游设置、系统设置统一到同一套组件结构下
@@ -164,7 +171,7 @@ OpenWrt 版由 procd 管理服务，并针对路由器环境提供 LuCI、dnsmas
 
 ## 发布状态
 
-本项目作为持续维护的 WebUI 与 DNS 分流增强分支发布。当前版本请以仓库的 [Tags](https://github.com/jasonxtt/mosdns/tags) 和 [更新日志](CHANGELOG.md) 为准。
+MosDNS-T 的历史版本见 [Tags](https://github.com/jasonxtt/mosdns/tags) 和 [更新日志](CHANGELOG.md)。后续版本请前往 [AtomDNS Releases](https://github.com/jasonxtt/atomdns/releases)。
 
 ## 文档
 
