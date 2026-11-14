@@ -1,0 +1,17 @@
+.DS_Store
+.codegraph/
+.git/
+.github/
+.agents/
+.codex/
+.trellis/
+.superpowers/
+.tmp/
+dist/
+docs/
+**/.DS_Store
+**/__pycache__/
+mosdns-linux-amd64
+node_modules/
+webui-blog/node_modules/
+webui-log/node_modules/

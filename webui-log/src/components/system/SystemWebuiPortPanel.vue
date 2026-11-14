@@ -4,6 +4,10 @@ defineProps({
     type: Object,
     required: true,
   },
+  changeSupported: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 defineEmits(["apply-port"]);
@@ -19,6 +23,7 @@ defineEmits(["apply-port"]);
 
       <input
         v-model="webuiPort.input"
+        :disabled="!changeSupported"
         type="number"
         min="1"
         max="65535"
@@ -27,12 +32,15 @@ defineEmits(["apply-port"]);
 
       <button
         class="btn tiny primary webui-port-btn"
-        :disabled="webuiPort.saving || webuiPort.loading"
+        :disabled="webuiPort.saving || webuiPort.loading || !changeSupported"
         @click="$emit('apply-port')"
       >
         {{ webuiPort.saving ? "处理中..." : "保存" }}
       </button>
     </div>
+    <p v-if="webuiPort.message" class="muted webui-port-message">
+      {{ webuiPort.message }}
+    </p>
   </section>
 </template>
 
@@ -40,6 +48,8 @@ defineEmits(["apply-port"]);
 .webui-port-module {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
   min-height: 0;
   padding: 12px 14px;
   container-type: inline-size;
@@ -92,6 +102,11 @@ defineEmits(["apply-port"]);
   text-align: center;
 }
 
+.webui-port-layout input:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .webui-port-layout input::-webkit-outer-spin-button,
 .webui-port-layout input::-webkit-inner-spin-button {
   margin: 0;
@@ -108,6 +123,12 @@ defineEmits(["apply-port"]);
   font-size: 0.76rem;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.webui-port-message {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
 @container (max-width: 240px) {

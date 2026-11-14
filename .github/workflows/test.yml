@@ -16,8 +16,24 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui-log/package-lock.json
+
+      - name: Build embedded WebUI
+        working-directory: webui-log
+        run: |
+          npm ci
+          npm run build
+          npm run build:log1
+
       - name: Build
         run: go build -v ./...
-#
-#      - name: Test
-#        run: go test -race -v ./...
+
+      - name: Test
+        run: |
+          go test ./...
+          scripts/test-docker-release.sh

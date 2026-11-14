@@ -70,6 +70,8 @@ const webuiPort = reactive({
   input: '',
   activePort: 0,
   activeAddr: '',
+  changeSupported: true,
+  message: '',
 })
 
 const overrides = reactive({
@@ -288,12 +290,18 @@ const hasUpdate = computed(() => {
   if (cur && latest && cur === latest) {
     return false
   }
-  return Boolean(status.update_available && status.download_url)
+  return Boolean(status.apply_supported !== false && status.update_available && status.download_url)
 })
+
+const updateApplySupported = computed(() => update.status?.apply_supported !== false)
+const configManageSupported = computed(() => update.status?.apply_supported !== false)
+const configManageMessage = computed(() => configManageSupported.value
+  ? ''
+  : '容器版请拉取新镜像并重建容器，不支持在 WebUI 内直接更新配置文件。')
 
 const showV3Callout = computed(() => {
   const status = update.status
-  if (!status) {
+  if (!status || status.apply_supported === false) {
     return false
   }
   const arch = String(status.architecture || '')
@@ -874,12 +882,18 @@ async function loadWebUIPortSettings() {
     webuiPort.activePort = Number(payload?.active_port || 0)
     webuiPort.activeAddr = String(payload?.active_addr || '')
     webuiPort.input = port > 0 ? String(port) : ''
+    webuiPort.changeSupported = payload?.change_supported !== false
+    webuiPort.message = String(payload?.message || '')
   } finally {
     webuiPort.loading = false
   }
 }
 
 async function applyWebUIPortAndRestart() {
+  if (!webuiPort.changeSupported) {
+    setError(webuiPort.message || '当前部署方式不支持在 WebUI 中修改端口')
+    return
+  }
   const port = Number.parseInt(String(webuiPort.input || '').trim(), 10)
   if (!Number.isFinite(port) || port < 1 || port > 65535) {
     setError('请输入 1-65535 之间的端口')
@@ -1638,6 +1652,10 @@ function saveConfigManagerSettings() {
 }
 
 async function backupConfig() {
+  if (!configManageSupported.value) {
+    setError(configManageMessage.value)
+    return
+  }
   const dir = String(configManaging.localDir || '').trim()
   if (!dir) {
     setError('请先输入 MosDNS 本地工作目录')
@@ -1684,6 +1702,10 @@ async function backupConfig() {
 }
 
 async function applyRemoteConfig() {
+  if (!configManageSupported.value) {
+    setError(configManageMessage.value)
+    return
+  }
   const dir = String(configManaging.localDir || '').trim()
   const url = String(configManaging.remoteUrl || '').trim()
   if (!dir || !url) {
@@ -1805,6 +1827,7 @@ onBeforeUnmount(() => {
       <div class="control-panel-grid log1-system-grid-four">
         <SystemUpdatePanel
           :has-update="hasUpdate"
+          :apply-supported="updateApplySupported"
           :show-v3-callout="showV3Callout"
           :update="update"
           :update-banner-text="updateBannerText"
@@ -1818,6 +1841,8 @@ onBeforeUnmount(() => {
 
         <SystemConfigManagePanel
           :config-managing="configManaging"
+          :config-manage-supported="configManageSupported"
+          :config-manage-message="configManageMessage"
           :config-version="configVersionInfo"
           @save-settings="saveConfigManagerSettings"
           @backup-config="backupConfig"
@@ -1833,6 +1858,7 @@ onBeforeUnmount(() => {
 
         <SystemWebuiPortPanel
           :webui-port="webuiPort"
+          :change-supported="webuiPort.changeSupported"
           @apply-port="applyWebUIPortAndRestart"
         />
       </div>
